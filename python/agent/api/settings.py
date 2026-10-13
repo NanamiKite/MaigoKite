@@ -5,6 +5,7 @@ import asyncio
 import os
 import uuid
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, cast
 
 from fastapi import APIRouter, Depends, Query, Response
 
@@ -15,15 +16,20 @@ from agent.models.discovery import discover_models
 from agent.models.native_model import normalize_base_url
 from agent.safety import SAFETY_CREDENTIAL_REFERENCE, SAFETY_FORMATS, SAFETY_JEV_LAYOUTS
 
+if TYPE_CHECKING:
+    from agent.api.credentials import Credentials
+    from agent.core import AgentCore
+    from agent.models.runtime import ChatModelSettings
 
-def routes(core, credentials) -> APIRouter:
+
+def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
     router = APIRouter()
     owner_only = [Depends(owner)]
 
-    async def audit(workspace: str, action: str, resource: str, result: str = "success"):
+    async def audit(workspace: str, action: str, resource: str, result: str = "success") -> None:
         await core.repository.record_audit(workspace, dto.Principal, action, resource, result, {})
 
-    async def model_value(workspace, model):
+    async def model_value(workspace: str, model: ChatModelSettings) -> dict[str, object]:
         configured = False
         if model.id:
             try:
@@ -33,41 +39,41 @@ def routes(core, credentials) -> APIRouter:
         env = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}.get(model.provider, "")
         return {**model.to_dict(), "credential_configured": configured or bool(os.getenv(env))}
 
-    async def catalog(workspace):
+    async def catalog(workspace: str) -> dict[str, object]:
         models, default = await core.list_chat_models(workspace)
         return {"models": [await model_value(workspace, item) for item in models], "default_model_id": default}
 
-    @router.get("/settings", dependencies=owner_only)
-    async def get_settings(workspace_id: str):
+    @router.get("/settings", dependencies=owner_only, response_model=None)
+    async def get_settings(workspace_id: str) -> dict[str, object]:
         return {"models": {"chat": await model_value(workspace_id, await core.get_chat_model_settings(workspace_id))}}
 
-    @router.patch("/settings", dependencies=owner_only)
-    async def update_settings(workspace_id: str, body: dto.SettingsUpdate):
+    @router.patch("/settings", dependencies=owner_only, response_model=None)
+    async def update_settings(workspace_id: str, body: dto.SettingsUpdate) -> dict[str, object]:
         async with credentials.model_changes:
             current = await core.get_chat_model_settings(workspace_id)
             value = body.models.chat.model_copy(update={"id": current.id, "is_default": True})
             return {"models": {"chat": await persist_model(workspace_id, value)}}
 
-    @router.get("/models")
-    async def models(workspace_id: str):
+    @router.get("/models", response_model=None)
+    async def models(workspace_id: str) -> dict[str, object]:
         return await catalog(workspace_id)
 
-    @router.get("/models/{model_id}/thinking")
-    async def thinking(workspace_id: str, model_id: str):
+    @router.get("/models/{model_id}/thinking", response_model=None)
+    async def thinking(workspace_id: str, model_id: str) -> dict[str, object]:
         await credentials.restore_model(workspace_id, model_id)
         return (await core.models.thinking_control(workspace_id, model_id)).public()
 
-    @router.get("/models/{model_id}/context")
-    async def context(workspace_id: str, model_id: str):
+    @router.get("/models/{model_id}/context", response_model=None)
+    async def context(workspace_id: str, model_id: str) -> dict[str, object]:
         async with asyncio.timeout(12):
             await credentials.restore_model(workspace_id, model_id)
             return await core.get_chat_model_context(workspace_id, model_id)
 
-    async def save_model(workspace_id, body):
+    async def save_model(workspace_id: str, body: dto.ModelInput) -> dict[str, object]:
         async with credentials.model_changes:
             return await persist_model(workspace_id, body)
 
-    async def persist_model(workspace_id, body):
+    async def persist_model(workspace_id: str, body: dto.ModelInput) -> dict[str, object]:
         from dataclasses import replace
         settings = body.settings()
         secret = body.api_key
@@ -86,23 +92,23 @@ def routes(core, credentials) -> APIRouter:
         changed_endpoint = previous is not None and (previous.provider, normalize_base_url(previous.base_url)) != (settings.provider, settings.base_url)
         # Revoke before changing the host; OS cleanup can fail without enabling reuse.
         if changed_endpoint:
-            await credentials.revoke_model(workspace_id, previous)
+            await credentials.revoke_model(workspace_id, cast(ChatModelSettings, previous))
         item = await core.upsert_chat_model(workspace_id, settings)
         if secret:
             await credentials.save(workspace_id, "model-profile." + item.id, secret)
         await audit(workspace_id, "model.profile.saved", item.id)
         return await model_value(workspace_id, item)
 
-    @router.post("/models", status_code=201, dependencies=owner_only)
-    async def add_model(workspace_id: str, body: dto.ModelInput):
+    @router.post("/models", status_code=201, dependencies=owner_only, response_model=None)
+    async def add_model(workspace_id: str, body: dto.ModelInput) -> dict[str, object]:
         return await save_model(workspace_id, body)
 
-    @router.put("/models/{model_id}", dependencies=owner_only)
-    async def put_model(workspace_id: str, model_id: str, body: dto.ModelInput):
+    @router.put("/models/{model_id}", dependencies=owner_only, response_model=None)
+    async def put_model(workspace_id: str, model_id: str, body: dto.ModelInput) -> dict[str, object]:
         return await save_model(workspace_id, body.model_copy(update={"id": model_id}))
 
-    @router.delete("/models/{model_id}", status_code=204, dependencies=owner_only)
-    async def delete_model(workspace_id: str, model_id: str):
+    @router.delete("/models/{model_id}", status_code=204, dependencies=owner_only, response_model=None)
+    async def delete_model(workspace_id: str, model_id: str) -> Response:
         async with credentials.model_changes:
             profile = await core.models.get_profile(workspace_id, model_id)
             await credentials.revoke_model(workspace_id, profile)
@@ -110,14 +116,14 @@ def routes(core, credentials) -> APIRouter:
             await audit(workspace_id, "model.profile.deleted", model_id)
         return Response(status_code=204)
 
-    @router.post("/models/{model_id}/default", dependencies=owner_only)
-    async def set_default(workspace_id: str, model_id: str):
+    @router.post("/models/{model_id}/default", dependencies=owner_only, response_model=None)
+    async def set_default(workspace_id: str, model_id: str) -> dict[str, object]:
         async with credentials.model_changes:
             await core.set_default_chat_model(workspace_id, model_id)
         return await catalog(workspace_id)
 
-    @router.post("/models/actions/validate", dependencies=owner_only)
-    async def validate(workspace_id: str, body: dto.ModelValidation):
+    @router.post("/models/actions/validate", dependencies=owner_only, response_model=None)
+    async def validate(workspace_id: str, body: dto.ModelValidation) -> dict[str, object]:
         try:
             key = body.api_key or body.chat.api_key or await credentials.profile_key(workspace_id, body.chat.id, body.chat.provider, body.chat.base_url)
             await core.validate_chat_model(body.chat.settings(), key)
@@ -127,8 +133,8 @@ def routes(core, credentials) -> APIRouter:
         await audit(workspace_id, "model.connection.validated", body.chat.provider + ":" + body.chat.model, "success" if ok else "failed")
         return {"ok": ok, "message": message, "model": body.chat.model}
 
-    @router.post("/models/actions/discover", dependencies=owner_only)
-    async def discover(workspace_id: str, body: dto.Discovery):
+    @router.post("/models/actions/discover", dependencies=owner_only, response_model=None)
+    async def discover(workspace_id: str, body: dto.Discovery) -> dict[str, object]:
         try:
             key = body.api_key or await credentials.profile_key(workspace_id, body.id, body.provider, body.base_url)
             result = await discover_models(body.provider, body.base_url, key)
@@ -137,8 +143,8 @@ def routes(core, credentials) -> APIRouter:
         await audit(workspace_id, "model.catalog.discovered", body.provider)
         return {"models": result}
 
-    @router.get("/credential-references", dependencies=owner_only)
-    async def credential_status(workspace_id: str):
+    @router.get("/credential-references", dependencies=owner_only, response_model=None)
+    async def credential_status(workspace_id: str) -> dict[str, object]:
         values = []
         for name in ("model.openai", "model.anthropic", "model.openai_compatible", "tavily", "google"):
             try:
@@ -148,46 +154,46 @@ def routes(core, credentials) -> APIRouter:
             values.append({"name": name, "configured": configured, "validated": False})
         return {"engines": values}
 
-    @router.post("/credential-references", status_code=201, dependencies=owner_only)
-    async def save_credential(workspace_id: str, body: dto.CredentialSave):
+    @router.post("/credential-references", status_code=201, dependencies=owner_only, response_model=None)
+    async def save_credential(workspace_id: str, body: dto.CredentialSave) -> dict[str, object]:
         async with credentials.model_changes:
             await credentials.save(workspace_id, body.service, body.api_key)
         await audit(workspace_id, "credential.saved", body.service)
         return {"id": body.service, "service": body.service, "status": "saved", "validated": False}
 
-    @router.put("/credential-references/{reference}", dependencies=owner_only)
-    async def update_credential(workspace_id: str, reference: str, body: dto.CredentialUpdate):
+    @router.put("/credential-references/{reference}", dependencies=owner_only, response_model=None)
+    async def update_credential(workspace_id: str, reference: str, body: dto.CredentialUpdate) -> dict[str, object]:
         async with credentials.model_changes:
             await credentials.save(workspace_id, reference, body.api_key)
         await audit(workspace_id, "credential.updated", reference)
         return {"id": reference, "updated_at": datetime.now(UTC).isoformat()}
 
-    @router.delete("/credential-references/{reference}", status_code=204, dependencies=owner_only)
-    async def delete_credential(workspace_id: str, reference: str):
+    @router.delete("/credential-references/{reference}", status_code=204, dependencies=owner_only, response_model=None)
+    async def delete_credential(workspace_id: str, reference: str) -> Response:
         async with credentials.model_changes:
             await credentials.delete(workspace_id, reference)
         await audit(workspace_id, "credential.deleted", reference)
         return Response(status_code=204)
 
-    @router.get("/preferences")
-    async def preferences(workspace_id: str):
+    @router.get("/preferences", response_model=None)
+    async def preferences(workspace_id: str) -> dict[str, str]:
         return await core.get_user_preferences(workspace_id, dto.Principal)
 
-    @router.patch("/preferences")
-    async def update_preferences(workspace_id: str, body: dto.Preferences):
+    @router.patch("/preferences", response_model=None)
+    async def update_preferences(workspace_id: str, body: dto.Preferences) -> dict[str, str]:
         result = await core.update_user_preferences(workspace_id, dto.Principal, body.assistant_name)
         await audit(workspace_id, "user.preferences.updated", "interface")
         return result
 
-    @router.get("/permissions")
-    async def permissions(workspace_id: str):
+    @router.get("/permissions", response_model=None)
+    async def permissions(workspace_id: str) -> dict[str, object]:
         return await core.get_permission_settings(workspace_id)
 
-    @router.patch("/permissions", dependencies=owner_only)
-    async def update_permissions(workspace_id: str, body: dto.Permissions):
+    @router.patch("/permissions", dependencies=owner_only, response_model=None)
+    async def update_permissions(workspace_id: str, body: dto.Permissions) -> dict[str, object]:
         return await core.update_permission_settings(workspace_id, **body.model_dump())
 
-    async def safety_view(workspace_id: str):
+    async def safety_view(workspace_id: str) -> dict[str, object]:
         # The key stays in the credential store; only its presence is exposed.
         value = await core.get_safety_settings(workspace_id)
         try:
@@ -196,12 +202,12 @@ def routes(core, credentials) -> APIRouter:
             configured = False
         return {**value, "credential_configured": configured}
 
-    @router.get("/settings/safety", dependencies=owner_only)
-    async def safety_settings(workspace_id: str):
+    @router.get("/settings/safety", dependencies=owner_only, response_model=None)
+    async def safety_settings(workspace_id: str) -> dict[str, object]:
         return await safety_view(workspace_id)
 
-    @router.patch("/settings/safety", dependencies=owner_only)
-    async def update_safety(workspace_id: str, body: dto.SafetySettings):
+    @router.patch("/settings/safety", dependencies=owner_only, response_model=None)
+    async def update_safety(workspace_id: str, body: dto.SafetySettings) -> dict[str, object]:
         if body.request_format not in SAFETY_FORMATS:
             # A distinct code, not generic VALIDATION, per the API contract.
             raise dto.APIError(400, "SAFETY_FORMAT_UNSUPPORTED", "不支持的决策模型请求格式。")
@@ -215,62 +221,62 @@ def routes(core, credentials) -> APIRouter:
         await audit(workspace_id, "safety.settings.updated", "safety")
         return await safety_view(workspace_id)
 
-    @router.get("/tool-settings", dependencies=owner_only)
-    async def tools(workspace_id: str):
+    @router.get("/tool-settings", dependencies=owner_only, response_model=None)
+    async def tools(workspace_id: str) -> dict[str, object]:
         return await core.get_tool_settings(workspace_id)
 
-    @router.patch("/tool-settings", dependencies=owner_only)
-    async def update_tools(workspace_id: str, body: dto.ToolSettings):
+    @router.patch("/tool-settings", dependencies=owner_only, response_model=None)
+    async def update_tools(workspace_id: str, body: dto.ToolSettings) -> dict[str, object]:
         return await core.update_tool_settings(workspace_id, body.enabled)
 
-    @router.get("/memories")
+    @router.get("/memories", response_model=None)
     async def memories(workspace_id: str, q: str = Query(default="", max_length=200),
-                       folder_id: str | None = Query(default=None, max_length=200)):
+                       folder_id: str | None = Query(default=None, max_length=200)) -> dict[str, object]:
         return {"memories": await core.list_memories(workspace_id, dto.Principal, q, 200, folder_id)}
 
-    @router.get("/memory-settings")
-    async def memory_settings(workspace_id: str, folder_id: str = Query(max_length=200)):
+    @router.get("/memory-settings", response_model=None)
+    async def memory_settings(workspace_id: str, folder_id: str = Query(max_length=200)) -> dict[str, object]:
         return await core.get_memory_settings(workspace_id, dto.Principal, folder_id)
 
-    @router.patch("/memory-settings")
-    async def update_memory_settings(workspace_id: str, body: dto.MemorySettings):
+    @router.patch("/memory-settings", response_model=None)
+    async def update_memory_settings(workspace_id: str, body: dto.MemorySettings) -> dict[str, object]:
         return await core.set_memory_settings(workspace_id, dto.Principal, body.folder_id, body.enabled)
 
-    @router.post("/memories", status_code=201)
-    async def add_memory(workspace_id: str, body: dto.MemoryInput):
+    @router.post("/memories", status_code=201, response_model=None)
+    async def add_memory(workspace_id: str, body: dto.MemoryInput) -> dict[str, object]:
         return await core.upsert_memory(workspace_id, dto.Principal, **body.model_dump())
 
-    @router.patch("/memories/{memory_id}")
-    async def update_memory(workspace_id: str, memory_id: str, body: dto.MemoryInput):
+    @router.patch("/memories/{memory_id}", response_model=None)
+    async def update_memory(workspace_id: str, memory_id: str, body: dto.MemoryInput) -> dict[str, object]:
         return await core.upsert_memory(workspace_id, dto.Principal, memory_id=memory_id, **body.model_dump())
 
-    @router.delete("/memories/{memory_id}", status_code=204)
-    async def delete_memory(workspace_id: str, memory_id: str):
+    @router.delete("/memories/{memory_id}", status_code=204, response_model=None)
+    async def delete_memory(workspace_id: str, memory_id: str) -> Response:
         await core.delete_memory(workspace_id, dto.Principal, memory_id)
         return Response(status_code=204)
 
-    @router.get("/data-summary", dependencies=owner_only)
-    async def summary(workspace_id: str):
+    @router.get("/data-summary", dependencies=owner_only, response_model=None)
+    async def summary(workspace_id: str) -> dict[str, object]:
         return await core.get_workspace_data_summary(workspace_id)
 
-    @router.get("/mcp-servers")
-    async def mcp():
+    @router.get("/mcp-servers", response_model=None)
+    async def mcp() -> dict[str, object]:
         return {"servers": await core.list_mcp_servers()}
 
-    @router.get("/skills")
-    async def skills():
+    @router.get("/skills", response_model=None)
+    async def skills() -> dict[str, object]:
         return {"skills": await core.list_skills()}
 
-    @router.get("/extension-settings", dependencies=owner_only)
-    async def extensions(workspace_id: str):
+    @router.get("/extension-settings", dependencies=owner_only, response_model=None)
+    async def extensions(workspace_id: str) -> dict[str, object]:
         return await core.get_extensions(workspace_id)
 
-    @router.put("/extension-settings", dependencies=owner_only)
-    async def save_extensions(workspace_id: str, body: dict):
+    @router.put("/extension-settings", dependencies=owner_only, response_model=None)
+    async def save_extensions(workspace_id: str, body: dict[str, object]) -> dict[str, object]:
         return await core.update_extensions(workspace_id, body)
 
-    @router.post("/extension-settings/apply", dependencies=owner_only)
-    async def apply_extensions(workspace_id: str, body: dto.ExtensionApply):
+    @router.post("/extension-settings/apply", dependencies=owner_only, response_model=None)
+    async def apply_extensions(workspace_id: str, body: dto.ExtensionApply) -> dict[str, object]:
         snapshot = await core.get_extensions(workspace_id)
         config = snapshot.get("active_config" if body.restore_only else "config")
         if not config or config["revision"] != body.revision:

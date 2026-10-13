@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlsplit
 
 import httpx
@@ -14,6 +14,10 @@ from pydantic import BaseModel
 from agent.api.contracts import APIError
 from agent.api.sessions import owner
 from agent.models.statistics import public_endpoint
+
+if TYPE_CHECKING:
+    from agent.api.credentials import Credentials
+    from agent.core import AgentCore
 
 
 class BalanceValue(BaseModel):
@@ -52,11 +56,11 @@ def amount(value: object) -> str | None:
         return None
 
 
-def routes(core, credentials) -> APIRouter:
+def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
     router = APIRouter(dependencies=[Depends(owner)])
 
-    @router.get("/usage")
-    async def usage(workspace_id: str, days: int = Query(default=7, ge=0, le=365)):
+    @router.get("/usage", response_model=None)
+    async def usage(workspace_id: str, days: int = Query(default=7, ge=0, le=365)) -> dict[str, object]:
         local_now = datetime.now().astimezone()
         since = (local_now.replace(hour=0, minute=0, second=0, microsecond=0)
                  - timedelta(days=days - 1)).astimezone(UTC).isoformat() if days else ""
@@ -72,7 +76,7 @@ def routes(core, credentials) -> APIRouter:
                 "start_date": start_date, "end_date": local_now.date().isoformat()}
 
     @router.get("/models/{model_id}/balance", response_model=BalanceResult)
-    async def balance(workspace_id: str, model_id: str):
+    async def balance(workspace_id: str, model_id: str) -> BalanceResult:
         async with credentials.model_changes:
             profile = await core.models.get_profile(workspace_id, model_id)
             service = quota_service(profile.base_url)

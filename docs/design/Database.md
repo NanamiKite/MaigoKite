@@ -45,7 +45,7 @@
 | `messages` | 会话、`role / content / created_at`；没有显式 sequence/词元列 |
 | `user_preferences` | `(workspace_id, subject_user_id, key)` 唯一，保存非敏感 JSON |
 | `workspace_settings` | `(workspace_id, key)` 唯一，保存非敏感 JSON |
-| `tasks` | 工作区/会话、输入、状态、最后错误、版本、时间与可选聊天提交指纹 `request_hash` |
+| `tasks` | 工作区/会话、输入、状态、最后错误、版本、时间、可选提交指纹 `request_hash`，以及本次输出契约 `output_schema_json` 与已校验结果 `output_result_json` |
 | `task_events` | 任务/会话、会话内 sequence、类型、payload 和发生时间 |
 | `tool_calls` | 任务、工具名、参数、结果、摘要、风险和状态；旧续接列只保留历史兼容 |
 | `approvals` | 任务/工具调用、principal、参数摘要值、风险、版本、过期和决定时间；`reuse_scope_json / authorization_scope / authorization_expires_at / authorization_revoked_at` 保存有限期窄授权 |
@@ -129,6 +129,7 @@ pending, consumed, rejected, expired
 - 创建审批，并把工具调用/任务切换为等待；
 - 决定、过期或取消审批，并同步更新关联工具调用/任务；
 - 单次 Repository 方法内部的数据修改。
+- 结构化任务的最终结果、对应助手消息、会话更新时间和 succeeded 状态由 `complete_structured_task` 同事务提交；终态不被再次覆盖。只有成功且存在结果的记录可供后续步骤消费。它是产品交付物，不替代 LangGraph execution checkpoint。
 - 聊天准入时检查归属/归档/未结束任务，创建任务与用户消息并更新会话时间；单一 LangGraph 路径使用 `start_chat_turn`。带幂等键的 task ID 按工作区/会话/主体/键派生，`request_hash` 校验 content/attachments。重发返回原任务，不触发模型或副作用；不额外创建通用幂等请求库。
 
 尚未原子完成：
@@ -140,6 +141,8 @@ pending, consumed, rejected, expired
 `EventBus` 当前先写 `task_events`，再实时投递事件，因此断线后可以回放。但领域状态与事件的写入不在同一事务中。尚无正式 Unit of Work/Outbox。应先修复需要原子提交的最小事务，不预设必须建设完整事件溯源或通用 Outbox 框架。
 
 会话 snapshot 在单 Core Repository 锁内读取各产品列表与事件水位，最大行数和响应预算见 API。它不承诺多个 Core 共用数据库的一致性，不从产品记录重建 LangGraph checkpoint。任务 inspection 的用量为事件只读聚合，没有第二份持久 token 账本。新增 `request_hash` 使用既有受限 ALTER 迁移，旧任务默认空指纹；不会把旧任务猜测为某次新提交的重放。
+
+结构化输出使用既有增列迁移：`tasks.output_schema_json TEXT NOT NULL DEFAULT ''`、`tasks.output_result_json TEXT`。旧任务保持普通聊天/无结构化结果，不从旧助手文本推导 JSON。输出契约在任务准入时固定，幂等指纹在结构化请求中增加 Schema，普通请求指纹不改变。结果列保留标准 JSON 文本（不是 pickle），受大小与深度限制；不新增工作流状态表。具体契约见 [API 结构化任务结果](API.md#结构化任务结果)。本次仅源码修改与人工审阅，未打开或迁移用户实际数据库。
 
 ## 7. 当前迁移方式
 

@@ -1,0 +1,35 @@
+.tools-panels { display: grid; gap: var(--space-6); }
+.tool-groups { display: grid; gap: var(--space-4); margin-top: var(--space-4); }
+.tool-entry {
+  padding-block: var(--space-4);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+.tool-entry:first-of-type { padding-top: 0; }
+.tool-entry:last-of-type { border-bottom: 0; padding-bottom: 0; }
+.tool-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-5);
+}
+.tool-row span { display: grid; gap: var(--space-2); min-width: 0; }
+.tool-row strong { font-size: var(--text-sm); }
+.tool-row small { color: var(--ink-2); font-size: var(--text-xs); }
+.tool-row input { width: var(--size-18); height: var(--size-18); accent-color: var(--accent); }
+.tool-instructions { margin-top: var(--space-3); color: var(--ink-2); font-size: var(--text-xs); }
+.tool-instructions summary { cursor: pointer; }
+.tool-instructions pre { font-family: var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-description { margin-block: var(--space-3); font-size: var(--text-sm); line-height: var(--leading-normal); }
+.tool-original { margin-top: var(--space-3); }
+.settings-actions,
+.settings-actions > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+}
+.settings-actions { margin-top: var(--space-5); }
+.panel-loading { display: grid; gap: var(--space-5); padding-block: var(--space-7); }
+.panel-empty { color: var(--ink-2); padding-block: var(--space-6); font-size: var(--text-sm); }

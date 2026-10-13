@@ -1,4 +1,5 @@
 """Explicit batch 1–4 acceptance; all state belongs in pytest's temporary path."""
+
 from __future__ import annotations
 
 import asyncio
@@ -8,12 +9,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from aiohttp import web
-from langchain.agents.middleware.types import ModelRequest
-from langchain_core.callbacks import AsyncCallbackHandler
-from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
-
 from agent.browser_runtime import BrowserRuntime
 from agent.config_manager import ConfigManager
 from agent.core import AgentCore
@@ -24,13 +19,23 @@ from agent.observability import Observability
 from agent.repository import SQLiteRepository
 from agent.runtime import LangGraphRuntime
 from agent.runtime.context import ContextBudgetExceeded, ContextBudgetMiddleware, effective_input_budget
+from aiohttp import web
+from langchain.agents.middleware.types import ModelRequest
+from langchain_core.callbacks import AsyncCallbackHandler
+from langchain_core.messages import HumanMessage
+from langchain_openai import ChatOpenAI
 from tests.fixtures.chat_model import FakeModel
 
 
-@pytest.mark.parametrize("profile,expected", [
-    ({"max_input_tokens": 2048}, 1664), ({"max_input_tokens": 100000}, 98720),
-    ({}, 32000), ({"max_input_tokens": True}, 32000),
-])
+@pytest.mark.parametrize(
+    "profile,expected",
+    [
+        ({"max_input_tokens": 2048}, 1664),
+        ({"max_input_tokens": 100000}, 98720),
+        ({}, 32000),
+        ({"max_input_tokens": True}, 32000),
+    ],
+)
 def test_budget_uses_sdk_capacity_without_model_name_table(profile, expected):
     assert effective_input_budget(SimpleNamespace(profile=profile, max_tokens=256), 32000) == expected
 
@@ -38,8 +43,12 @@ def test_budget_uses_sdk_capacity_without_model_name_table(profile, expected):
 @pytest.mark.asyncio
 async def test_small_model_rejected_before_network_without_slicing():
     messages = [HumanMessage("large request " * 600)]
-    request = ModelRequest(model=FakeModel(profile={"max_input_tokens": 512}), messages=messages, tools=[],
-                           runtime=SimpleNamespace(context=SimpleNamespace()))
+    request = ModelRequest(
+        model=FakeModel(profile={"max_input_tokens": 512}),
+        messages=messages,
+        tools=[],
+        runtime=SimpleNamespace(context=SimpleNamespace()),
+    )
 
     async def forbidden(_):
         raise AssertionError("model should not be called")
@@ -165,22 +174,69 @@ async def test_mcp_cancel_and_timeout_keep_shared_session_usable():
         with pytest.raises(MCPError, match="outcome may be unknown"):
             await client.call_tool("delayed_echo", {"text": "timeout", "delay": 0.5})
         client.request_timeout = 5
-        assert (await client.call_tool("delayed_echo", {"text": "after timeout"}))["content"][0]["text"] == "after timeout"
+        assert (await client.call_tool("delayed_echo", {"text": "after timeout"}))["content"][0][
+            "text"
+        ] == "after timeout"
     finally:
         await asyncio.wait_for(client.stop(), 10)
     assert client._owner is None and client._session is None
 
 
 @pytest.mark.asyncio
-async def test_failed_mcp_initialization_releases_core_repository(tmp_path):
+async def test_failed_mcp_initialization_keeps_native_core_available(tmp_path):
     config = ConfigManager()
     config.set("workspace.root", str(tmp_path))
     config.set("browser.enabled", False)
     config.set("mcp.servers.invalid", {"command": str(tmp_path / "missing-executable")})
     core = AgentCore(config, EventBus(), Observability(), FakeModel(), SQLiteRepository(tmp_path / "failed.db"))
-    with pytest.raises(Exception):
+    await core.initialize()
+    try:
+        assert core._initialized and core._mcp_clients == {}
+        assert await core.list_mcp_servers() == [
+            {
+                "namespace": "invalid",
+                "status": "error",
+                "transport": "stdio",
+                "tool_names": [],
+            }
+        ]
+        assert core.tool_registry.get("file_read") is not None
+        assert core.tool_registry.get("invalid__echo") is None
+        result = await core.run("hello")
+        assert result["status"] == "succeeded"
+        assert result["response"] == "reply:hello"
+    finally:
+        await core.shutdown()
+    assert not core._initialized and core._mcp_clients == {}
+    with pytest.raises(RuntimeError):
+        core.repository._db()
+
+
+@pytest.mark.asyncio
+async def test_core_startup_failure_releases_connected_mcp_and_repository(tmp_path, monkeypatch):
+    config = ConfigManager()
+    config.set("workspace.root", str(tmp_path))
+    config.set("browser.enabled", False)
+    config.set(
+        "mcp.servers.fixture",
+        {
+            "command": sys.executable,
+            "args": ["-B", str(Path(__file__).with_name("test_mcp_server.py"))],
+        },
+    )
+    core = AgentCore(config, EventBus(), Observability(), FakeModel(), SQLiteRepository(tmp_path / "startup.db"))
+    clients = []
+
+    async def fail_runtime(_registry, _skills):
+        clients.extend(core._mcp_clients.values())
+        assert len(clients) == 1 and clients[0].is_running
+        raise RuntimeError("injected runtime startup failure")
+
+    monkeypatch.setattr(core, "_create_langgraph_runtime", fail_runtime)
+    with pytest.raises(RuntimeError, match="injected runtime startup failure"):
         await core.initialize()
-    assert not core._initialized and core._mcp_clients == []
+    assert not core._initialized and core._mcp_clients == {}
+    assert all(client._owner is None and client._session is None for client in clients)
     with pytest.raises(RuntimeError):
         core.repository._db()
 
@@ -230,7 +286,9 @@ async def test_provider_cancel_disconnects_and_keeps_model_reusable(tmp_path, mo
         await request.json()
         calls += 1
         stream_forever = calls == 1
-        result = web.StreamResponse(headers={"Content-Type": "text/event-stream" if provider == "anthropic" else "application/x-ndjson"})
+        result = web.StreamResponse(
+            headers={"Content-Type": "text/event-stream" if provider == "anthropic" else "application/x-ndjson"}
+        )
         await result.prepare(request)
 
         async def event(kind, value):
@@ -238,26 +296,52 @@ async def test_provider_cancel_disconnects_and_keeps_model_reusable(tmp_path, mo
 
         try:
             if provider == "anthropic":
-                await event("message_start", {"message": {"id": "msg_cancel", "type": "message", "role": "assistant",
-                    "model": "local-model", "content": [], "stop_reason": None, "stop_sequence": None,
-                    "usage": {"input_tokens": 1, "output_tokens": 0}}})
+                await event(
+                    "message_start",
+                    {
+                        "message": {
+                            "id": "msg_cancel",
+                            "type": "message",
+                            "role": "assistant",
+                            "model": "local-model",
+                            "content": [],
+                            "stop_reason": None,
+                            "stop_sequence": None,
+                            "usage": {"input_tokens": 1, "output_tokens": 0},
+                        }
+                    },
+                )
                 await event("content_block_start", {"index": 0, "content_block": {"type": "text", "text": ""}})
             while True:
                 if provider == "anthropic":
                     await event("content_block_delta", {"index": 0, "delta": {"type": "text_delta", "text": "OK"}})
                 else:
-                    await result.write((json.dumps({"model": "local-model", "created_at": "2026-10-10T00:00:00Z",
-                        "message": {"role": "assistant", "content": "OK"}, "done": not stream_forever}) + "\n").encode())
+                    await result.write(
+                        (
+                            json.dumps(
+                                {
+                                    "model": "local-model",
+                                    "created_at": "2026-10-10T00:00:00Z",
+                                    "message": {"role": "assistant", "content": "OK"},
+                                    "done": not stream_forever,
+                                }
+                            )
+                            + "\n"
+                        ).encode()
+                    )
                 streaming.set()
                 if not stream_forever:
                     break
                 await asyncio.sleep(0.02)
             if provider == "anthropic":
                 await event("content_block_stop", {"index": 0})
-                await event("message_delta", {"delta": {"stop_reason": "end_turn", "stop_sequence": None}, "usage": {"output_tokens": 1}})
+                await event(
+                    "message_delta",
+                    {"delta": {"stop_reason": "end_turn", "stop_sequence": None}, "usage": {"output_tokens": 1}},
+                )
                 await event("message_stop", {})
             await result.write_eof()
-        except (ConnectionResetError, asyncio.CancelledError):
+        except ConnectionResetError, asyncio.CancelledError:
             disconnected.set()
         return result
 
@@ -268,11 +352,22 @@ async def test_provider_cancel_disconnects_and_keeps_model_reusable(tmp_path, mo
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
     port = site._server.sockets[0].getsockname()[1]
-    model = build_chat_model(provider, "local-model", base_url=f"http://127.0.0.1:{port}",
-                             api_key="local-test", max_tokens=64, timeout=5, callbacks=[PauseFirstToken()])
+    model = build_chat_model(
+        provider,
+        "local-model",
+        base_url=f"http://127.0.0.1:{port}",
+        api_key="local-test",
+        max_tokens=64,
+        timeout=5,
+        callbacks=[PauseFirstToken()],
+    )
     try:
-        async with LangGraphRuntime(model=model, workspace_root=tmp_path,
-                product_db_path=tmp_path / "provider.db", checkpoint_path=tmp_path / "provider-checkpoint.db") as runtime:
+        async with LangGraphRuntime(
+            model=model,
+            workspace_root=tmp_path,
+            product_db_path=tmp_path / "provider.db",
+            checkpoint_path=tmp_path / "provider-checkpoint.db",
+        ) as runtime:
             handle = await runtime.start("stream")
             await asyncio.wait_for(streaming.wait(), 5)
             await asyncio.wait_for(paused.wait(), 5)

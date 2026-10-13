@@ -8,7 +8,7 @@ import json
 import os
 import re
 import uuid
-from collections.abc import Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from pathlib import Path
 from threading import Event
 from typing import Any, TypeVar
@@ -19,16 +19,23 @@ from agent.browser_runtime import BrowserRuntime
 from agent.config_manager import ConfigManager
 from agent.event_bus import EventBus
 from agent.extensions import ExtensionConfig, startup_config
-from agent.models.runtime import ChatModelRuntime, ChatModelSettings
 from agent.mcp import MCPClient
+from agent.models.runtime import ChatModelRuntime, ChatModelSettings
 from agent.observability import Observability
-from agent.repository import ConversationBusyError, MessageReplay, SQLiteRepository, folder_memory_scope, validate_subagent_model_ids
 from agent.process_registry import ProcessRegistry
+from agent.repository import (
+    ConversationBusyError,
+    MessageReplay,
+    SQLiteRepository,
+    folder_memory_scope,
+    validate_subagent_model_ids,
+)
 from agent.runtime import LangGraphRuntime, ProductToolSpec, RuntimeRunRequest
 from agent.safety import SAFETY_SETTING_KEY, normalize_safety_settings
 from agent.security.injection_filter import InjectionFilter
 from agent.security.whitelist import Whitelist
 from agent.skill_registry import SkillRegistry
+from agent.structured_output import validate_output_schema
 from agent.tools.native import (
     BashTool,
     BrowserTool,
@@ -43,10 +50,9 @@ from agent.tools.native import (
     WebFetchTool,
     WebSearchTool,
 )
-from agent.tools.permission_mgr import PermissionManager
 from agent.tools.native.bash import ExecCommandTool
+from agent.tools.permission_mgr import PermissionManager
 from agent.tools.tool_registry import ToolRegistry
-
 
 _EntryResult = TypeVar("_EntryResult")
 
@@ -146,7 +152,7 @@ class AgentCore:
         self._skill_errors: list[str] = []
         self._applied_extension_revision = -1
         self._tool_credentials: dict[tuple[str, str], str] = {}
-        self._safety_credential_provider = None
+        self._safety_credential_provider: Callable[[str], Awaitable[str]] | None = None
         self._langgraph_runtime: LangGraphRuntime | None = None
         self._langgraph_entry_tasks: set[asyncio.Task[Any]] = set()
         self.processes = ProcessRegistry()
@@ -413,8 +419,8 @@ class AgentCore:
 
     async def _create_langgraph_runtime(self, registry: ToolRegistry, skills: SkillRegistry) -> LangGraphRuntime:
         """Reuse product tools; LangChain owns all runtime invocation."""
-        from agent.tools.native.ask_user_question import AskUserQuestionTool
         from agent.runtime.subagents import DelegateTool, ListSubagentModelsTool
+        from agent.tools.native.ask_user_question import AskUserQuestionTool
 
         registry.register(AskUserQuestionTool())
         registry.register(DelegateTool())
@@ -476,7 +482,7 @@ class AgentCore:
             return ""
         return await self._safety_credential_provider(workspace_id)
 
-    def set_safety_credential_provider(self, provider) -> None:
+    def set_safety_credential_provider(self, provider: Callable[[str], Awaitable[str]]) -> None:
         self._safety_credential_provider = provider
 
     def _configured_tool_selection(self) -> tuple[set[str], set[str]]:
@@ -772,6 +778,7 @@ class AgentCore:
         if not self._initialized:
             raise RuntimeError("Agent Core is not initialized")
         metadata = dict(metadata or {})
+        metadata["output_schema"] = validate_output_schema(metadata.get("output_schema"))
         key = str(metadata.get("idempotency_key") or "")
         if key:
             if len(key) > 128 or not key.isascii() or any(ord(char) < 33 or ord(char) > 126 for char in key):
@@ -783,7 +790,12 @@ class AgentCore:
             await self.repository.get_conversation(workspace_id, conversation_id)
             identity = "\x00".join((workspace_id, conversation_id, str(metadata.get("principal_id", "local-user")), key))
             metadata["task_id"] = "task_" + hashlib.sha256(identity.encode()).hexdigest()
-            body = json.dumps({"content": prompt, "attachments": metadata.get("attachments", [])},
+            payload = {"content": prompt, "attachments": metadata.get("attachments", [])}
+            if metadata["output_schema"] is not None:
+                # Preserve existing chat submission hashes; structured contracts
+                # are part of identity and cannot change under a reused key.
+                payload["output_schema"] = metadata["output_schema"]
+            body = json.dumps(payload,
                               sort_keys=True, ensure_ascii=False, separators=(",", ":"))
             metadata["request_hash"] = hashlib.sha256(body.encode()).hexdigest()
         try:
@@ -838,6 +850,7 @@ class AgentCore:
             trace_id=str(metadata.get("trace_id") or f"trace_{uuid.uuid4().hex}"),
             task_id=str(metadata.get("task_id") or ""),
             request_hash=str(metadata.get("request_hash") or ""),
+            output_schema=metadata.get("output_schema"),
         )
         handle = await runtime.start(prompt, request)
         try:

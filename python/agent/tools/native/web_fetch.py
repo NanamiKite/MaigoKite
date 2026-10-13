@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import logging
 import asyncio
 import ipaddress
+import logging
 import socket
 from typing import Any
 from urllib.parse import urljoin, urlsplit
@@ -109,20 +109,20 @@ class WebFetchTool(BaseTool):
                 from html.parser import HTMLParser
 
                 class TitleExtractor(HTMLParser):
-                    def __init__(self):
+                    def __init__(self) -> None:
                         super().__init__()
                         self.title = ""
                         self._in_title = False
 
-                    def handle_starttag(self, tag, attrs):
+                    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
                         if tag == "title":
                             self._in_title = True
 
-                    def handle_endtag(self, tag):
+                    def handle_endtag(self, tag: str) -> None:
                         if tag == "title":
                             self._in_title = False
 
-                    def handle_data(self, data):
+                    def handle_data(self, data: str) -> None:
                         if self._in_title:
                             self.title += data
 

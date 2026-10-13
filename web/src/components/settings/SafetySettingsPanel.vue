@@ -141,14 +141,13 @@ onBeforeUnmount(() => { controller?.abort(); apiKey.value = ''; draft.value = nu
       <h2>{{ $t('安全') }}</h2>
       <button type="button" class="text-button" :disabled="busy" @click="load">{{ $t('重新读取') }}</button>
     </header>
-    <p v-if="!unavailable" id="safety-review-status" class="safety-notice" role="note">{{ $t('当前对话不执行安全审查。') }}</p>
     <InkLoader v-if="action === 'load'" />
     <p v-if="unavailable" class="panel-copy" role="status">{{ $t('当前服务不支持安全设置，请更新服务后重试。') }}</p>
     <form v-if="draft && !unavailable" @submit.prevent="save">
       <fieldset :disabled="busy">
         <section class="setting-group" data-settings-field="safety-enabled">
           <label class="safety-switch">
-            <input v-model="draft.enabled" type="checkbox" aria-describedby="safety-review-status">
+            <input v-model="draft.enabled" type="checkbox">
             <span>{{ $t('提示词安全审查') }}</span>
           </label>
         </section>
@@ -173,15 +172,6 @@ onBeforeUnmount(() => { controller?.abort(); apiKey.value = ''; draft.value = nu
 
 <style scoped lang="scss">
 .safety-settings fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
-.safety-notice {
-  color: var(--ink-2);
-  background: var(--paper-2);
-  border-inline-start: var(--focus-width) solid var(--wait);
-  padding: var(--space-4);
-  font-size: var(--text-sm);
-  line-height: var(--leading-normal);
-  margin-block: var(--space-5);
-}
 .safety-switch, .safety-actions { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .safety-switch { font-size: var(--text-md); font-weight: var(--weight-semibold); }
 .safety-switch input { accent-color: var(--accent); width: var(--size-18); height: var(--size-18); }

@@ -6,8 +6,9 @@ import json
 import os
 import re
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -348,6 +349,7 @@ class ChatModelRuntime:
         catalog = await self._model_catalog.find(settings.provider, settings.base_url, settings.model)
         route = self._model_catalog.route(settings.provider, settings.base_url)
         key = f"models.chat.capacity.{settings.id}"
+        saved: dict[str, object] | None
         if catalog is not None:
             saved = {
                 "model_key": model_key, "context_window": catalog.context_window,

@@ -9,6 +9,7 @@ import sys
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING, TypedDict, cast
 
 from anyio import to_thread
 from fastapi import APIRouter, Depends, Request, Response
@@ -19,9 +20,30 @@ from agent.api.workspace_fs import create_entry, read_file
 from agent.security.sensitive_paths import validate_windows_path
 from agent.utils.sandbox import process_sandbox_status
 
+if TYPE_CHECKING:
+    from agent.api.execution import Execution
+    from agent.core import AgentCore
+
 IGNORED = {".git", ".venv", "node_modules", "__pycache__", "dist", "build", ".pytest_cache"}
 PREVIEW_LIMIT = 512 * 1024
 DIFF_LIMIT = 256 * 1024
+
+
+class FileEntry(TypedDict):
+    name: str
+    path: str
+    type: str
+    size: int
+    modified_at: str
+
+
+class FilePreview(TypedDict):
+    path: str
+    content: str
+    binary: bool
+    size: int
+    modified_at: str
+    truncated: bool
 
 
 def timestamp(value: float) -> str:
@@ -42,15 +64,16 @@ def resolve(root: Path, relative: str, *, exists: bool = True) -> Path:
     return target
 
 
-def entry(path: Path, root: Path, info=None, kind: str | None = None) -> dict:
+def entry(path: Path, root: Path, info: os.stat_result | None = None, kind: str | None = None) -> FileEntry:
     info = info or path.stat(follow_symlinks=False)
     return {"name": path.name, "path": path.relative_to(root).as_posix(),
             "type": kind or ("directory" if path.is_dir() else "file"),
             "size": info.st_size, "modified_at": timestamp(info.st_mtime)}
 
 
-def list_files(root: Path, relative: str) -> dict:
+def list_files(root: Path, relative: str) -> dict[str, object]:
     target = resolve(root, relative)
+    entries: list[FileEntry]
     entries, scanned, truncated = [], 0, False
     with os.scandir(target) as directory:
         for item in directory:
@@ -71,7 +94,7 @@ def list_files(root: Path, relative: str) -> dict:
     return {"path": relative, "entries": entries, "truncated": truncated}
 
 
-def preview(root: Path, relative: str, limit: int = PREVIEW_LIMIT) -> dict:
+def preview(root: Path, relative: str, limit: int = PREVIEW_LIMIT) -> FilePreview:
     path = resolve(root, relative)
     data, info = read_file(root, str(path.relative_to(root)), limit)
     truncated = len(data) > limit
@@ -85,7 +108,7 @@ def preview(root: Path, relative: str, limit: int = PREVIEW_LIMIT) -> dict:
             "size": info.st_size, "modified_at": timestamp(info.st_mtime), "truncated": truncated}
 
 
-def new_entry(root: Path, parent: str, name: str, kind: str) -> dict:
+def new_entry(root: Path, parent: str, name: str, kind: str) -> FileEntry:
     try:
         validate_windows_path(name)
     except ValueError as exc:
@@ -102,12 +125,13 @@ def new_entry(root: Path, parent: str, name: str, kind: str) -> dict:
     return entry(target / name, root, info, kind)
 
 
-def browse(path: str, show_hidden: bool) -> dict:
+def browse(path: str, show_hidden: bool) -> dict[str, object]:
     home = Path.home().resolve()
     target = Path(path) if path else home
     if not target.is_absolute() or len(path) > 4096 or "\0" in path:
         raise dto.APIError(400, "INVALID_PATH", "请选择有效的目录。")
     target = target.resolve(strict=True)
+    entries: list[dict[str, str]]
     entries, truncated = [], False
     with os.scandir(target) as directory:
         for scanned, item in enumerate(directory):
@@ -125,13 +149,17 @@ def browse(path: str, show_hidden: bool) -> dict:
 async def git(root: Path, *args: str) -> bytes:
     env = {key: os.environ[key] for key in ("PATH", "SYSTEMROOT", "WINDIR", "PATHEXT", "TMPDIR", "TEMP", "TMP") if key in os.environ}
     env.update({"LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"})
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = subprocess.CREATE_NO_WINDOW
     process = await asyncio.create_subprocess_exec("git", "--literal-pathspecs", "-c", "core.fsmonitor=false", "-C", str(root), *args,
                                                    env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-                                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+                                                   creationflags=creationflags)
+    stdout = cast(asyncio.StreamReader, process.stdout)
     output = bytearray()
     try:
         async with asyncio.timeout(8):
-            while chunk := await process.stdout.read(65536):
+            while chunk := await stdout.read(65536):
                 output.extend(chunk)
                 if len(output) > 4 * 1024 * 1024:
                     raise dto.APIError(413, "GIT_OUTPUT_LIMIT", "Git 输出过大，请缩小查询范围。")
@@ -153,11 +181,12 @@ def change_status(code: str) -> str:
     return next((name for chars, name in (("D", "deleted"), ("RC", "renamed"), ("A", "added")) if any(char in code for char in chars)), "modified")
 
 
-async def changes(root: Path) -> dict:
+async def changes(root: Path) -> dict[str, object]:
     try:
         parts = (await git(root, "status", "--porcelain=v1", "-z", "--untracked-files=normal")).split(b"\0")
     except (dto.APIError, OSError, TimeoutError):
         return {"changes": [], "git": False, "truncated": False}
+    values: list[dict[str, object]]
     values, index = [], 0
     while index < len(parts):
         part = parts[index]
@@ -174,7 +203,7 @@ async def changes(root: Path) -> dict:
     return {"changes": values, "git": True, "truncated": False}
 
 
-async def diff(root: Path, path: str) -> dict:
+async def diff(root: Path, path: str) -> dict[str, object]:
     if not path.strip():
         raise dto.APIError(400, "INVALID_PATH", "请选择文件。")
     resolve(root, path, exists=False)
@@ -199,44 +228,46 @@ async def diff(root: Path, path: str) -> dict:
             "deletions": sum(line.startswith("-") and not line.startswith("---") for line in text.splitlines())}
 
 
-def routes(core, execution) -> APIRouter:
+def routes(core: AgentCore, execution: Execution) -> APIRouter:
     router = APIRouter()
 
     async def root(workspace: str, folder: str) -> Path:
         return Path((await core.get_workspace_folder(workspace, folder))["root_path"]).resolve()
 
-    @router.get("/folders")
-    async def folders(workspace_id: str):
+    @router.get("/folders", response_model=None)
+    async def folders(workspace_id: str) -> dict[str, object]:
         return {"folders": await core.list_workspace_folders(workspace_id)}
 
-    @router.get("/folders/browse", dependencies=[Depends(owner)])
-    async def folder_browser(path: str = "", show_hidden: bool = False):
+    @router.get("/folders/browse", dependencies=[Depends(owner)], response_model=None)
+    async def folder_browser(path: str = "", show_hidden: bool = False) -> dict[str, object]:
         return await to_thread.run_sync(partial(browse, path, show_hidden))
 
-    @router.post("/folders", status_code=201, dependencies=[Depends(owner)])
-    async def add_folder(workspace_id: str, body: dto.FolderCreate):
+    @router.post("/folders", status_code=201, dependencies=[Depends(owner)], response_model=None)
+    async def add_folder(workspace_id: str, body: dto.FolderCreate) -> dict[str, object]:
         return await core.create_workspace_folder(workspace_id, body.root_path, body.name)
 
-    @router.delete("/folders/{folder_id}", status_code=204, dependencies=[Depends(owner)])
-    async def delete_folder(workspace_id: str, folder_id: str):
+    @router.delete("/folders/{folder_id}", status_code=204, dependencies=[Depends(owner)], response_model=None)
+    async def delete_folder(workspace_id: str, folder_id: str) -> Response:
         await core.delete_workspace_folder(workspace_id, folder_id, dto.Principal)
         return Response(status_code=204)
 
-    @router.get("/files")
-    async def files(workspace_id: str, folder_id: str = "", path: str = ""):
+    @router.get("/files", response_model=None)
+    async def files(workspace_id: str, folder_id: str = "", path: str = "") -> dict[str, object]:
         return await to_thread.run_sync(partial(list_files, await root(workspace_id, folder_id), path))
 
-    @router.get("/files/content")
-    async def content(workspace_id: str, folder_id: str = "", path: str = ""):
+    @router.get("/files/content", response_model=None)
+    async def content(workspace_id: str, folder_id: str = "", path: str = "") -> FilePreview:
         return await to_thread.run_sync(partial(preview, await root(workspace_id, folder_id), path))
 
-    @router.post("/files", status_code=201, dependencies=[Depends(owner)])
-    async def create(workspace_id: str, body: dto.EntryCreate, response: Response, folder_id: str = "", path: str = ""):
+    @router.post("/files", status_code=201, dependencies=[Depends(owner)], response_model=None)
+    async def create(
+        workspace_id: str, body: dto.EntryCreate, response: Response, folder_id: str = "", path: str = "",
+    ) -> FileEntry:
         response.headers["Cache-Control"] = "no-store"
         return await to_thread.run_sync(partial(new_entry, await root(workspace_id, folder_id), path, body.name, body.type))
 
-    @router.post("/files/open-folder", status_code=202, dependencies=[Depends(owner)])
-    async def open_folder(workspace_id: str, folder_id: str = "", path: str = ""):
+    @router.post("/files/open-folder", status_code=202, dependencies=[Depends(owner)], response_model=None)
+    async def open_folder(workspace_id: str, folder_id: str = "", path: str = "") -> Response | dict[str, object]:
         target = resolve(await root(workspace_id, folder_id), path)
         if not target.is_dir():
             raise dto.APIError(400, "NOT_DIRECTORY", "请选择目录。")
@@ -248,7 +279,7 @@ def routes(core, execution) -> APIRouter:
         else:
             program = "open" if sys.platform == "darwin" else "xdg-open"
 
-        async def launch():
+        async def launch() -> int:
             process = await asyncio.create_subprocess_exec(program, str(target), stdout=asyncio.subprocess.DEVNULL,
                                                             stderr=asyncio.subprocess.DEVNULL)
             try:
@@ -269,16 +300,16 @@ def routes(core, execution) -> APIRouter:
             return Response(status_code=204)
         return {"launched": True}
 
-    @router.get("/changes")
-    async def get_changes(workspace_id: str, folder_id: str = ""):
+    @router.get("/changes", response_model=None)
+    async def get_changes(workspace_id: str, folder_id: str = "") -> dict[str, object]:
         return await changes(await root(workspace_id, folder_id))
 
-    @router.get("/changes/diff")
-    async def get_diff(workspace_id: str, path: str, folder_id: str = ""):
+    @router.get("/changes/diff", response_model=None)
+    async def get_diff(workspace_id: str, path: str, folder_id: str = "") -> dict[str, object]:
         return await diff(await root(workspace_id, folder_id), path)
 
-    @router.get("/runtime-status", dependencies=[Depends(owner)])
-    async def status(workspace_id: str, request: Request, folder_id: str = ""):
+    @router.get("/runtime-status", dependencies=[Depends(owner)], response_model=None)
+    async def status(workspace_id: str, request: Request, folder_id: str = "") -> dict[str, object]:
         return {"workspace_id": workspace_id, "workspace_root": str(await root(workspace_id, folder_id)),
                 "workspace_source": "selection" if folder_id else "environment" if os.getenv("MAIGOKITE_WORKSPACE_ROOT") else "configuration",
                 "environment": core.config.get("app.environment", "development"),

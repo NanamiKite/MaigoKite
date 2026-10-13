@@ -7,6 +7,15 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from agent.config_manager import ConfigManager
+from agent.models.context_capacity import ContextCapacity
+from agent.models.runtime import ChatModelRuntime, ChatModelSettings
+from agent.models.usage import message_usage
+from agent.repository import SQLiteRepository
+from agent.runtime import LangGraphRuntime, ProductToolSpec, RuntimeRunRequest
+from agent.runtime.context import ContextBudgetExceeded, ContextBudgetMiddleware, SafeSummarizationMiddleware
+from agent.skill_registry import SkillDefinition, SkillRegistry
+from agent.tools.native.skill import SkillTool
 from langchain.agents.middleware.types import ModelRequest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
@@ -20,18 +29,7 @@ from langchain_core.messages import (
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from pydantic import Field
 
-from agent.config_manager import ConfigManager
-from agent.runtime.context import ContextBudgetExceeded, ContextBudgetMiddleware
 from tests.fixtures.chat_model import FakeModel
-from agent.models.runtime import ChatModelRuntime, ChatModelSettings
-from agent.models.context_capacity import ContextCapacity
-from agent.models.usage import message_usage
-from agent.repository import SQLiteRepository
-from agent.runtime import LangGraphRuntime, RuntimeRunRequest
-from agent.runtime.context import SafeSummarizationMiddleware
-from agent.skill_registry import SkillDefinition, SkillRegistry
-from agent.tools.native.skill import SkillTool
-from agent.runtime import ProductToolSpec
 
 
 class InspectModel(BaseChatModel):

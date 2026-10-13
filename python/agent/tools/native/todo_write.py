@@ -51,8 +51,8 @@ class TodoWriteTool(BaseTool):
                 todo_id = str(items[index]["id"])
             if not todo_id:
                 raise ValueError("id or index is required for update")
-            text = arguments.get("text")
-            normalized_text = str(text).strip() if text is not None else None
+            update_text = arguments.get("text")
+            normalized_text = str(update_text).strip() if update_text is not None else None
             if normalized_text == "":
                 raise ValueError("text must not be empty")
             snapshot = await self._repository.update_todo(

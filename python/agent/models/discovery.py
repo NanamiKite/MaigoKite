@@ -6,6 +6,8 @@ import ipaddress
 import json
 import socket
 import ssl
+from collections.abc import Sequence
+from typing import NotRequired, TypedDict, cast
 from urllib.parse import urlsplit
 from urllib.request import getproxies, proxy_bypass
 
@@ -14,6 +16,14 @@ import httpx
 
 from agent.errors import UserFacingError
 from agent.models.native_model import normalize_base_url
+
+
+class ModelCatalogEntry(TypedDict):
+    id: str
+    name: object
+    owned_by: object
+    context_window: NotRequired[int]
+    details: NotRequired[str]
 
 
 def catalog_proxy(url: httpx.URL) -> str | None:
@@ -34,7 +44,10 @@ def catalog_proxy(url: httpx.URL) -> str | None:
     return proxy
 
 
-async def catalog_page(client, url, addresses, proxy, params, headers, remaining):
+async def catalog_page(
+    client: aiohttp.ClientSession, url: httpx.URL, addresses: Sequence[str], proxy: str | None,
+    params: dict[str, str], headers: dict[str, str], remaining: int,
+) -> tuple[bytearray, int]:
     # GET may try another validated address only if establishing the connection
     # fails. TLS still validates the original hostname, including inside CONNECT.
     for index, address in enumerate(addresses):
@@ -57,7 +70,7 @@ async def catalog_page(client, url, addresses, proxy, params, headers, remaining
     raise UserFacingError("模型目录地址没有可连接的网络地址。")
 
 
-async def discover_models(provider: str, base_url: str, api_key: str = "") -> list[dict]:
+async def discover_models(provider: str, base_url: str, api_key: str = "") -> list[ModelCatalogEntry]:
     base = normalize_base_url(base_url) or {
         "openai": "https://api.openai.com/v1", "anthropic": "https://api.anthropic.com/v1",
         "ollama": "http://127.0.0.1:11434",
@@ -79,14 +92,16 @@ async def discover_models(provider: str, base_url: str, api_key: str = "") -> li
             headers["x-api-key"] = api_key
     elif api_key:
         headers["Authorization"] = "Bearer " + api_key
-    results: dict[str, dict] = {}
+    results: dict[str, ModelCatalogEntry] = {}
     cursors: set[str] = set()
     params = {"limit": "1000"} if provider == "anthropic" else {}
     remaining = 2 * 1024 * 1024
     async with asyncio.timeout(20):
         url = httpx.URL(endpoint)
         resolved = await asyncio.get_running_loop().getaddrinfo(url.host, url.port or (443 if url.scheme == "https" else 80), type=socket.SOCK_STREAM)
-        addresses = list(dict.fromkeys(row[4][0] for row in resolved))
+        # HTTP URL resolution yields AF_INET/AF_INET6 socket addresses, whose
+        # first element is the textual host rather than an AF_UNIX path.
+        addresses = list(dict.fromkeys(cast(str, row[4][0]) for row in resolved))
         for address in addresses:
             ip = ipaddress.ip_address(address)
             ip = getattr(ip, "ipv4_mapped", None) or ip
@@ -118,8 +133,10 @@ async def discover_models(provider: str, base_url: str, api_key: str = "") -> li
                                      if isinstance(entry.get(key), str) and entry[key].strip()), "")
                     if not model_id or len(model_id) > 200 or model_id in results:
                         continue
-                    item = {"id": model_id, "name": entry.get("display_name") or entry.get("name") or model_id,
-                            "owned_by": entry.get("owned_by") or ""}
+                    item: ModelCatalogEntry = {
+                        "id": model_id, "name": entry.get("display_name") or entry.get("name") or model_id,
+                        "owned_by": entry.get("owned_by") or "",
+                    }
                     limit = entry.get("limit") or {}
                     capacities = [entry.get(key) for key in ("context_window", "context_length", "contextWindow", "max_model_len", "max_input_tokens")]
                     capacities.append(limit.get("context") if isinstance(limit, dict) else None)

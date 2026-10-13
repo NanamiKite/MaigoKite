@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from aiohttp import web
-
 from agent.models.native_model import build_chat_model, close_chat_models
+from aiohttp import web
 from langchain_core.messages import HumanMessage
 
 

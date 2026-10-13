@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from agent.repository import SQLiteRepository
 
 
 class IMemorySystem(ABC):
@@ -22,7 +25,7 @@ class IMemorySystem(ABC):
         ...
 
     @abstractmethod
-    async def query_conversation(self, n: int) -> list[dict[str, str]]:
+    async def query_conversation(self, n: int) -> list[dict[str, object]]:
         ...
 
     @abstractmethod
@@ -41,7 +44,9 @@ class IMemorySystem(ABC):
 class MemorySystem(IMemorySystem):
     """Phase-one memory facade: volatile scratch state plus SQLite history/profile."""
 
-    def __init__(self, repository: Any, workspace_id: str = "personal", user_id: str = "local-user") -> None:
+    def __init__(
+        self, repository: SQLiteRepository, workspace_id: str = "personal", user_id: str = "local-user",
+    ) -> None:
         from agent.memory.short_term import ShortTermMemory
         self.repository = repository
         self.workspace_id = workspace_id
@@ -61,7 +66,7 @@ class MemorySystem(IMemorySystem):
             self.conversation_id = conversation["id"]
         await self.repository.append_message(self.conversation_id, turn["role"], turn["content"])
 
-    async def query_conversation(self, n: int) -> list[dict[str, str]]:
+    async def query_conversation(self, n: int) -> list[dict[str, object]]:
         if self.conversation_id is None:
             return []
         return await self.repository.list_messages(self.conversation_id, n)

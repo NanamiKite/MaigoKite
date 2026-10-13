@@ -7,16 +7,28 @@ import logging
 import os
 import re
 import sys
+from collections.abc import Callable
 from functools import partial
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from anyio import to_thread
+from keyring.backend import KeyringBackend
 
 from agent.api.contracts import APIError
 from agent.models.native_model import normalize_base_url
 from agent.tools.mcp_wrapper import mcp_tool_prefix
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from agent.core import AgentCore
+    from agent.models.runtime import ChatModelSettings
+
+
+class _CollectionPreference(Protocol):
+    """SecretService's supported per-instance collection configuration."""
+
+    preferred_collection: str
 
 
 def location(workspace: str, reference: str) -> tuple[str, str]:
@@ -38,6 +50,8 @@ def location(workspace: str, reference: str) -> tuple[str, str]:
 
 def windows_legacy(service: str, account: str, *, delete: bool = False) -> str:
     """Read Go's UTF-8 CredentialBlob by its exact target; Python keyring uses a different target/encoding."""
+    if sys.platform != "win32":
+        raise OSError("Windows credential migration requires Windows")
     import ctypes
     from ctypes import wintypes as w
 
@@ -72,25 +86,25 @@ def windows_legacy(service: str, account: str, *, delete: bool = False) -> str:
 
 
 class Credentials:
-    def __init__(self, core) -> None:
+    def __init__(self, core: AgentCore) -> None:
         self.core = core
         # Serialize profile/secret edits with restoration so an in-flight
         # keychain read cannot install an old key after the endpoint changes.
         self.model_changes = asyncio.Lock()
 
     @staticmethod
-    def _backend():
+    def _backend() -> KeyringBackend:
         # Explicit OS backends prevent an installed plaintext fallback from becoming our secret store.
         if sys.platform == "win32":
             from keyring.backends.Windows import WinVaultKeyring
-            return WinVaultKeyring()
+            return cast(Callable[[], KeyringBackend], WinVaultKeyring)()
         if sys.platform == "darwin":
-            from keyring.backends.macOS import Keyring
-            return Keyring()
-        from keyring.backends.SecretService import Keyring
-        backend = Keyring()
+            from keyring.backends.macOS import Keyring as MacKeyring
+            return cast(Callable[[], KeyringBackend], MacKeyring)()
+        from keyring.backends.SecretService import Keyring as SecretServiceKeyring
+        backend = cast(Callable[[], KeyringBackend], SecretServiceKeyring)()
         # Match go-keyring's existing Linux collection and service/username attributes.
-        backend.preferred_collection = "/org/freedesktop/secrets/collection/login"
+        cast(_CollectionPreference, backend).preferred_collection = "/org/freedesktop/secrets/collection/login"
         return backend
 
     def _operate(self, action: str, workspace: str, reference: str, value: str = "") -> str:
@@ -152,7 +166,7 @@ class Credentials:
         await to_thread.run_sync(partial(self._operate, "delete", workspace, reference))
         await self.sync(workspace, reference, "")
 
-    async def revoke_model(self, workspace: str, profile) -> None:
+    async def revoke_model(self, workspace: str, profile: ChatModelSettings) -> None:
         """Detach credentials durably before moving/removing their model profile.
 
         OS deletion may require an unavailable desktop keychain. The persisted
@@ -184,7 +198,7 @@ class Credentials:
         elif reference in {"tavily", "google"}:
             await self.core.set_tool_credential(workspace, reference, secret)
 
-    async def model_key(self, workspace: str, profile) -> str:
+    async def model_key(self, workspace: str, profile: ChatModelSettings) -> str:
         # A moved/deleted default profile must not fall back to a legacy
         # provider-wide key that was saved for a different endpoint.
         if await self._revoked(workspace, "model-profile." + profile.id):

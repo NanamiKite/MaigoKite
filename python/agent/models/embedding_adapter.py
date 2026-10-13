@@ -19,7 +19,6 @@ from sentence_transformers import SentenceTransformerEmbeddings
 
 from agent.models.embedding_provider import IEmbeddingProvider
 
-
 # ------------------------------------------------------------------
 # Private dimension lookup tables
 # ------------------------------------------------------------------
@@ -90,7 +89,7 @@ class EmbeddingAdapter(IEmbeddingProvider):
             kwargs.update({k: v for k, v in extra.items()})
             self._embeddings = OpenAIEmbeddings(**kwargs)
         elif self.provider in ("bge", "gte"):
-            kwargs: dict[str, Any] = {
+            kwargs = {
                 "model_name": model,
                 "model_kwargs": extra.get("model_kwargs", {}),
             }

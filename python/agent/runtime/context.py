@@ -6,7 +6,7 @@ import asyncio
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from langchain.agents.middleware import AgentMiddleware, SummarizationMiddleware
 from langchain.agents.middleware.summarization import DEFAULT_SUMMARY_PROMPT
@@ -18,10 +18,11 @@ from langchain.agents.middleware.types import (
     ToolCallRequest,
 )
 from langchain_core.callbacks import AsyncCallbackHandler
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately, merge_message_runs
 from langgraph.constants import TAG_NOSTREAM
 from langgraph.types import Command
+from langgraph.typing import ContextT
 
 from agent.errors import UserFacingError
 from agent.models.context_capacity import (
@@ -33,6 +34,11 @@ from agent.models.context_capacity import (
 )
 from agent.models.usage import message_usage
 from agent.runtime.memory import project_memories
+from agent.structured_output import output_budget_tools
+
+if TYPE_CHECKING:
+    from agent.runtime.langgraph_runtime import _RunContext
+    from agent.runtime.subagents import ChildContext
 
 
 class ContextBudgetExceeded(UserFacingError):
@@ -277,6 +283,7 @@ class SafeSummarizationMiddleware(SummarizationMiddleware):
             fixed = [system_message]  # The wrapper already merged system instructions.
         if request_tools is not None:
             tools = request_tools
+        tools = output_budget_tools(tools, context)
         overhead = count_tokens_approximately(fixed, tools=tools, use_usage_metadata_scaling=False)
         input_budget = effective_input_budget(self.model, self.input_budget, capacity)
         before = count_tokens_approximately(conversation, use_usage_metadata_scaling=False)
@@ -400,15 +407,18 @@ class SafeSummarizationMiddleware(SummarizationMiddleware):
         return {**update, "messages": [replacements[0], *systems, summary, *retained]}
 
 
-class ContextBudgetMiddleware(AgentMiddleware):
+class ContextBudgetMiddleware(AgentMiddleware[AgentState[object], ContextT]):
     """Prepare one system prefix and reject oversized requests without losing history."""
 
     def __init__(self, max_tokens: int, summarizer: SafeSummarizationMiddleware | None = None) -> None:
         self.max_tokens = max_tokens
         self.summarizer = summarizer
 
-    async def awrap_tool_call(self, request: ToolCallRequest, handler: Any) -> Any:
-        context = request.runtime.context
+    async def awrap_tool_call(
+        self, request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[str]]],
+    ) -> ToolMessage | Command[str]:
+        context = cast("_RunContext", request.runtime.context)
         if request.tool_call["name"] == "delegate" and self.summarizer is not None and context.result_budget is None:
             # Resuming an approval can enter ToolNode without a model call in
             # this process. Recompute estimates from the model configuration;
@@ -418,20 +428,20 @@ class ContextBudgetMiddleware(AgentMiddleware):
             context.context_capacity = capacity
             fixed = [SystemMessage(self.summarizer.system_prompt)] if self.summarizer.system_prompt else []
             overhead = count_tokens_approximately(
-                fixed, tools=self.summarizer.budget_tools, use_usage_metadata_scaling=False,
+                fixed, tools=output_budget_tools(self.summarizer.budget_tools, context), use_usage_metadata_scaling=False,
             )
             context.result_budget = (effective_input_budget(model, self.max_tokens, capacity), overhead)
         return await handler(request)
 
     async def awrap_model_call(
         self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+        request: ModelRequest[ContextT],
+        handler: Callable[[ModelRequest[ContextT]], Awaitable[ModelResponse]],
     ) -> ModelResponse | ExtendedModelResponse:
         return await self._call(request, handler, allow_recovery=True)
 
     async def _compact_request(
-        self, request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+        self, request: ModelRequest[ContextT], handler: Callable[[ModelRequest[ContextT]], Awaitable[ModelResponse]],
         capacity: ContextCapacity, *, force: bool, reason: str,
     ) -> ExtendedModelResponse | None:
         """Use the same native summary and checkpoint update at the final request boundary.
@@ -460,14 +470,14 @@ class ContextBudgetMiddleware(AgentMiddleware):
             )
         except asyncio.CancelledError:
             if hasattr(request.runtime.context, "compaction_receipt"):
-                request.runtime.context.compaction_receipt = None
+                cast("_RunContext", request.runtime.context).compaction_receipt = None
             await _emit(request.runtime.context, "context.compaction.skipped", {
                 "reason": "cancelled", "message": "任务已停止，压缩结果未提交。",
             })
             raise
         except Exception as exc:
             if hasattr(request.runtime.context, "compaction_receipt"):
-                request.runtime.context.compaction_receipt = None
+                cast("_RunContext", request.runtime.context).compaction_receipt = None
             await _emit(request.runtime.context, "context.compaction.failed", {
                 "error_type": type(exc).__name__, "reason": getattr(exc, "reason", ""),
                 "message": str(exc) if isinstance(exc, ContextBudgetExceeded)
@@ -476,7 +486,7 @@ class ContextBudgetMiddleware(AgentMiddleware):
             raise
 
     async def _call(
-        self, request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]], *,
+        self, request: ModelRequest[ContextT], handler: Callable[[ModelRequest[ContextT]], Awaitable[ModelResponse]], *,
         allow_recovery: bool,
     ) -> ModelResponse | ExtendedModelResponse:
         # Recovery notices (including old checkpoints/imported history) are
@@ -505,8 +515,9 @@ class ContextBudgetMiddleware(AgentMiddleware):
             messages.insert(0, request.system_message)
         # Historical usage describes the pre-compaction prompt. Scaling this
         # rewritten input by those counters would falsely reject a short summary.
-        estimated = count_tokens_approximately(messages, tools=request.tools, use_usage_metadata_scaling=False)
-        context: Any = request.runtime.context
+        context = cast("_RunContext | ChildContext | None", request.runtime.context)
+        budget_tools = output_budget_tools(request.tools, context)
+        estimated = count_tokens_approximately(messages, tools=budget_tools, use_usage_metadata_scaling=False)
         capacity = getattr(context, "context_capacity", None)
         # Parent compaction has just fetched the window. Children have no
         # summarizer, so resolve their own model rather than inheriting it.
@@ -533,7 +544,7 @@ class ContextBudgetMiddleware(AgentMiddleware):
         if memory["included_count"]:
             outbound = [*([request.system_message] if request.system_message is not None else []), *projected]
             projected_tokens = count_tokens_approximately(
-                outbound, tools=request.tools, use_usage_metadata_scaling=False,
+                outbound, tools=budget_tools, use_usage_metadata_scaling=False,
             )
             if projected_tokens <= input_budget:
                 memory["estimated_tokens"] = max(0, projected_tokens - estimated)
@@ -545,7 +556,7 @@ class ContextBudgetMiddleware(AgentMiddleware):
                 memory.update(included_count=0, ids=[], estimated_tokens=0)
         if context is not None and hasattr(context, "result_budget"):
             history = count_tokens_approximately(request.messages, use_usage_metadata_scaling=False)
-            context.result_budget = (input_budget, max(0, estimated - history))
+            cast("_RunContext", context).result_budget = (input_budget, max(0, estimated - history))
         call_id = f"call_{uuid.uuid4().hex}"
         await _publish_context(context, request.model, capacity, self.max_tokens, estimated,
                                call_id=call_id, memory=memory)

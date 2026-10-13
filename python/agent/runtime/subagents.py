@@ -1,21 +1,24 @@
 """Run isolated read-only investigations within the parent's quota and task scope."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
-from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolCallRequest
+from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse, ToolCallRequest
 from langchain.tools import ToolRuntime
 from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately
 from langchain_core.tools import StructuredTool
+from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from agent.errors import UserFacingError, public_error
@@ -23,6 +26,9 @@ from agent.models.context_capacity import ContextCapacity
 from agent.models.reasoning import split_thinking
 from agent.runtime.context import ContextBudgetMiddleware, summary_target_tokens
 from agent.tools.base import BaseTool, ExecutionContext, ToolResult
+
+if TYPE_CHECKING:
+    from agent.runtime.langgraph_runtime import LangGraphRuntime, RuntimeRunRequest, _RunContext
 
 READ_TOOLS = frozenset({"file_read", "glob", "grep"})
 CHILD_TAG = "maigokite:subagent"
@@ -40,9 +46,9 @@ class DelegateArgs(BaseModel):
 
 @dataclass(slots=True)
 class ChildContext:
-    parent: Any
+    parent: _RunContext
     subagent_id: str
-    request: Any
+    request: RuntimeRunRequest
     execution_metadata: dict[str, Any]
     model_info: dict[str, Any]
     scope: asyncio.TaskGroup | None = None
@@ -50,11 +56,11 @@ class ChildContext:
     result_token_limit: int = 0
 
     @property
-    def adapter(self) -> Any:
+    def adapter(self) -> LangGraphRuntime:
         return self.parent.adapter
 
 
-class _ReadOnlyTools(AgentMiddleware):
+class _ReadOnlyTools(AgentMiddleware[AgentState[object], ChildContext]):
     @staticmethod
     async def refresh_authority(child: ChildContext) -> None:
         adapter, parent = child.adapter, child.parent
@@ -79,28 +85,35 @@ class _ReadOnlyTools(AgentMiddleware):
             raise DelegationError("父任务已结束或中断，子 Agent 不再执行。")
 
     async def awrap_model_call(
-        self, request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+        self, request: ModelRequest[ChildContext],
+        handler: Callable[[ModelRequest[ChildContext]], Awaitable[ModelResponse]],
     ) -> ModelResponse:
         await self.refresh_authority(request.runtime.context)
         enabled = request.runtime.context.execution_metadata["enabled_tools"]
         return await handler(request.override(tools=[tool for tool in request.tools if getattr(tool, "name", "") in enabled]))
 
-    async def awrap_tool_call(self, request: ToolCallRequest, handler: Any) -> Any:
+    async def awrap_tool_call(
+        self, request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[str]]],
+    ) -> ToolMessage | Command[str]:
         # A child owns its reads. Drain them before returning a failed/timed-out
         # delegation; the parent root scope still owns the entire delegation.
-        async def read() -> Any:
+        async def read() -> ToolMessage | Command[str]:
             try:
                 return await self._read(request, handler)
             except Exception as exc:
                 return ToolMessage(content=public_error(exc), tool_call_id=request.tool_call["id"], status="error")
 
-        child = request.runtime.context
+        child = cast(ChildContext, request.runtime.context)
         if child.scope is None:
             raise RuntimeError("subagent requires an active task scope")
         return await child.scope.create_task(read())
 
-    async def _read(self, request: ToolCallRequest, handler: Any) -> Any:
-        child: ChildContext = request.runtime.context
+    async def _read(
+        self, request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[str]]],
+    ) -> ToolMessage | Command[str]:
+        child = cast(ChildContext, request.runtime.context)
         adapter, parent = child.adapter, child.parent
         # Re-check revocation and the actual workspace on every read, including replay.
         await self.refresh_authority(child)
@@ -114,7 +127,10 @@ class _ReadOnlyTools(AgentMiddleware):
             **child.execution_metadata,
             "sandbox_mode": decision.sandbox_mode, "allow_network": decision.allow_network,
         })
-        request = replace(request, runtime=replace(request.runtime, context=authority))
+        # ToolCallRequest's upstream field defaults to a None context, while
+        # create_agent injects the ChildContext declared in context_schema.
+        runtime = replace(cast(ToolRuntime[ChildContext], request.runtime), context=authority)
+        request = replace(request, runtime=cast(ToolRuntime[None], runtime))
         await adapter._emit(parent, "subagent.progress", {
             "subagent_id": child.subagent_id, "tool_name": call["name"], "arguments": decision.arguments,
             **child.model_info,
@@ -131,7 +147,7 @@ class _ReadOnlyTools(AgentMiddleware):
 def create_readonly_agent(model: Any, specs: Any, input_budget: int, max_calls: int) -> Any:
     middleware: list[AgentMiddleware[Any, Any, Any]] = [
         ModelCallLimitMiddleware(thread_limit=min(4, max_calls), exit_behavior="error"),
-        _ReadOnlyTools(), ContextBudgetMiddleware(input_budget),
+        _ReadOnlyTools(), ContextBudgetMiddleware[ChildContext](input_budget),
     ]
     if isinstance(model, ChatAnthropic):
         middleware.append(AnthropicPromptCachingMiddleware())
@@ -180,8 +196,8 @@ class DelegateTool(BaseTool):
     def to_langchain_tool(self) -> StructuredTool:
         # Keep real ToolRuntime annotations: current StructuredTool preserves
         # injected arguments by inspecting the function signature, not strings.
-        async def invoke(task: str, runtime: ToolRuntime, model_id: str = "", label: str = "") -> ToolMessage:
-            parent = runtime.context
+        async def invoke(task: str, runtime: ToolRuntime[object], model_id: str = "", label: str = "") -> ToolMessage:
+            parent = cast("_RunContext", runtime.context)
             if self.graph is None or parent.child_scope is None or parent.terminal_emitted:
                 raise ValueError("子 Agent 执行入口不可用。")
             # The product middleware registers this entire invocation (including
@@ -192,8 +208,8 @@ class DelegateTool(BaseTool):
             coroutine=invoke, name=self.name, description=self.description, args_schema=DelegateArgs,
         )
 
-    async def _run(self, task: str, runtime: ToolRuntime, model_id: str, label: str) -> ToolMessage:
-        parent = runtime.context
+    async def _run(self, task: str, runtime: ToolRuntime[object], model_id: str, label: str) -> ToolMessage:
+        parent = cast("_RunContext", runtime.context)
         adapter = parent.adapter
         call_id = str(runtime.tool_call_id)
         selected = dict(self.model_info) if not model_id or model_id == self.model_info.get("model_id") else {}
@@ -350,8 +366,8 @@ class ListSubagentModelsTool(BaseTool):
         raise ValueError("model discovery requires a running LangGraph task")
 
     def to_langchain_tool(self) -> StructuredTool:
-        async def invoke(runtime: ToolRuntime, model_id: str = "") -> ToolMessage:
-            parent = runtime.context
+        async def invoke(runtime: ToolRuntime[object], model_id: str = "") -> ToolMessage:
+            parent = cast("_RunContext", runtime.context)
             catalog = await parent.adapter.model_catalog(parent.request.workspace_id) if parent.adapter.model_catalog else []
             # Empty allowlist means parent model only, never all configured models.
             available = {item["model_id"]: item for item in catalog if item["model_id"] in parent.subagent_model_ids}

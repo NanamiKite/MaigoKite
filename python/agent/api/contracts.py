@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from agent.errors import UserFacingError
+from agent.structured_output import validate_output_schema
+
+if TYPE_CHECKING:
+    from agent.models.runtime import ChatModelSettings
 
 Principal = "local-user"
 PermissionMode = Literal["read_only", "workspace", "workspace_auto", "full_access", "danger_full_access"]
@@ -59,6 +63,12 @@ class Attachment(Input):
 class SendMessage(Input):
     content: str = Field(min_length=1, max_length=10000)
     attachments: list[Attachment] = Field(default_factory=list, max_length=100)
+    output_schema: dict[str, Any] | None = None
+
+    @field_validator("output_schema")
+    @classmethod
+    def check_output_schema(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        return validate_output_schema(value)
 
 
 class TaskInput(Input):
@@ -102,7 +112,7 @@ class ModelInput(Input):
     api_key: str = Field(default="", max_length=8192, repr=False)
     credential_source_id: str = Field(default="", max_length=86)
 
-    def settings(self):
+    def settings(self) -> ChatModelSettings:
         from agent.models.runtime import ChatModelSettings
         result = ChatModelSettings.from_dict(self.model_dump(exclude={"api_key", "credential_source_id"}))
         result.validate()
@@ -215,6 +225,8 @@ def conversation(item: dict[str, Any]) -> dict[str, Any]:
 def task(item: dict[str, Any]) -> dict[str, Any]:
     value = fields(item, "id workspace_id conversation_id title status input_text last_error version created_at updated_at")
     value["subagent_model_ids"] = json.loads(item.get("subagent_model_ids_json") or "[]")
+    value["output_mode"] = "json_schema" if item.get("output_schema_json") else "text"
+    value["result_ready"] = item.get("status") == "succeeded" and bool(item.get("output_result_json"))
     return value
 
 

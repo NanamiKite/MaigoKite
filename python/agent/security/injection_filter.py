@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
 import re
+from typing import cast
 
 
 class InjectionFilter:
@@ -22,9 +22,9 @@ class InjectionFilter:
             raise ValueError("input contains a NUL byte")
         return input_text
 
-    def sanitize_arguments(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    def sanitize_arguments(self, arguments: dict[str, object]) -> dict[str, object]:
         """Sanitize tool arguments."""
-        def visit(value: Any) -> Any:
+        def visit(value: object) -> object:
             if isinstance(value, str):
                 return self.sanitize_input(value)
             if isinstance(value, list):
@@ -32,7 +32,7 @@ class InjectionFilter:
             if isinstance(value, dict):
                 return {str(key): visit(item) for key, item in value.items()}
             return value
-        return visit(arguments)
+        return cast(dict[str, object], visit(arguments))
 
     def detect_shell_injection(self, input_text: str) -> bool:
         """Check if input contains potential shell injection patterns."""

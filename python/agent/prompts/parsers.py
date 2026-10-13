@@ -9,9 +9,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
 from langchain_core.output_parsers import PydanticOutputParser
-
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -86,7 +85,7 @@ class PlanOutput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class ToolCallOutputParser(PydanticOutputParser):
+class ToolCallOutputParser(PydanticOutputParser[ToolCall]):
     """Parser that produces a single :class:`ToolCall` from LLM output.
 
     Example usage::
@@ -103,7 +102,7 @@ class ToolCallOutputParser(PydanticOutputParser):
         super().__init__(pydantic_object=ToolCall)
 
 
-class PlanOutputParser(PydanticOutputParser):
+class PlanOutputParser(PydanticOutputParser[PlanOutput]):
     """Parser that produces a :class:`PlanOutput` from LLM output.
 
     Example usage::

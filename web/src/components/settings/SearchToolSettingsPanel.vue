@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { useSettingsStore } from '@/stores/settings'
 import SecretField from '@/components/common/SecretField.vue'
 import Pulse from '@/components/shell/Pulse.vue'
+import CollapseCard from '@/components/common/CollapseCard.vue'
 import { t } from '@/i18n'
 import { confirmAction } from '@/utils/confirm-action'
 const settings = useSettingsStore()
+const route = useRoute()
 const tavilyKey = ref(''),
   googleKey = ref(''),
   googleCx = ref(''),
@@ -13,6 +16,7 @@ const tavilyKey = ref(''),
 const feedback = ref<Record<string, string>>({}),
   errors = ref<Record<string, string>>({})
 const failedAction = ref<Record<string, 'save' | 'remove'>>({})
+const hasError = computed(() => Object.values(errors.value).some(Boolean))
 const tavilyConfigured = computed(() => settings.credentials.tavily?.configured === true)
 const googleConfigured = computed(() => settings.credentials.google?.configured === true)
 async function save(service: 'tavily' | 'google') {
@@ -58,33 +62,37 @@ async function remove(service: 'tavily' | 'google') {
 }
 </script>
 <template>
-  <section
+  <CollapseCard
     class="search-settings settings-panel"
     data-settings-field="search-tools"
+    variant="settings"
+    :title="$t('联网搜索')"
+    icon="search"
+    :default-expanded="route.query.field === 'search-tools'"
   >
-    <header class="panel-heading">
-      <h2>{{ $t('联网搜索') }}</h2>
-    </header>
-    <p class="panel-copy">
-      {{ $t('已配置的搜索服务优先使用。') }}
-    </p>
+    <template v-if="busyService || hasError" #summary>
+      <Pulse :state="busyService ? 'acting' : 'error'" />
+      <span>{{ busyService ? $t('正在保存…') : $t('操作失败') }}</span>
+    </template>
     <article class="search-service">
       <header>
         <Pulse state="idle" /><strong>DuckDuckGo</strong><span>{{ $t('无需配置') }}</span>
       </header>
     </article>
-    <article
+    <CollapseCard
       v-for="service in ['tavily', 'google'] as const"
       :key="service"
-      class="search-service"
+      class="search-provider"
+      variant="settings"
+      icon="key"
+      :title="service === 'tavily' ? 'Tavily' : 'Google Programmable Search'"
+      :default-expanded="route.query.field === 'search-tools'"
     >
-      <header>
-        <Pulse :state="busyService === service ? 'acting' : 'idle'" /><strong>{{
-          service === 'tavily' ? 'Tavily' : 'Google Programmable Search'
-        }}</strong><span>{{
-          (service === 'tavily' ? tavilyConfigured : googleConfigured) ? $t('已配置') : $t('未配置')
+      <template #summary>
+        <Pulse :state="errors[service] ? 'error' : busyService === service ? 'acting' : 'idle'" /><span>{{
+          errors[service] ? $t('操作失败') : (service === 'tavily' ? tavilyConfigured : googleConfigured) ? $t('已配置') : $t('未配置')
         }}</span>
-      </header>
+      </template>
       <form
         class="search-form credential-form"
         :class="{ 'google-form': service === 'google' }"
@@ -149,17 +157,14 @@ async function remove(service: 'tavily' | 'google') {
           </button>
         </p>
       </form>
-    </article>
-  </section>
+    </CollapseCard>
+  </CollapseCard>
 </template>
 <style scoped lang="scss">
 .search-service {
-  padding-block: var(--space-6);
-  border-bottom: var(--hairline) solid var(--rule);
+  padding-bottom: var(--space-4);
 }
-.search-service:last-child {
-  border-bottom: 0;
-}
+.search-provider + .search-provider { margin-top: var(--space-4); }
 .search-service header {
   display: flex;
   flex-wrap: wrap;
@@ -175,7 +180,6 @@ async function remove(service: 'tavily' | 'google') {
 .search-form {
   display: grid;
   gap: var(--space-4);
-  margin-top: var(--space-4);
 }
 .search-form label {
   display: grid;

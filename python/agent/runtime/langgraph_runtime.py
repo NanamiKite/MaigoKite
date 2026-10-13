@@ -25,7 +25,14 @@ from langchain.agents.middleware import (
     TodoListMiddleware,
 )
 from langchain.agents.middleware.human_in_the_loop import InterruptOnConfig
-from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolCallRequest
+from langchain.agents.middleware.types import (
+    AgentState,
+    ExtendedModelResponse,
+    ModelRequest,
+    ModelResponse,
+    ToolCallRequest,
+)
+from langchain.agents.structured_output import StructuredOutputError, ToolStrategy
 from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -43,15 +50,24 @@ from langchain_core.tools import StructuredTool
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.errors import GraphInterrupt
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
+from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
+from langgraph.typing import ContextT
 
-from agent.errors import UserFacingCancellation, public_error
+from agent.errors import UserFacingCancellation, UserFacingError, public_error
 from agent.models.context_capacity import ContextCapacity
 from agent.models.reasoning import ThinkTagStream, split_thinking, visible_reasoning
 from agent.repository import ConversationBusyError, SQLiteRepository
-from agent.safety import SafetyReviewError, SafetyReviewInput, SafetyReviewResult, SafetyReviewer, skipped_review
 from agent.runtime.context import ContextBudgetMiddleware, SafeSummarizationMiddleware
 from agent.runtime.subagents import CHILD_TAG, ChildContext, DelegateTool, ListSubagentModelsTool, create_readonly_agent
+from agent.safety import SafetyReviewer, SafetyReviewError, SafetyReviewInput, SafetyReviewResult, skipped_review
+from agent.structured_output import (
+    OUTPUT_TOOL_NAME,
+    StructuredResultError,
+    response_schema,
+    validate_output_schema,
+    validated_result_json,
+)
 from agent.tools.base import BaseTool
 from agent.tools.native.file_read import FileReadTool
 from agent.tools.native.file_write import FileWriteTool
@@ -82,6 +98,7 @@ class RuntimeRunRequest:
     permission_mode: str = "read_only"
     trace_id: str = ""
     request_hash: str = ""
+    output_schema: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,7 +191,7 @@ class _RunContext:
     compaction_receipt: tuple[str, dict[str, Any]] | None = None
 
 
-class _ProductToolMiddleware(AgentMiddleware):
+class _ProductToolMiddleware(AgentMiddleware[AgentState[object], _RunContext]):
     """Map official tool execution callbacks to MaigoKite product concerns."""
 
     async def abefore_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
@@ -193,7 +210,8 @@ class _ProductToolMiddleware(AgentMiddleware):
         await runtime.context.adapter._refresh_execution_metadata(runtime.context)
 
     async def awrap_model_call(
-        self, request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+        self, request: ModelRequest[_RunContext],
+        handler: Callable[[ModelRequest[_RunContext]], Awaitable[ModelResponse]],
     ) -> ModelResponse:
         context = request.runtime.context
         if context.direct_tool is not None:
@@ -214,6 +232,14 @@ class _ProductToolMiddleware(AgentMiddleware):
         if context.max_subagent_calls == 0:
             request = request.override(tools=[tool for tool in request.tools if getattr(tool, "name", "") not in {"delegate", "list_subagent_models"}])
         response = await handler(request)
+        if context.request.output_schema is not None:
+            result = response.model_response if isinstance(response, ExtendedModelResponse) else response
+            if result.structured_response is not None:
+                if any(call["name"] != OUTPUT_TOOL_NAME
+                       for message in result.result if isinstance(message, AIMessage)
+                       for call in message.tool_calls):
+                    raise StructuredResultError("最终结果不能与尚未执行的工具一起提交；未保存工作流结果。")
+                validated_result_json(context.request.output_schema, result.structured_response)
         # A budget rejection or failed/cancelled request is not a confirmed
         # consumption receipt. A successful model response confirms this input;
         # remote consumption after a lost response remains deliberately unknown.
@@ -261,11 +287,12 @@ class _ProductToolMiddleware(AgentMiddleware):
             return await context.adapter._execute_product_tool_call(request, handler)
 
 
-class _PromptSafetyMiddleware(AgentMiddleware):
+class _PromptSafetyMiddleware(AgentMiddleware[AgentState[object], _RunContext]):
     """Review newly visible human prompt text immediately before a model call."""
 
     async def awrap_model_call(
-            self, request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+            self, request: ModelRequest[_RunContext],
+            handler: Callable[[ModelRequest[_RunContext]], Awaitable[ModelResponse]],
     ) -> ModelResponse:
             context = request.runtime.context
             adapter = context.adapter
@@ -467,7 +494,12 @@ class LangGraphRuntime:
             self._readonly_graphs[key] = create_readonly_agent(model, self.tool_specs, self.context_max_tokens, self.max_model_calls)
         return self._readonly_graphs[key]
 
-    def _create_graph(self, model: BaseChatModel, model_info: dict[str, Any] | None = None) -> Any:
+    def _create_graph(
+        self, model: BaseChatModel, model_info: dict[str, Any] | None = None,
+        *, output_schema: dict[str, Any] | None = None,
+    ) -> Any:
+        if output_schema is not None and OUTPUT_TOOL_NAME in self._specs_by_name:
+            raise UserFacingError("工具名称与结构化结果保留名称冲突，请停用同名扩展。")
         child = create_readonly_agent(model, self.tool_specs, self.context_max_tokens, self.max_model_calls)
         info = {**(model_info or {}), "model": getattr(model, "model_name", None) or getattr(model, "model", "")}
         runtime_tools = [DelegateTool(child, info).to_langchain_tool() if spec.tool.name == "delegate"
@@ -477,7 +509,7 @@ class LangGraphRuntime:
             spec.tool.name: InterruptOnConfig(
                 allowed_decisions=["approve", "reject"],
                 when=self._should_interrupt,
-                description=cast(Any, self._approval_description),
+                description=self._approval_description,
             )
             for spec in self.tool_specs
         }
@@ -509,7 +541,7 @@ class LangGraphRuntime:
             HumanInTheLoopMiddleware(interrupt_on),
             _ProductToolMiddleware(),
             _PromptSafetyMiddleware(),
-            ContextBudgetMiddleware(self.context_max_tokens, summarizer),
+            ContextBudgetMiddleware[_RunContext](self.context_max_tokens, summarizer),
         ]
         if isinstance(model, ChatAnthropic):
             middleware.append(AnthropicPromptCachingMiddleware())
@@ -520,6 +552,10 @@ class LangGraphRuntime:
             middleware=middleware,
             checkpointer=self._checkpointer,
             context_schema=_RunContext,
+            response_format=ToolStrategy(
+                response_schema(output_schema), handle_errors=False,
+                tool_message_content="Final structured task result captured.",
+            ) if output_schema is not None else None,
             name="maigokite-langgraph-runtime",
         )
 
@@ -582,8 +618,16 @@ class LangGraphRuntime:
 
     async def _graph_for(self, request: RuntimeRunRequest) -> Any:
         self._require_open()
+        schema = request.output_schema
+        if schema is None and request.task_id:
+            try:
+                task = await self.repository.get_task(request.workspace_id, request.task_id)
+            except KeyError:
+                pass  # A new turn has not committed its task yet.
+            else:
+                schema = json.loads(task["output_schema_json"]) if task.get("output_schema_json") else None
         if self.model is not None:
-            return self._graphs["fixed"]
+            return self._create_graph(self.model, output_schema=schema) if schema is not None else self._graphs["fixed"]
         assert self.model_resolver is not None
         conversation = await self.repository.get_conversation(
             request.workspace_id, request.conversation_id
@@ -594,12 +638,16 @@ class LangGraphRuntime:
         )
         self._require_open()
         graph = self._graphs.get(key)
-        if graph is None:
+        if graph is None or schema is not None:
             catalog = await self.model_catalog(request.workspace_id) if self.model_catalog else []
             info = next((item for item in catalog if item["model_id"] == conversation.get("model_id")), {})
             if not conversation.get("model_id"):
                 info = next((item for item in catalog if item.get("is_default")), {})
-            graph = self._create_graph(model, info)
+            graph = self._create_graph(model, info, output_schema=schema)
+            if schema is not None:
+                # Schemas are per-task inputs. Do not retain one compiled graph
+                # for every user schema in the shared model cache.
+                return graph
             self._graphs[key] = graph
         return graph
 
@@ -664,8 +712,8 @@ class LangGraphRuntime:
             "reason": result.reason,
         })
 
-    def _should_interrupt(self, tool_request: Any) -> bool:
-        context = tool_request.runtime.context
+    def _should_interrupt(self, tool_request: ToolCallRequest) -> bool:
+        context = cast(_RunContext, tool_request.runtime.context)
         if context.review_call_ids and any(
             call["id"] in context.review_call_ids for call in context.latest_tool_calls
         ):
@@ -679,11 +727,13 @@ class LangGraphRuntime:
         )
         return decision.outcome == "approval_required"
 
-    def _approval_description(self, tool_call: dict[str, Any], _state: Any, runtime: Any) -> str:
+    def _approval_description(
+        self, tool_call: NativeToolCall, state: AgentState[object], runtime: Runtime[ContextT],
+    ) -> str:
         decision = self._policy_decision(
             str(tool_call["name"]),
             dict(tool_call.get("args") or {}),
-            runtime.context,
+            cast(_RunContext, runtime.context),
         )
         return (
             f"{decision.reason}\n"
@@ -698,6 +748,9 @@ class LangGraphRuntime:
     ) -> RunHandle:
         self._require_open()
         requested = request or RuntimeRunRequest()
+        requested = replace(requested, output_schema=validate_output_schema(requested.output_schema))
+        if requested.output_schema is not None and prompt.startswith("/tool "):
+            raise UserFacingError("结构化输出需要模型完成最终结果，不能与直接 /tool 命令合用。")
         await self.repository.ensure_workspace(
             requested.workspace_id,
             requested.workspace_id,
@@ -785,6 +838,7 @@ class LangGraphRuntime:
         await self.repository.start_chat_turn(
             actual.task_id, actual.workspace_id, actual.conversation_id, prompt, actual.request_hash,
             model_call_limit=self.max_model_calls,
+            output_schema=actual.output_schema,
         )
         messages.append({"role": "user", "content": prompt})
         try:
@@ -793,7 +847,8 @@ class LangGraphRuntime:
                 actual,
                 graph=graph,
                 initial_events=[
-                    ("task.started", {"trace_id": actual.trace_id, "input_text": prompt}),
+                    ("task.started", {"trace_id": actual.trace_id, "input_text": prompt,
+                                      "output_mode": "json_schema" if actual.output_schema is not None else "text"}),
                     ("context.history", {"source": history_source, "previous_task_id": previous["id"] if previous else None,
                                          "execution_resumed": False}),
                 ],
@@ -946,21 +1001,24 @@ class LangGraphRuntime:
             if not await self.has_checkpoint(task_id):
                 raise ValueError("no execution checkpoint is available for this task")
             graph = await self._graph_for(request)
+            result_only = False
             if version is not None:
                 conversation = await self.repository.get_conversation(workspace_id, request.conversation_id)
                 if conversation.get("archived"):
                     raise ValueError("archived conversations cannot resume execution")
                 snapshot = await graph.aget_state({"configurable": {"thread_id": task_id}})
-                if not snapshot.next and not snapshot.interrupts:
+                result_only = (bool(task.get("output_schema_json")) and "structured_response" in snapshot.values
+                               and not snapshot.next and not snapshot.interrupts)
+                if not snapshot.next and not snapshot.interrupts and not result_only:
                     raise ValueError("checkpoint has no unfinished execution; send a new message")
                 direct = self._direct_tool_call(str(task["input_text"]), task_id)
                 if direct is not None and direct["name"] not in {"file_read", "file_write"}:
                     raise ValueError("direct command recovery supports only file_read/file_write")
-                # Initial production recovery is deliberately file-only. Inspect
-                # native retained history, not a truncated UI projection. This
-                # may reject a turn that inherited earlier non-file tool calls.
-                if any(
-                    call["name"] not in {"file_read", "file_write"}
+                # Execution replay stays file-only. A finished structured
+                # checkpoint needs only its product result committed and never
+                # re-executes the historical tools, regardless of their kinds.
+                if not result_only and any(
+                    call["name"] not in {"file_read", "file_write", OUTPUT_TOOL_NAME}
                     for message in snapshot.values.get("messages", []) if isinstance(message, AIMessage)
                     for call in message.tool_calls
                 ):
@@ -973,7 +1031,8 @@ class LangGraphRuntime:
                     await self.repository.resume_interrupted_task(workspace_id, task_id, version)
                 admitted = True
                 return await self._launch(None, request, graph=graph, initial_events=[
-                    ("task.resumed", {"trace_id": trace_id, "execution_resumed": True,
+                    ("task.resumed", {"trace_id": trace_id, "execution_resumed": not result_only,
+                                      "result_projection_only": result_only,
                                       "principal_id": principal_id, "previous_version": task["version"]}),
                 ])
             except asyncio.CancelledError:
@@ -1091,6 +1150,11 @@ class LangGraphRuntime:
             else:
                 raise RuntimeError(f"task is already running: {request.task_id}")
         product_task = await self.repository.get_task(request.workspace_id, request.task_id)
+        # Approval/question/crash resumes use the original immutable contract,
+        # not caller metadata or a later conversation setting.
+        request = replace(request, output_schema=(
+            json.loads(product_task["output_schema_json"]) if product_task.get("output_schema_json") else None
+        ))
         cancelled = product_task["status"] == "cancelled"
         queue: asyncio.Queue[MaigoKiteEvent | object] = asyncio.Queue()
         context = _RunContext(self, request, queue)
@@ -1159,10 +1223,15 @@ class LangGraphRuntime:
                     name for name in context.execution_metadata.get("enabled_tools", self._specs_by_name)
                     if name not in {"delegate", "list_subagent_models"}
                 ]
+            run_graph = True
             if graph_input is None:
                 snapshot = await graph.aget_state(config)
                 if not snapshot.values:
                     raise RuntimeError("runtime checkpoint is missing; the decision is saved but execution cannot resume")
+                # A crash can follow the final checkpoint but precede the
+                # product-result transaction. Only project that finished state;
+                # do not invoke the graph or repeat completed tools.
+                run_graph = bool(snapshot.next or snapshot.interrupts)
                 if snapshot.interrupts:
                     message = next(
                         (
@@ -1189,32 +1258,47 @@ class LangGraphRuntime:
                         return
             # Scope exits (including cancellation cleanup) before any parent
             # terminal status is published. No detached child task survives it.
-            async with asyncio.TaskGroup() as children:
-                context.child_scope = children
-                async with aclosing(graph.astream(
-                    graph_input,
-                    config=config,
-                    context=context,
-                    stream_mode=["messages", "updates", "checkpoints"],
-                    durability="sync",
-                    version="v2",
-                )) as stream:
-                    # Close the generator even if cancellation/error occurs in
-                    # event projection while LangGraph is suspended at yield.
-                    async for event in stream:
-                        await self._map_runtime_event(event, context)
-            if (await graph.aget_state(config)).interrupts:
+            if run_graph:
+                async with asyncio.TaskGroup() as children:
+                    context.child_scope = children
+                    async with aclosing(graph.astream(
+                        graph_input,
+                        config=config,
+                        context=context,
+                        stream_mode=["messages", "updates", "checkpoints"],
+                        durability="sync",
+                        version="v2",
+                    )) as stream:
+                        # Close the generator even if cancellation/error occurs in
+                        # event projection while LangGraph is suspended at yield.
+                        async for event in stream:
+                            await self._map_runtime_event(event, context)
+            snapshot = await graph.aget_state(config)
+            if snapshot.interrupts:
                 return
             await self._complete_reasoning(context)
             task = await self.repository.get_task(
                 context.request.workspace_id, context.request.task_id
             )
+            if context.request.output_schema is not None and task["status"] == "running":
+                if snapshot.next or "structured_response" not in snapshot.values:
+                    raise StructuredResultError("模型未产生完整的结构化结果；任务未保存可供后续步骤读取的结果。")
+                task, saved = await self.repository.complete_structured_task(
+                    context.request.workspace_id, context.request.task_id, snapshot.values["structured_response"],
+                )
+                if saved is not None:
+                    context.final_saved = True
+                    await self._emit(context, "message.completed", {"content": saved["content"], "message_id": saved["id"]})
             if str(task["status"]) == "cancelled":
                 await self._emit(
                     context,
                     "task.cancelled",
                     {"message": "Task cancelled"},
                 )
+            elif context.request.output_schema is not None:
+                if task["status"] != "succeeded":
+                    raise StructuredResultError("任务已停止或失败，没有可读取的结构化结果。")
+                await self._emit(context, "task.succeeded", {"result_ready": True, "output_mode": "json_schema"})
             else:
                 await self.repository.update_task_status(
                     context.request.task_id, "succeeded"
@@ -1242,6 +1326,8 @@ class LangGraphRuntime:
             # Keep a lone original error useful to users/inspection.
             while isinstance(exc, ExceptionGroup) and len(exc.exceptions) == 1:
                 exc = exc.exceptions[0]
+            if isinstance(exc, StructuredOutputError):
+                exc = StructuredResultError("模型返回的结构化结果不完整或包含多个结果；未保存工作流结果。")
             task = await self.repository.get_task(
                 context.request.workspace_id, context.request.task_id
             )
@@ -1249,6 +1335,10 @@ class LangGraphRuntime:
                 # A concurrent stop remains cancellation even if model/tool
                 # cleanup raised an error on its way out.
                 await self._emit(context, "task.cancelled", {"message": "Task cancelled"})
+            elif task["status"] == "succeeded":
+                # Event delivery failure cannot undo the atomic result commit.
+                # Clients can always reconcile through task/result queries.
+                await self._emit(context, "task.succeeded", {"result_ready": bool(task.get("output_result_json"))})
             else:
                 await self.repository.update_task_status(
                     context.request.task_id, "failed", public_error(exc)
@@ -1259,6 +1349,7 @@ class LangGraphRuntime:
                     {
                         "message": public_error(exc),
                         "error_type": type(exc).__name__,
+                        "error_code": "STRUCTURED_OUTPUT_INVALID" if isinstance(exc, StructuredResultError) else None,
                     },
                 )
         finally:
@@ -1397,7 +1488,7 @@ class LangGraphRuntime:
                     await self._record_tool_proposals(message, context)
                 else:
                     content = self._message_text(message)
-                    if content and not context.final_saved:
+                    if content and not context.final_saved and context.request.output_schema is None:
                         saved = await self.repository.append_message(
                             context.request.conversation_id,
                             "assistant",
@@ -1419,6 +1510,8 @@ class LangGraphRuntime:
             await self._project_text_delta(self._raw_message_text(message), context)
             return
         if isinstance(message, ToolMessage):
+            if context.request.output_schema is not None and message.name == OUTPUT_TOOL_NAME:
+                return
             call_id = str(message.tool_call_id or "")
             if not call_id or call_id in context.finished_tool_calls:
                 return
@@ -1478,6 +1571,10 @@ class LangGraphRuntime:
     ) -> None:
         context.latest_tool_calls = []
         for raw_call in message.tool_calls:
+            if context.request.output_schema is not None and raw_call.get("name") == OUTPUT_TOOL_NAME:
+                # LangChain's result binding is not a product capability and
+                # must not create an approval, tool audit row or execution event.
+                continue
             call: dict[str, Any] = {
                 "id": str(raw_call.get("id") or f"call_{uuid.uuid4().hex}"),
                 "name": str(raw_call.get("name") or ""),

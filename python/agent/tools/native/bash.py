@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, BinaryIO, Literal
 
 from pydantic import BaseModel, Field
 
@@ -98,12 +100,13 @@ class ExecCommandTool(BaseTool):
              "output_directory": str(workspace_root / ".maigokite" / "outputs")}
         )
         registry = context.metadata.get("process_registry")
-        def on_spawn(process, stdout, stderr, stop):
+        def on_spawn(process: asyncio.subprocess.Process, stdout: BinaryIO, stderr: BinaryIO,
+                     stop: Callable[[asyncio.subprocess.Process], Awaitable[None]]) -> None:
             if registry is not None:
                 registry.attach(context.step_id, str(context.metadata.get("workspace_id", "personal")),
                                 context.task_id, process, stdout, stderr, stop,
                                 interactive=bool(arguments.get("interactive", False)))
-        def on_exit():
+        def on_exit() -> None:
             if registry is not None:
                 registry.detach(context.step_id)
         try:

@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from agent.repository import SQLiteRepository
 from agent.skill_registry import SkillRegistry
 from agent.tools.base import ExecutionContext

@@ -45,12 +45,21 @@ jobs:
         id: dependencies
         run: uv sync --locked --extra dev --no-default-groups
       - name: Ruff
-        run: uv run --no-sync ruff check python/
+        id: ruff
+        shell: bash
+        run: |
+          mkdir -p test-results
+          uv run --no-sync ruff check python/ --output-format github | tee test-results/ruff.log
       - name: Mypy
+        id: mypy
         # Preserve every check's failure while still collecting the other results.
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: uv run --no-sync mypy python/agent
+        shell: bash
+        run: |
+          mkdir -p test-results
+          uv run --no-sync mypy python/agent --junit-xml test-results/mypy.xml | tee test-results/mypy.log
       - name: Python tests and runtime acceptance
+        id: tests
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         timeout-minutes: 15
         run: >-
@@ -58,12 +67,27 @@ jobs:
           --ignore=python/tests/spike/test_runtime_spike_live.py
           -ra --tb=short -o faulthandler_timeout=120
           --junitxml=test-results/python.xml
+      - name: Summarize Python checks
+        if: ${{ always() }}
+        env:
+          DEPENDENCIES_RESULT: ${{ steps.dependencies.outcome }}
+          RUFF_RESULT: ${{ steps.ruff.outcome }}
+          MYPY_RESULT: ${{ steps.mypy.outcome }}
+          TESTS_RESULT: ${{ steps.tests.outcome }}
+        shell: bash
+        run: |
+          printf '## Python checks\n\n| Check | Result |\n| --- | --- |\n| Dependencies | %s |\n| Ruff | %s |\n| Mypy | %s |\n| Pytest and acceptance | %s |\n\nDetails: Ruff file annotations and the python-test-report artifact.\n' \
+            "$DEPENDENCIES_RESULT" "$RUFF_RESULT" "$MYPY_RESULT" "$TESTS_RESULT" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Python test report
         if: ${{ always() }}
         uses: actions/upload-artifact@v7.0.2
         with:
           name: python-test-report
-          path: test-results/python.xml
+          path: |
+            test-results/python.xml
+            test-results/ruff.log
+            test-results/mypy.log
+            test-results/mypy.xml
           if-no-files-found: warn
           retention-days: 7
 

@@ -16,7 +16,7 @@ def with_compatible_cache_usage(metadata: UsageMetadata | None, provider: Any) -
     """
     if metadata is None or not isinstance(provider, dict):
         return metadata
-    details: dict[str, int] = dict(metadata.get("input_token_details") or {})
+    details: dict[str, object] = dict(metadata.get("input_token_details") or {})
     for source, target in (
         ("prompt_cache_hit_tokens", "cache_read"),
         ("prompt_cache_miss_tokens", "cache_miss"),

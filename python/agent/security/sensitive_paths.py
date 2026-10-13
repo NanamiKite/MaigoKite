@@ -4,6 +4,7 @@ This is a conservative path guard, not content DLP or a sandbox for arbitrary co
 """
 
 import os
+import sys
 from fnmatch import fnmatchcase
 from pathlib import Path
 
@@ -25,7 +26,7 @@ def validate_windows_path(path: str | Path) -> None:
     text = str(path)
     if "\x00" in text:
         raise ValueError("file paths must not contain NUL")
-    if os.name != "nt":
+    if sys.platform != "win32":
         return
     value = Path(text)
     # C:foo and \foo depend on a drive's current directory; neither identifies

@@ -10,10 +10,10 @@ checks confirm that concurrent requests keep their shared clients usable.
 """
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import AsyncExitStack, aclosing, asynccontextmanager
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, cast
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, AIMessageChunk
@@ -47,6 +47,9 @@ class OwnedStreamChatAnthropic(ChatAnthropic):
 
     async def astream(self, *args: Any, **kwargs: Any) -> AsyncIterator[AIMessageChunk]:
         async with _response_scope():
-            async with aclosing(super().astream(*args, **kwargs)) as chunks:
+            # BaseChatModel.astream is an async generator; its public annotation
+            # exposes only AsyncIterator, which omits the closing operation.
+            stream = cast(AsyncGenerator[AIMessageChunk], super().astream(*args, **kwargs))
+            async with aclosing(stream) as chunks:
                 async for chunk in chunks:
                     yield chunk

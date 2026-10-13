@@ -8,11 +8,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from agent.tools.native.file_write import FileWriteTool
 from langchain_core.messages import AIMessageChunk, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatGenerationChunk
 from pydantic import Field
 
-from agent.tools.native.file_write import FileWriteTool
 from tests.unit.test_langgraph_production import RuleModel, SerialWritesModel, make_langgraph_core
 
 
@@ -69,7 +69,7 @@ async def test_started_tool_keeps_snapshot_next_tool_requires_approval(tmp_path:
     async def gated_write(tool, context, arguments):
         name = Path(arguments["path"]).name
         executed.append(name)
-        if name == "first.txt" and not started.is_set():
+        if not started.is_set():
             started.set()
             before = context.metadata["permission_mode"]
             await release.wait()
@@ -82,21 +82,28 @@ async def test_started_tool_keeps_snapshot_next_tool_requires_approval(tmp_path:
         conversation = await core.create_conversation(title="tool boundary", permission_mode="workspace")
         work = asyncio.create_task(core.run("write twice", {"conversation_id": conversation["id"]}))
         await asyncio.wait_for(started.wait(), 3)
+        # ToolNode dispatches the batch concurrently; either write can acquire
+        # the product tool lock first. Gate the actual first tool, so the other
+        # remains unstarted when we revoke write access.
+        assert len(executed) == 1
+        first_name = executed[0]
+        next_name = "second.txt" if first_name == "first.txt" else "first.txt"
         await core.update_conversation_permission("personal", conversation["id"], "read_only")
         release.set()
         blocked = await asyncio.wait_for(work, 3)
-        assert observed == [("first.txt", "workspace", "workspace")]
-        assert (tmp_path / "first.txt").read_text() == "first"
-        assert not (tmp_path / "second.txt").exists()
+        assert observed == [(first_name, "workspace", "workspace")]
+        assert (tmp_path / first_name).read_text() == Path(first_name).stem
+        assert not (tmp_path / next_name).exists()
         assert blocked["status"] == "waiting_approval"
         approval = blocked["approval"]
-        assert approval["tool_call_id"] == "call-second-write"
+        assert approval["tool_call_id"] == f"call-{Path(next_name).stem}-write"
         result = await core.decide_approval(
             "personal", approval["approval_id"], "local-user", "allow", approval["version"],
         )
         assert result["status"] == "succeeded"
+        assert (tmp_path / "first.txt").read_text() == "first"
         assert (tmp_path / "second.txt").read_text() == "second"
-        assert executed == ["first.txt", "second.txt"]
+        assert executed == [first_name, next_name]
     finally:
         release.set()
         await core.shutdown()

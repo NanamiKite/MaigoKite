@@ -101,7 +101,7 @@ describe('InputBox', () => {
     await flushPromises()
     const dialog = document.querySelector('dialog[aria-label="选择对话模型"]') as HTMLDialogElement
     expect(dialog.open).toBe(true)
-    const option = [...dialog.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(item => item.textContent?.includes('other'))!
+    const option = dialog.querySelector<HTMLButtonElement>('[role="treeitem"][aria-level="2"][data-node-id="model-2"]')!
     expect(option).toBeDefined()
     option.click()
     await flushPromises()

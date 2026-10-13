@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import pytest
-
 from examples.code_analysis import analyze_python
 from examples.code_review import review_file
 from examples.document_summary import summarize_document
 from examples.search_summary import search_and_summarize
+
 from tests.fixtures.chat_model import FakeModel
 
 

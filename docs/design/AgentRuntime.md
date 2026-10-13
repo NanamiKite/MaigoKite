@@ -247,6 +247,15 @@ Ollama/OpenAI-compatible 不借用云端环境密钥。OpenAI/compatible、Ollam
 
 后续先选择一个真实个人流程：输入、交付物、审批位置、失败处理可验证后再实现。能用顺序技能完成的，不升级为工作流引擎。
 
+### 结构化任务结果（源码接入，未运行验收）
+
+- `SendMessage.output_schema → RuntimeRunRequest → create_agent(response_format=ToolStrategy(...))`，每任务单独编译图，沿用共享模型与客户端，不为每种用户 Schema 建永久图缓存。普通聊天、子 Agent 和摘要调用不默认开启该模式。
+- 复用 [LangChain 结构化输出](https://docs.langchain.com/oss/python/langchain/structured-output)，不实现 JSON 文本提取、Provider 协议或新的 Agent Loop。当前依赖对原始 JSON Schema 的结果只作解析，产品边界补用现有 `jsonschema` 实现完整约束校验；不使用 SDK 私有字段。Schema 开销计入现有上下文预算和压缩触发计算。
+- 官方内部结果工具使用保留名称，不经产品 ToolRegistry/PermissionPolicy，也不产生虚假审批或工具执行事件；其他真实工具仍逐次检查权限。结果不能与尚未执行的工具混在同次模型输出里提交，避免消费工具执行前的结论；错误直接使任务失败，不扩建纠错/重试引擎。
+- 最终提交只读取完成 checkpoint 的 `structured_response`，校验后由 Repository 原子保存结果、可见助手消息和任务成功。调用期间的流式文字不是工作流数据；下游读取 [任务结果接口](API.md#结构化任务结果)，不解析消息或事件拼接结果。
+- 准入冻结 Schema，审批/提问恢复使用同一契约；恢复最终 checkpoint 与产品投影之间的崩溃窗口时不调用图、不重放工具，只校验并补存结果。仍需继续执行的中断任务沿用文件读写恢复门限；新字段不扩大 MCP/浏览器重放能力。
+- 本批仅提供任务输入/结果契约，不增加工作流调度器、步骤自动串联、前端模式开关或新状态机。沿用现有调用预算、HITL、根 Task 取消和客户端所有权；真实 Provider 支持度及恢复/取消行为未在本批运行验收。
+
 ### 会话级子 Agent（多模型源码接入，修复后待验收）
 
 复用 [LangChain subagent-as-tool](https://docs.langchain.com/oss/python/langchain/multi-agent/subagents) 与 [LangGraph per-invocation 子图](https://docs.langchain.com/oss/python/langgraph/use-subgraphs)：`delegate → create_agent.ainvoke`，不另建 SubAgentManager、子任务状态机或 continuation。

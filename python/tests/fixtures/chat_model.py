@@ -9,7 +9,7 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 
 
 class FakeModel(BaseChatModel):
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "FakeModel":
+    def bind_tools(self, tools: Any, **kwargs: Any) -> FakeModel:
         return self
 
     def reply(self, messages: list[Any], **kwargs: Any) -> AIMessage:

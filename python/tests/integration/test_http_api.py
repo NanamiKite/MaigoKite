@@ -5,7 +5,6 @@ import json
 
 import httpx
 import pytest
-
 from agent.api.app import create_app
 
 API = "/api/v1/workspaces/personal"

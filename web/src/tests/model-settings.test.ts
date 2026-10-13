@@ -66,7 +66,7 @@ describe('model settings', () => {
     store.defaultModelId = cloudProfile.id
     const wrapper = mount(ModelSettingsPanel)
 
-    await wrapper.get('.profile-main').trigger('click')
+    await wrapper.get('button[aria-label="管理 Cloud 的模型"]').trigger('click')
 
     expect(wrapper.text()).toContain('密钥已保存')
     expect((wrapper.get('[data-testid="api-key"]').element as HTMLInputElement).value).toBe('')
@@ -95,7 +95,7 @@ describe('model settings', () => {
     store.defaultModelId = 'model_compatible'
     const wrapper = mount(ModelSettingsPanel)
 
-    await wrapper.get('.profile-main').trigger('click')
+    await wrapper.get('button[aria-label="管理 Compatible 的模型"]').trigger('click')
     await wrapper.get('[data-testid="base-url"]').setValue('https://api.deepseek.com')
     await wrapper.get('[data-testid="model-id"]').setValue('new-model')
 

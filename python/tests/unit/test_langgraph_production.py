@@ -7,17 +7,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from agent.config_manager import ConfigManager
+from agent.core import AgentCore
+from agent.event_bus import EventBus
+from agent.models.native_model import close_chat_models
+from agent.observability import Observability
+from agent.repository import ConversationBusyError, SQLiteRepository
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from pydantic import Field
-
-from agent.config_manager import ConfigManager
-from agent.core import AgentCore
-from agent.event_bus import EventBus
-from agent.observability import Observability
-from agent.models.native_model import close_chat_models
-from agent.repository import ConversationBusyError, SQLiteRepository
 
 
 class RuleModel(BaseChatModel):
@@ -25,7 +24,7 @@ class RuleModel(BaseChatModel):
     tool_args: dict[str, Any] = Field(default_factory=dict)
     final_text: str = "done"
 
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "RuleModel":
+    def bind_tools(self, tools: Any, **kwargs: Any) -> RuleModel:
         return self
 
     def _reply(self, messages: list[BaseMessage]) -> AIMessage:
@@ -49,14 +48,10 @@ class RuleModel(BaseChatModel):
     async def _agenerate(self, messages: list[BaseMessage], **kwargs: Any) -> ChatResult:
         return self._generate(messages, **kwargs)
 
-    async def _astream(
-        self, messages: list[BaseMessage], **kwargs: Any
-    ) -> AsyncIterator[ChatGenerationChunk]:
+    async def _astream(self, messages: list[BaseMessage], **kwargs: Any) -> AsyncIterator[ChatGenerationChunk]:
         message = self._reply(messages)
         if message.tool_calls:
-            yield ChatGenerationChunk(
-                message=AIMessageChunk(content="", tool_calls=message.tool_calls)
-            )
+            yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_calls=message.tool_calls))
             return
         for character in str(message.content):
             yield ChatGenerationChunk(message=AIMessageChunk(content=character))
@@ -70,15 +65,13 @@ class SlowModel(BaseChatModel):
     started: Any = Field(default_factory=asyncio.Event, exclude=True)
     cancelled: Any = Field(default_factory=asyncio.Event, exclude=True)
 
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "SlowModel":
+    def bind_tools(self, tools: Any, **kwargs: Any) -> SlowModel:
         return self
 
     def _generate(self, messages: list[BaseMessage], **kwargs: Any) -> ChatResult:
         raise AssertionError("async streaming is required")
 
-    async def _astream(
-        self, messages: list[BaseMessage], **kwargs: Any
-    ) -> AsyncIterator[ChatGenerationChunk]:
+    async def _astream(self, messages: list[BaseMessage], **kwargs: Any) -> AsyncIterator[ChatGenerationChunk]:
         try:
             self.started.set()
             yield ChatGenerationChunk(message=AIMessageChunk(content="first"))
@@ -92,7 +85,7 @@ class SlowModel(BaseChatModel):
 
 
 class SerialWritesModel(BaseChatModel):
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "SerialWritesModel":
+    def bind_tools(self, tools: Any, **kwargs: Any) -> SerialWritesModel:
         return self
 
     @staticmethod
@@ -124,13 +117,9 @@ class SerialWritesModel(BaseChatModel):
     async def _agenerate(self, messages: list[BaseMessage], **kwargs: Any) -> ChatResult:
         return self._generate(messages, **kwargs)
 
-    async def _astream(
-        self, messages: list[BaseMessage], **kwargs: Any
-    ) -> AsyncIterator[ChatGenerationChunk]:
+    async def _astream(self, messages: list[BaseMessage], **kwargs: Any) -> AsyncIterator[ChatGenerationChunk]:
         reply = self._reply(messages)
-        yield ChatGenerationChunk(
-            message=AIMessageChunk(content=reply.content, tool_calls=reply.tool_calls)
-        )
+        yield ChatGenerationChunk(message=AIMessageChunk(content=reply.content, tool_calls=reply.tool_calls))
 
     @property
     def _llm_type(self) -> str:
@@ -139,6 +128,7 @@ class SerialWritesModel(BaseChatModel):
 
 class ModelOwner:
     """Observe Core-owned client cleanup; no legacy provider boundary."""
+
     def __init__(self, model: BaseChatModel) -> None:
         self.langchain_model = model
         self.closed = False
@@ -206,9 +196,7 @@ async def test_production_langgraph_chat_read_and_write_approval(tmp_path: Path,
 
     event_bus.subscribe("*", capture)
     try:
-        conversation = await core.create_conversation(
-            title="production runtime", permission_mode="read_only"
-        )
+        conversation = await core.create_conversation(title="production runtime", permission_mode="read_only")
         blocked = await core.run(
             "write created.txt",
             {"conversation_id": conversation["id"]},
@@ -232,10 +220,7 @@ async def test_production_langgraph_chat_read_and_write_approval(tmp_path: Path,
         assert kinds.index("tool.proposed") < kinds.index("approval.requested")
         assert kinds.index("approval.decided") < kinds.index("tool.started")
         assert kinds[-1] == "task.succeeded"
-        assert all(
-            not any(key.startswith("langgraph") for key in payload)
-            for _kind, payload in events
-        )
+        assert all(not any(key.startswith("langgraph") for key in payload) for _kind, payload in events)
     finally:
         await core.shutdown()
     assert owner.closed is True
@@ -244,7 +229,8 @@ async def test_production_langgraph_chat_read_and_write_approval(tmp_path: Path,
 @pytest.mark.asyncio
 async def test_missing_checkpoint_cannot_fall_back_to_legacy_approval(tmp_path: Path, monkeypatch) -> None:
     core, _bus, _owner = await make_langgraph_core(
-        tmp_path, RuleModel(tool_name="file_write", tool_args={"path": "blocked.txt", "content": "secret"}),
+        tmp_path,
+        RuleModel(tool_name="file_write", tool_args={"path": "blocked.txt", "content": "secret"}),
         monkeypatch,
     )
     try:
@@ -260,7 +246,11 @@ async def test_missing_checkpoint_cannot_fall_back_to_legacy_approval(tmp_path: 
         assert stored["status"] == "pending" and stored["version"] == approval["version"]
         assert not (tmp_path / "blocked.txt").exists()
         denied = await core.decide_approval(
-            "personal", approval["approval_id"], "local-user", "deny", approval["version"],
+            "personal",
+            approval["approval_id"],
+            "local-user",
+            "deny",
+            approval["version"],
         )
         # Refusal commits independently of recovery; a missing checkpoint is
         # an explicit continuation failure, not a cancellation or permission.
@@ -314,7 +304,8 @@ async def test_changed_approval_path_does_not_consume_version(tmp_path: Path, mo
     link = tmp_path / "target.txt"
     link.symlink_to(original)
     core, _bus, _owner = await make_langgraph_core(
-        tmp_path, RuleModel(tool_name="file_write", tool_args={"path": "target.txt", "content": "approved"}),
+        tmp_path,
+        RuleModel(tool_name="file_write", tool_args={"path": "target.txt", "content": "approved"}),
         monkeypatch,
     )
     try:
@@ -328,7 +319,9 @@ async def test_changed_approval_path_does_not_consume_version(tmp_path: Path, mo
         stored = await core.repository.get_approval("personal", approval["approval_id"])
         assert (stored["status"], stored["version"]) == ("pending", approval["version"])
         assert not original.exists() and not changed.exists()
-        denied = await core.decide_approval("personal", approval["approval_id"], "local-user", "deny", approval["version"])
+        denied = await core.decide_approval(
+            "personal", approval["approval_id"], "local-user", "deny", approval["version"]
+        )
         assert denied["status"] == "succeeded"
         assert denied["response"] == "done"
         assert not original.exists() and not changed.exists()
@@ -383,7 +376,8 @@ async def test_global_interrupt_drains_native_runs_and_keeps_client_open(tmp_pat
 
 @pytest.mark.asyncio
 async def test_production_langgraph_chat_executes_file_read_without_approval(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     (tmp_path / "note.txt").write_text("hello", encoding="utf-8")
     core, event_bus, _owner = await make_langgraph_core(
@@ -403,9 +397,7 @@ async def test_production_langgraph_chat_executes_file_read_without_approval(
     event_bus.subscribe("*", capture)
     try:
         conversation = await core.create_conversation(title="read")
-        result = await core.run(
-            "read note.txt", {"conversation_id": conversation["id"]}
-        )
+        result = await core.run("read note.txt", {"conversation_id": conversation["id"]})
         assert result["status"] == "succeeded"
         assert result["response"] == "read complete"
         assert "tool.started" in events and "tool.completed" in events
@@ -418,18 +410,13 @@ async def test_production_langgraph_chat_executes_file_read_without_approval(
 
 @pytest.mark.asyncio
 async def test_parallel_protected_calls_are_serialized_into_two_approvals(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
-    core, _event_bus, _owner = await make_langgraph_core(
-        tmp_path, SerialWritesModel(), monkeypatch
-    )
+    core, _event_bus, _owner = await make_langgraph_core(tmp_path, SerialWritesModel(), monkeypatch)
     try:
-        conversation = await core.create_conversation(
-            title="serial approvals", permission_mode="read_only"
-        )
-        first = await core.run(
-            "write both files", {"conversation_id": conversation["id"]}
-        )
+        conversation = await core.create_conversation(title="serial approvals", permission_mode="read_only")
+        first = await core.run("write both files", {"conversation_id": conversation["id"]})
         assert first["status"] == "waiting_approval", first
         assert first["approval"]["tool_call_id"] == "call-first-write"
         second = await core.decide_approval(
@@ -474,9 +461,7 @@ async def test_production_cancel_waits_for_model_and_stops_events(tmp_path: Path
 
     event_bus.subscribe("*", capture)
     conversation = await core.create_conversation(title="cancel")
-    run_task = asyncio.create_task(
-        core.run("stream", {"conversation_id": conversation["id"]})
-    )
+    run_task = asyncio.create_task(core.run("stream", {"conversation_id": conversation["id"]}))
     try:
         await asyncio.wait_for(first_delta.wait(), timeout=2)
         task_id = next(payload["task_id"] for kind, payload in events if kind == "task.started")
@@ -485,9 +470,7 @@ async def test_production_cancel_waits_for_model_and_stops_events(tmp_path: Path
         assert cancelled["status"] == "cancelled"
         assert result["status"] == "cancelled"
         await asyncio.wait_for(model.cancelled.wait(), timeout=1)
-        cancelled_index = next(
-            index for index, event in enumerate(events) if event[0] == "task.cancelled"
-        )
+        cancelled_index = next(index for index, event in enumerate(events) if event[0] == "task.cancelled")
         assert events[cancelled_index + 1 :] == []
     finally:
         if not run_task.done():
@@ -499,7 +482,8 @@ async def test_production_cancel_waits_for_model_and_stops_events(tmp_path: Path
 
 @pytest.mark.asyncio
 async def test_sync_file_read_cancel_stops_runtime_but_not_worker_thread(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     (tmp_path / "slow.txt").write_text("value", encoding="utf-8")
     model = RuleModel(
@@ -515,9 +499,7 @@ async def test_sync_file_read_cancel_stops_runtime_but_not_worker_thread(
     release = threading.Event()
     finished = threading.Event()
 
-    def slow_read(
-        path: str, encoding: str = "utf-8", max_bytes: int = 16_000, offset: int = 0
-    ) -> dict[str, Any]:
+    def slow_read(path: str, encoding: str = "utf-8", max_bytes: int = 16_000, offset: int = 0) -> dict[str, Any]:
         started.set()
         release.wait(timeout=5)
         finished.set()
@@ -539,21 +521,15 @@ async def test_sync_file_read_cancel_stops_runtime_but_not_worker_thread(
 
     event_bus.subscribe("*", capture)
     conversation = await core.create_conversation(title="sync cancel")
-    run_task = asyncio.create_task(
-        core.run("read slow.txt", {"conversation_id": conversation["id"]})
-    )
+    run_task = asyncio.create_task(core.run("read slow.txt", {"conversation_id": conversation["id"]}))
     try:
         assert await asyncio.wait_for(asyncio.to_thread(started.wait, 2), timeout=3)
-        task_id = next(
-            payload["task_id"] for kind, payload in events if kind == "task.started"
-        )
+        task_id = next(payload["task_id"] for kind, payload in events if kind == "task.started")
         await core.cancel_task("personal", task_id)
         result = await asyncio.wait_for(run_task, timeout=2)
         assert result["status"] == "cancelled"
         assert finished.is_set() is False
-        cancelled_index = next(
-            index for index, event in enumerate(events) if event[0] == "task.cancelled"
-        )
+        cancelled_index = next(index for index, event in enumerate(events) if event[0] == "task.cancelled")
         release.set()
         await asyncio.wait_for(asyncio.to_thread(finished.wait), timeout=2)
         await asyncio.sleep(0)
@@ -568,7 +544,8 @@ async def test_sync_file_read_cancel_stops_runtime_but_not_worker_thread(
 
 @pytest.mark.asyncio
 async def test_core_shutdown_cancels_runs_before_closing_model_owner(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     model = SlowModel()
     core, event_bus, owner = await make_langgraph_core(tmp_path, model, monkeypatch)
@@ -582,9 +559,7 @@ async def test_core_shutdown_cancels_runs_before_closing_model_owner(
 
     event_bus.subscribe("*", capture)
     conversation = await core.create_conversation(title="shutdown")
-    run_task = asyncio.create_task(
-        core.run("stream", {"conversation_id": conversation["id"]})
-    )
+    run_task = asyncio.create_task(core.run("stream", {"conversation_id": conversation["id"]}))
     try:
         await asyncio.wait_for(first_delta.wait(), timeout=2)
         await asyncio.wait_for(core.shutdown(), timeout=5)
@@ -621,27 +596,42 @@ async def test_runtime_keeps_recorded_product_write_semantics(tmp_path: Path, mo
     # Legacy comparison was recorded before deletion; keep its product milestones,
     # not an executable copy of the retired runtime.
     core, bus, _ = await make_langgraph_core(
-        tmp_path, RuleModel(tool_name="file_write",
-                            tool_args={"path": "result.txt", "content": "same"},
-                            final_text="write complete"), monkeypatch,
+        tmp_path,
+        RuleModel(
+            tool_name="file_write", tool_args={"path": "result.txt", "content": "same"}, final_text="write complete"
+        ),
+        monkeypatch,
     )
     events = []
+
     async def capture(kind, payload):
         events.append(kind)
+
     bus.subscribe("*", capture)
     try:
         conversation = await core.create_conversation(title="product milestones")
         blocked = await core.run("write result.txt", {"conversation_id": conversation["id"]})
         approval = blocked["approval"]
         completed = await core.decide_approval(
-            "personal", approval["approval_id"], "local-user", "allow", approval["version"],
+            "personal",
+            approval["approval_id"],
+            "local-user",
+            "allow",
+            approval["version"],
         )
         assert completed["status"] == "succeeded"
         assert completed["response"] == "write complete"
         assert (tmp_path / "result.txt").read_text(encoding="utf-8") == "same"
         milestones = [
-            "task.started", "tool.proposed", "task.waiting_approval", "approval.requested",
-            "approval.decided", "tool.started", "tool.completed", "message.completed", "task.succeeded",
+            "task.started",
+            "tool.proposed",
+            "task.waiting_approval",
+            "approval.requested",
+            "approval.decided",
+            "tool.started",
+            "tool.completed",
+            "message.completed",
+            "task.succeeded",
         ]
         assert [event for event in events if event in milestones] == milestones
     finally:
@@ -649,7 +639,9 @@ async def test_runtime_keeps_recorded_product_write_semantics(tmp_path: Path, mo
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("case", ["owner", "version", "pending", "checkpoint", "archived", "archive_race", "newer", "terminal", "unsafe"])
+@pytest.mark.parametrize(
+    "case", ["owner", "version", "pending", "checkpoint", "archived", "archive_race", "newer", "terminal", "unsafe"]
+)
 async def test_public_recovery_rejects_without_replaying(tmp_path: Path, monkeypatch, case: str) -> None:
     model = RuleModel(tool_name="file_write", tool_args={"path": "blocked.txt", "content": "no replay"})
     core, bus, _ = await make_langgraph_core(tmp_path, model, monkeypatch)
@@ -683,12 +675,24 @@ async def test_public_recovery_rejects_without_replaying(tmp_path: Path, monkeyp
             from agent.runtime.langgraph_runtime import RuntimeRunRequest
 
             graph = await runtime._graph_for(RuntimeRunRequest(conversation_id=conversation["id"], task_id=task_id))
-            await graph.aupdate_state({"configurable": {"thread_id": task_id}}, {"messages": [
-                AIMessage(content="", tool_calls=[{
-                    "id": "unsafe-call", "name": "exec_command", "args": {"command": "echo blocked"},
-                    "type": "tool_call",
-                }]),
-            ]})
+            await graph.aupdate_state(
+                {"configurable": {"thread_id": task_id}},
+                {
+                    "messages": [
+                        AIMessage(
+                            content="",
+                            tool_calls=[
+                                {
+                                    "id": "unsafe-call",
+                                    "name": "exec_command",
+                                    "args": {"command": "echo blocked"},
+                                    "type": "tool_call",
+                                }
+                            ],
+                        ),
+                    ]
+                },
+            )
         before = await core.get_task("personal", task_id)
         captured = []
 
@@ -699,7 +703,9 @@ async def test_public_recovery_rejects_without_replaying(tmp_path: Path, monkeyp
         expected = PermissionError if case == "owner" else ValueError
         with pytest.raises(expected):
             await core.resume_task(
-                "personal", task_id, "intruder" if case == "owner" else "local-user",
+                "personal",
+                task_id,
+                "intruder" if case == "owner" else "local-user",
                 before["version"] - 1 if case == "version" else before["version"],
             )
         assert await core.get_task("personal", task_id) == before
@@ -712,7 +718,9 @@ async def test_public_recovery_rejects_without_replaying(tmp_path: Path, monkeyp
 @pytest.mark.asyncio
 async def test_public_recovery_does_not_grant_pending_approval(tmp_path: Path, monkeypatch) -> None:
     core, bus, _ = await make_langgraph_core(
-        tmp_path, RuleModel(tool_name="file_write", tool_args={"path": "pending.txt", "content": "pending"}), monkeypatch,
+        tmp_path,
+        RuleModel(tool_name="file_write", tool_args={"path": "pending.txt", "content": "pending"}),
+        monkeypatch,
     )
     try:
         conversation = await core.create_conversation(title="pending recovery")
@@ -749,7 +757,9 @@ async def test_public_recovery_cancellation_drains_root(tmp_path: Path, monkeypa
 
     monkeypatch.setattr(RuleModel, "_astream", stream)
     core, bus, owner = await make_langgraph_core(
-        tmp_path, RuleModel(tool_name="file_write", tool_args={"path": "once.txt", "content": "once"}), monkeypatch,
+        tmp_path,
+        RuleModel(tool_name="file_write", tool_args={"path": "once.txt", "content": "once"}),
+        monkeypatch,
     )
     recovery = None
     captured = []
@@ -766,7 +776,9 @@ async def test_public_recovery_cancellation_drains_root(tmp_path: Path, monkeypa
         task_id = blocked["task_id"]
         approval = blocked["approval"]
         # Simulate a process dying immediately after its durable approval commit.
-        await core.repository.decide_approval("personal", approval["approval_id"], "local-user", "allow", approval["version"])
+        await core.repository.decide_approval(
+            "personal", approval["approval_id"], "local-user", "allow", approval["version"]
+        )
         await core.repository.update_task_status(task_id, "interrupted")
         task = await core.get_task("personal", task_id)
         recovery = asyncio.create_task(core.resume_task("personal", task_id, "local-user", task["version"]))

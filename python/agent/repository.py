@@ -14,6 +14,7 @@ from typing import Any
 
 from agent.errors import UserFacingError
 from agent.models.usage import aggregate_usage_events
+from agent.structured_output import validate_output_schema, validated_result_json
 
 
 def _now() -> str:
@@ -267,6 +268,8 @@ class SQLiteRepository:
             ("last_error", "TEXT NOT NULL DEFAULT ''"),
             ("version", "INTEGER NOT NULL DEFAULT 1"),
             ("request_hash", "TEXT NOT NULL DEFAULT ''"),
+            ("output_schema_json", "TEXT NOT NULL DEFAULT ''"),
+            ("output_result_json", "TEXT"),
             ("max_subagent_calls", "INTEGER NOT NULL DEFAULT 0"),
             ("max_concurrent_subagents", "INTEGER NOT NULL DEFAULT 1"),
             ("model_call_limit", "INTEGER NOT NULL DEFAULT 0"),
@@ -836,7 +839,7 @@ class SQLiteRepository:
 
     async def start_chat_turn(
         self, task_id: str, workspace_id: str, conversation_id: str, prompt: str, request_hash: str = "",
-        *, model_call_limit: int = 8,
+        *, model_call_limit: int = 8, output_schema: dict[str, Any] | None = None,
     ) -> None:
         """Atomically admit one turn and append its user message (not an execution checkpoint).
 
@@ -844,6 +847,8 @@ class SQLiteRepository:
         survives a crash; resubmitting that key only returns its task, including an
         interrupted task. A new execution always needs a new submission key.
         """
+        output_schema = validate_output_schema(output_schema)
+        schema_json = json.dumps(output_schema, ensure_ascii=False, sort_keys=True) if output_schema is not None else ""
         now = _now()
         async with self._lock:
             db = self._db()
@@ -870,11 +875,12 @@ class SQLiteRepository:
                     raise ConversationBusyError("conversation has unfinished work; finish or cancel it first")
                 db.execute(
                     """INSERT INTO tasks(id,workspace_id,conversation_id,title,status,input_text,request_hash,
-                       created_at,updated_at,max_subagent_calls,max_concurrent_subagents,model_call_limit,subagent_model_ids_json)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       created_at,updated_at,max_subagent_calls,max_concurrent_subagents,model_call_limit,subagent_model_ids_json,
+                       output_schema_json)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (task_id, workspace_id, conversation_id, prompt[:80] or "Agent task", "running", prompt,
                      request_hash, now, now, conversation["max_subagent_calls"],
-                     conversation["max_concurrent_subagents"], model_call_limit, conversation["subagent_model_ids_json"]),
+                     conversation["max_concurrent_subagents"], model_call_limit, conversation["subagent_model_ids_json"], schema_json),
                 )
                 db.execute(
                     "INSERT INTO messages(id,conversation_id,role,content,created_at) VALUES(?,?,?,?,?)",
@@ -948,6 +954,54 @@ class SQLiteRepository:
         if row is None:
             raise KeyError(task_id)
         return dict(row)
+
+    async def get_task_result(self, workspace_id: str, task_id: str) -> dict[str, Any]:
+        task = await self.get_task(workspace_id, task_id)
+        ready = task["status"] == "succeeded" and task.get("output_result_json") is not None
+        return {
+            "task_id": task_id, "status": task["status"], "ready": ready,
+            "output_mode": "json_schema" if task.get("output_schema_json") else "text",
+            "schema": json.loads(task["output_schema_json"]) if task.get("output_schema_json") else None,
+            "value": json.loads(task["output_result_json"]) if ready else None,
+            "error": task["last_error"],
+        }
+
+    async def complete_structured_task(
+        self, workspace_id: str, task_id: str, value: Any,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        """Commit a validated result, its visible message and success in one transaction.
+
+        Checkpoint remains execution state. This row is the consumable product
+        result; a concurrent stop must never expose it under a cancelled task.
+        """
+        async with self._lock:
+            db = self._db()
+            with db:
+                row = db.execute("SELECT * FROM tasks WHERE workspace_id=? AND id=?", (workspace_id, task_id)).fetchone()
+                if row is None:
+                    raise KeyError(task_id)
+                if row["status"] in {"cancelled", "failed", "succeeded", "timed_out", "expired", "rejected"}:
+                    return dict(row), None
+                if row["status"] != "running" or not row["output_schema_json"]:
+                    raise ConversationBusyError("当前任务不处于结构化结果提交阶段。")
+                encoded = validated_result_json(json.loads(row["output_schema_json"]), value)
+                now = _now()
+                message = {
+                    "id": f"msg_{uuid.uuid4().hex}", "conversation_id": row["conversation_id"],
+                    "role": "assistant", "content": encoded, "created_at": now,
+                }
+                db.execute(
+                    "INSERT INTO messages(id,conversation_id,role,content,created_at) "
+                    "VALUES(:id,:conversation_id,:role,:content,:created_at)", message,
+                )
+                db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, row["conversation_id"]))
+                db.execute(
+                    """UPDATE tasks SET output_result_json=?,status='succeeded',last_error='',
+                       version=version+1,updated_at=? WHERE workspace_id=? AND id=?""",
+                    (encoded, now, workspace_id, task_id),
+                )
+                task = dict(db.execute("SELECT * FROM tasks WHERE workspace_id=? AND id=?", (workspace_id, task_id)).fetchone())
+            return task, message
 
     async def resume_interrupted_task(self, workspace_id: str, task_id: str, version: int) -> None:
         """Commit product admission, not execution state or a continuation.

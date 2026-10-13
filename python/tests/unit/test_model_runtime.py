@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import pytest
-
 from agent.config_manager import ConfigManager
-from agent.models.native_model import build_chat_model, close_chat_models
-from agent.models.usage import message_usage
-from agent.runtime import LangGraphRuntime
-from pydantic import Field
-from tests.fixtures.chat_model import FakeModel
-from agent.models.runtime import ChatModelRuntime, ChatModelSettings
 from agent.errors import public_error
+from agent.models.native_model import build_chat_model, close_chat_models
+from agent.models.runtime import ChatModelRuntime, ChatModelSettings
+from agent.models.usage import message_usage
 from agent.repository import SQLiteRepository
+from agent.runtime import LangGraphRuntime
 from langchain_core.messages import AIMessage
+from pydantic import Field
+
+from tests.fixtures.chat_model import FakeModel
 
 
 class RecordingProvider(FakeModel):

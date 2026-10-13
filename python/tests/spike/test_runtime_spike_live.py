@@ -11,9 +11,8 @@ import os
 from pathlib import Path
 
 import pytest
-
-from agent.models.runtime import ChatModelSettings
 from agent.models.native_model import build_chat_model
+from agent.models.runtime import ChatModelSettings
 from agent.runtime import LangGraphRuntime
 
 

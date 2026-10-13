@@ -6,11 +6,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from aiohttp import web
-from langchain_core.language_models.chat_models import BaseChatModel
-
 from agent.models.native_model import build_chat_model, close_chat_models
 from agent.runtime import LangGraphRuntime
+from aiohttp import web
+from langchain_core.language_models.chat_models import BaseChatModel
 
 
 def _chunk(delta: dict[str, Any], finish_reason: str | None = None) -> bytes:
@@ -129,11 +128,13 @@ async def test_real_openai_compatible_http_tool_loop(provider: str, tmp_path: Pa
         "task.started",
         "context.history",
         "context.updated",
+        "context.updated",
         "model.call.started",
         "model.call.completed",
         "tool.proposed",
         "tool.started",
         "tool.completed",
+        "context.updated",
         "context.updated",
         "model.call.started",
         "message.delta",
@@ -222,12 +223,14 @@ async def test_real_ollama_wire_protocol_runs_tool_loop(tmp_path: Path) -> None:
         "task.started",
         "context.history",
         "context.updated",
+        "context.updated",
         "model.call.started",
         "model.call.completed",
         "model.usage",
         "tool.proposed",
         "tool.started",
         "tool.completed",
+        "context.updated",
         "context.updated",
         "model.call.started",
         "message.delta",
@@ -405,12 +408,14 @@ async def test_real_anthropic_wire_protocol_runs_tool_loop(
         "task.started",
         "context.history",
         "context.updated",
+        "context.updated",
         "model.call.started",
         "model.call.completed",
         "model.usage",
         "tool.proposed",
         "tool.started",
         "tool.completed",
+        "context.updated",
         "context.updated",
         "model.call.started",
         "message.delta",

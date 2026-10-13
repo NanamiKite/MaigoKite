@@ -4,6 +4,8 @@ import type { ChatModelProfile, SafetyJevLayout, SafetyRequestFormat, SafetySett
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import InkSelect from '@/components/common/InkSelect.vue'
 import InkNumber from '@/components/common/InkNumber.vue'
+import Tooltip from '@/components/common/Tooltip.vue'
+import { t } from '@/i18n'
 
 const props = defineProps<{ modelValue: SafetySettings; models: ChatModelProfile[]; disabled: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: SafetySettings] }>()
@@ -15,6 +17,10 @@ const formats: { id: SafetyRequestFormat; label: string }[] = [
   { id: 'jev_like', label: 'JEV / KEV' }, { id: 'laya', label: 'LAYA' },
   { id: 'openai', label: 'OpenAI 兼容' },
 ]
+const layouts = computed(() => [
+  { value: 'message', label: t('消息对象') },
+  { value: 'inline', label: t('内嵌指令') },
+])
 const canAdd = computed(() => !props.disabled && newId.value.trim().length > 0 && newId.value.trim().length <= 100 &&
   props.modelValue.trusted_model_ids.length < 32 && !props.modelValue.trusted_model_ids.includes(newId.value.trim()))
 function update(patch: Partial<SafetySettings>) { emit('update:modelValue', { ...props.modelValue, ...patch }) }
@@ -41,17 +47,11 @@ function remove(id: string) {
     <h3>{{ $t('审查规则') }}</h3>
     <div class="setting-row" data-settings-field="safety-format">
       <label for="safety-format">{{ $t('审查请求格式') }}</label>
-      <InkSelect id="safety-format" :value="modelValue.request_format" :options="formats.map(format => ({ value: format.id, label: format.label }))" :disabled="disabled" @change="setFormat" />
+      <InkSelect id="safety-format" :value="modelValue.request_format" :options="formats.map(format => ({ value: format.id, label: format.id === 'openai' ? $t(format.label) : format.label }))" :disabled="disabled" @change="setFormat" />
     </div>
     <div v-if="modelValue.request_format === 'jev_like'" class="setting-row" data-settings-field="safety-layout">
       <label for="safety-layout">{{ $t('JEV 布局') }}</label>
-      <div>
-        <select id="safety-layout" :value="modelValue.jev_layout" :disabled="disabled" @change="setLayout">
-          <option value="message">{{ $t('Message 对象（0.8B 推荐）') }}</option>
-          <option value="inline">{{ $t('内嵌（4B 推荐）') }}</option>
-        </select>
-        <p class="panel-copy">{{ $t('Message 把待审增量放进 state.message，内嵌放进问题指令；按决策模型实测选择。') }}</p>
-      </div>
+      <InkSelect id="safety-layout" :value="modelValue.jev_layout" :options="layouts" :disabled="disabled" @change="setLayout" />
     </div>
     <div class="setting-row safety-text-row" data-settings-field="safety-state">
       <label for="safety-state">{{ $t('审查状态文本') }}</label>
@@ -64,15 +64,17 @@ function remove(id: string) {
       </div>
     </div>
     <div class="setting-row" data-settings-field="safety-threshold">
-      <label for="safety-threshold">{{ $t('风险阈值') }}</label>
-      <div>
-        <InkNumber :disabled="disabled"><input
-          id="safety-threshold" :value="modelValue.risk_threshold" type="number" min="0" max="100" step="1"
-          required :disabled="disabled" aria-describedby="safety-threshold-help"
-          @input="update({ risk_threshold: ($event.target as HTMLInputElement).valueAsNumber })"
-        ></InkNumber>
-        <p id="safety-threshold-help" class="panel-copy">{{ $t('风险分值高于此值时需要人工确认。') }}</p>
-      </div>
+      <Tooltip id="safety-threshold-help" class="safety-threshold-label" :content="$t('风险分值高于此值时需要人工确认。')">
+        <label for="safety-threshold">{{ $t('风险阈值') }}</label>
+        <button type="button" class="safety-threshold-help" :aria-label="$t('风险阈值说明')" aria-describedby="safety-threshold-help">
+          <IconSymbol name="info" :size="14" />
+        </button>
+      </Tooltip>
+      <InkNumber :disabled="disabled"><input
+        id="safety-threshold" :value="modelValue.risk_threshold" type="number" min="0" max="100" step="1"
+        required :disabled="disabled" aria-describedby="safety-threshold-help"
+        @input="update({ risk_threshold: ($event.target as HTMLInputElement).valueAsNumber })"
+      ></InkNumber>
     </div>
   </section>
   <section class="setting-group safety-trusted-fields" data-settings-field="safety-trusted">
@@ -115,6 +117,20 @@ function remove(id: string) {
   line-height: var(--leading-normal);
 }
 .safety-text-row { align-items: start; }
+.safety-threshold-label { justify-self: start; }
+.safety-threshold-label label { font-weight: var(--weight-medium); cursor: help; }
+.safety-threshold-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+  border: 0;
+  background: var(--transparent);
+  color: var(--ink-2);
+  border-radius: var(--radius-sm);
+  cursor: help;
+}
+.safety-threshold-help:hover { color: var(--accent); background: var(--control-hover); }
 .safety-review-fields .panel-copy { margin-bottom: 0; margin-top: var(--space-2); }
 .safety-trusted-input { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .safety-trusted-input input { flex: 1 var(--select-menu-min-width); min-width: 0; font-family: var(--font-mono); font-size: var(--text-sm); }

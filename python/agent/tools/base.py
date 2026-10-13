@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any, cast
 
 from langchain.tools import ToolRuntime
 from langchain_core.messages import ToolMessage
@@ -14,6 +15,10 @@ from langchain_core.tools import StructuredTool
 
 from agent.errors import public_error
 from agent.tools.validator import ToolValidator
+
+if TYPE_CHECKING:
+    from agent.runtime.langgraph_runtime import _RunContext
+    from agent.runtime.subagents import ChildContext
 
 
 class BaseTool(ABC):
@@ -60,8 +65,8 @@ class BaseTool(ABC):
             raise ValueError(f"{self.name}: runtime/config are reserved LangChain arguments")
         validator = ToolValidator(lambda _name: schema)
 
-        async def invoke(runtime: ToolRuntime, **arguments: Any) -> ToolMessage:
-            run = runtime.context
+        async def invoke(runtime: ToolRuntime[object], **arguments: Any) -> ToolMessage:
+            run = cast("_RunContext | ChildContext", runtime.context)
             context = ExecutionContext(
                 run.request.trace_id,
                 run.request.task_id,

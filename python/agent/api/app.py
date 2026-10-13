@@ -238,7 +238,7 @@ def create_app(core: AgentCore, web_dir: Path | None = None) -> FastAPI:
                                     "subagent_model_selection", "conversation_fork", "context_estimate",
                                     "session_approval",
                                     "task_approval", "approval_authorization_revocation", "permission_boundary_v2",
-                                    "scoped_memory"), native))
+                                    "scoped_memory", "structured_output", "task_result"), native))
         flags.update(dict.fromkeys(
             ("model_context_percentage", "auto_review", "turn_rollback", "automatic_memory_events"), False,
         ))

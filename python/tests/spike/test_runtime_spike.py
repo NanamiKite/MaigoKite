@@ -2,16 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 import pytest
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolMessage
-from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
-from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, Field
-
 from agent.models.native_model import build_chat_model
 from agent.runtime import (
     LangGraphRuntime,
@@ -19,7 +14,13 @@ from agent.runtime import (
     RuntimeRunRequest,
 )
 from agent.tools.base import BaseTool, ExecutionContext, ToolResult
+from agent.tools.native.file_read import FileReadTool
 from agent.tools.native.file_write import FileWriteParams, FileWriteTool
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolMessage
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from langchain_core.tools import StructuredTool
+from pydantic import BaseModel, Field
 
 
 class RuleToolModel(BaseChatModel):
@@ -27,7 +28,7 @@ class RuleToolModel(BaseChatModel):
     tool_args: dict[str, Any]
     final_text: str = "tool result accepted"
 
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "RuleToolModel":
+    def bind_tools(self, tools: Any, **kwargs: Any) -> RuleToolModel:
         return self
 
     def _reply(self, messages: list[BaseMessage]) -> AIMessage:
@@ -51,9 +52,7 @@ class RuleToolModel(BaseChatModel):
     async def _agenerate(self, messages: list[BaseMessage], **kwargs: Any) -> ChatResult:
         return self._generate(messages, **kwargs)
 
-    async def _astream(
-        self, messages: list[BaseMessage], **kwargs: Any
-    ) -> AsyncIterator[ChatGenerationChunk]:
+    async def _astream(self, messages: list[BaseMessage], **kwargs: Any) -> AsyncIterator[ChatGenerationChunk]:
         message = self._reply(messages)
         if message.tool_calls:
             yield ChatGenerationChunk(
@@ -73,7 +72,7 @@ class RuleToolModel(BaseChatModel):
 
 
 class EchoModel(BaseChatModel):
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "EchoModel":
+    def bind_tools(self, tools: Any, **kwargs: Any) -> EchoModel:
         return self
 
     def _generate(self, messages: list[BaseMessage], **kwargs: Any) -> ChatResult:
@@ -82,9 +81,7 @@ class EchoModel(BaseChatModel):
     async def _agenerate(self, messages: list[BaseMessage], **kwargs: Any) -> ChatResult:
         return self._generate(messages, **kwargs)
 
-    async def _astream(
-        self, messages: list[BaseMessage], **kwargs: Any
-    ) -> AsyncIterator[ChatGenerationChunk]:
+    async def _astream(self, messages: list[BaseMessage], **kwargs: Any) -> AsyncIterator[ChatGenerationChunk]:
         yield ChatGenerationChunk(message=AIMessageChunk(content="ok"))
 
     @property
@@ -96,15 +93,13 @@ class SlowStreamModel(BaseChatModel):
     started: Any = Field(default_factory=asyncio.Event, exclude=True)
     cancelled: Any = Field(default_factory=asyncio.Event, exclude=True)
 
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "SlowStreamModel":
+    def bind_tools(self, tools: Any, **kwargs: Any) -> SlowStreamModel:
         return self
 
     def _generate(self, messages: list[BaseMessage], **kwargs: Any) -> ChatResult:
         raise AssertionError("the cancellation test must use the async stream")
 
-    async def _astream(
-        self, messages: list[BaseMessage], **kwargs: Any
-    ) -> AsyncIterator[ChatGenerationChunk]:
+    async def _astream(self, messages: list[BaseMessage], **kwargs: Any) -> AsyncIterator[ChatGenerationChunk]:
         try:
             self.started.set()
             yield ChatGenerationChunk(message=AIMessageChunk(content="first"))
@@ -118,15 +113,13 @@ class SlowStreamModel(BaseChatModel):
 
 
 class ErrorModel(BaseChatModel):
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "ErrorModel":
+    def bind_tools(self, tools: Any, **kwargs: Any) -> ErrorModel:
         return self
 
     def _generate(self, messages: list[BaseMessage], **kwargs: Any) -> ChatResult:
         raise RuntimeError("provider unavailable")
 
-    async def _astream(
-        self, messages: list[BaseMessage], **kwargs: Any
-    ) -> AsyncIterator[ChatGenerationChunk]:
+    async def _astream(self, messages: list[BaseMessage], **kwargs: Any) -> AsyncIterator[ChatGenerationChunk]:
         raise RuntimeError("provider unavailable")
         yield
 
@@ -152,9 +145,7 @@ class StubProductTool(BaseTool):
     def parameters_schema(self) -> dict[str, Any]:
         return {}
 
-    async def execute(
-        self, context: ExecutionContext, arguments: dict[str, Any]
-    ) -> ToolResult:
+    async def execute(self, context: ExecutionContext, arguments: dict[str, Any]) -> ToolResult:
         raise AssertionError("the runtime StructuredTool must execute directly")
 
 
@@ -164,6 +155,15 @@ class ValueArgs(BaseModel):
 
 class SimulatedProcessCrash(BaseException):
     pass
+
+
+def assert_process_crash(error: BaseException) -> None:
+    if isinstance(error, BaseExceptionGroup):
+        assert error.exceptions
+        for child in error.exceptions:
+            assert_process_crash(child)
+    else:
+        assert isinstance(error, SimulatedProcessCrash)
 
 
 def adapter_paths(tmp_path: Path) -> dict[str, Path]:
@@ -196,11 +196,20 @@ async def test_read_tool_loop_and_stable_ui_events(tmp_path: Path) -> None:
     event_types = [event.type for event in events]
     assert event_types == [
         "task.started",
+        "context.history",
+        "context.updated",
+        "context.updated",
+        "model.call.started",
         "reasoning.started",
         "reasoning.delta",
+        "model.call.completed",
+        "reasoning.completed",
         "tool.proposed",
         "tool.started",
         "tool.completed",
+        "context.updated",
+        "context.updated",
+        "model.call.started",
         "message.delta",
         "message.delta",
         "message.delta",
@@ -217,7 +226,7 @@ async def test_read_tool_loop_and_stable_ui_events(tmp_path: Path) -> None:
         "message.delta",
         "message.delta",
         "message.delta",
-        "reasoning.completed",
+        "model.call.completed",
         "message.completed",
         "task.succeeded",
     ]
@@ -229,7 +238,15 @@ async def test_read_tool_loop_and_stable_ui_events(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_tool_schema_validation_is_owned_by_langchain(tmp_path: Path) -> None:
+async def test_invalid_tool_arguments_fail_before_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    executed: list[dict[str, Any]] = []
+
+    async def forbidden_read(_tool: Any, _context: ExecutionContext, arguments: dict[str, Any]) -> ToolResult:
+        executed.append(arguments)
+        raise AssertionError("invalid arguments must be rejected before execution")
+
+    monkeypatch.setattr(FileReadTool, "execute", forbidden_read)
+    assert "path" in FileReadTool().parameters_schema["required"]
     model = RuleToolModel(
         tool_name="file_read",
         tool_args={},
@@ -243,7 +260,12 @@ async def test_tool_schema_validation_is_owned_by_langchain(tmp_path: Path) -> N
     event_types = [event.type for event in events]
     assert "tool.failed" in event_types
     failure = next(event for event in events if event.type == "tool.failed")
-    assert "path" in str(failure.payload)
+    assert failure.payload["tool_name"] == "file_read"
+    assert failure.payload["error_code"] == "TOOL_DENIED"
+    assert failure.payload["denied"] is True
+    assert failure.payload["summary"] == "invalid arguments for tool 'file_read'"
+    assert "tool.started" not in event_types
+    assert executed == []
     assert event_types[-1] == "task.succeeded"
 
 
@@ -292,12 +314,21 @@ async def test_approval_survives_restart_and_executes_side_effect_once(
         "approval.decided",
         "tool.started",
         "tool.completed",
+        "file.changed",
+        "context.updated",
+        "context.updated",
+        "model.call.started",
         *("message.delta" for _ in "tool result accepted"),
+        "model.call.completed",
         "message.completed",
         "task.succeeded",
     ]
     assert (tmp_path / "approved.txt").read_text(encoding="utf-8") == "written once"
-    with pytest.raises(ValueError, match="already been decided"):
+    receipt = await restarted.repository.get_approval("personal", approval["id"])
+    assert receipt["status"] == "consumed"
+    written_at = (tmp_path / "approved.txt").stat().st_mtime_ns
+    events_before = await restarted.repository.list_task_events("personal", resumed.request.conversation_id)
+    with pytest.raises(ValueError, match="no matching runtime interrupt"):
         await restarted.resume_approval(
             "personal",
             approval["id"],
@@ -305,6 +336,10 @@ async def test_approval_survives_restart_and_executes_side_effect_once(
             "allow",
             approval["version"],
         )
+    assert await restarted.repository.get_approval("personal", approval["id"]) == receipt
+    assert await restarted.repository.list_task_events("personal", resumed.request.conversation_id) == events_before
+    assert (tmp_path / "approved.txt").read_text(encoding="utf-8") == "written once"
+    assert (tmp_path / "approved.txt").stat().st_mtime_ns == written_at
     await restarted.close()
 
 
@@ -476,8 +511,9 @@ async def test_crash_after_approval_before_effect_replays_tool_once(
         approval["version"],
     )
     await crashing.collect()
-    with pytest.raises(BaseException):
+    with pytest.raises((SimulatedProcessCrash, BaseExceptionGroup)) as failure:
         await crashing.wait()
+    assert_process_crash(failure.value)
     assert not target.exists()
     await adapter.close()
 
@@ -546,8 +582,9 @@ async def test_side_effect_can_replay_after_crash_before_tool_result_checkpoint(
         approval["version"],
     )
     await crashing.collect()
-    with pytest.raises(BaseException):
+    with pytest.raises((SimulatedProcessCrash, BaseExceptionGroup)) as failure:
         await crashing.wait()
+    assert_process_crash(failure.value)
     assert effect_path.read_text(encoding="utf-8") == "1"
     await adapter.close()
 
@@ -589,7 +626,8 @@ async def test_side_effect_can_replay_after_crash_before_tool_result_checkpoint(
 
 @pytest.mark.asyncio
 async def test_file_write_reconciles_matching_content_after_result_checkpoint_crash(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     target = tmp_path / "reconciled.txt"
 
@@ -630,8 +668,9 @@ async def test_file_write_reconciles_matching_content_after_result_checkpoint_cr
         approval["version"],
     )
     await crashed.collect()
-    with pytest.raises(BaseException):
+    with pytest.raises((SimulatedProcessCrash, BaseExceptionGroup)) as failure:
         await crashed.wait()
+    assert_process_crash(failure.value)
     await adapter.close()
     assert target.read_text(encoding="utf-8") == "stable content"
 
@@ -682,9 +721,7 @@ async def test_async_sqlite_checkpoint_handles_small_desktop_concurrency(
     paths = adapter_paths(tmp_path)
     start = time.perf_counter()
     async with LangGraphRuntime(model=EchoModel(), **paths) as adapter:
-        handles = await asyncio.gather(
-            *(adapter.start(f"request {index}") for index in range(12))
-        )
+        handles = await asyncio.gather(*(adapter.start(f"request {index}") for index in range(12)))
         event_sets = await asyncio.gather(*(handle.collect() for handle in handles))
         await asyncio.gather(*(handle.wait() for handle in handles))
     elapsed = time.perf_counter() - start

@@ -6,15 +6,20 @@ import asyncio
 import errno
 import json
 import os
+import sys
 import tempfile
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from agent.errors import UserFacingError
 from agent.security.sensitive_paths import is_sensitive_path
 from agent.security.workspace_fs import windows_directory
 from agent.utils.command_shell import powershell_argv
+
+if TYPE_CHECKING:
+    from agent.utils.sandbox import SandboxExecutionResult, SandboxExecutor
 
 
 def bridge_command() -> list[str]:
@@ -59,7 +64,9 @@ def status(settings: dict[str, Any]) -> dict[str, Any]:
 
 
 @asynccontextmanager
-async def _exclusive(state: Path, timeout: float):
+async def _exclusive(state: Path, timeout: float) -> AsyncIterator[None]:
+    if sys.platform != "win32":
+        raise OSError("Windows sandbox locking requires Windows")
     import msvcrt
 
     # SRT grants target a shared account SID. Serialize this user's MaigoKite
@@ -90,8 +97,8 @@ async def _exclusive(state: Path, timeout: float):
             msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
 
 
-async def execute(executor: Any, args: list[str], timeout: float, *, shell: str,
-                  interactive: bool, on_spawn: Any, on_exit: Any) -> Any:
+async def execute(executor: SandboxExecutor, args: list[str], timeout: float, *, shell: str,
+                  interactive: bool, on_spawn: Any, on_exit: Any) -> SandboxExecutionResult:
     from agent.utils.sandbox import SandboxUnavailableError
 
     if executor.windows_sandbox.get("enabled") is not True:
@@ -151,8 +158,9 @@ async def execute(executor: Any, args: list[str], timeout: float, *, shell: str,
                         try:
                             async with control_lock:
                                 try:
-                                    process.stdin.write(b"stop\n")
-                                    await asyncio.wait_for(process.stdin.drain(), 5)
+                                    stdin = cast(asyncio.StreamWriter, process.stdin)
+                                    stdin.write(b"stop\n")
+                                    await asyncio.wait_for(stdin.drain(), 5)
                                 except (BrokenPipeError, ConnectionResetError):
                                     # A normally exiting bridge can close stdin
                                     # between returncode inspection and write.

@@ -5,31 +5,34 @@ import asyncio
 import logging
 from collections.abc import Callable, Coroutine
 from contextvars import ContextVar
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
 from agent.api.contracts import APIError, event
+
+if TYPE_CHECKING:
+    from agent.core import AgentCore
 
 logger = logging.getLogger(__name__)
 _admission = ContextVar[object | None]("http_admission", default=None)
 
 
 class Execution:
-    def __init__(self, core) -> None:
+    def __init__(self, core: AgentCore) -> None:
         self.core = core
         self.bus = core.event_bus
-        self.tasks: set[asyncio.Task[Any]] = set()
+        self.tasks: set[asyncio.Task[object]] = set()
         self.closing = False
 
-    def own(self, operation: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
+    def own[T](self, operation: Coroutine[Any, Any, T]) -> asyncio.Task[T]:
         if self.closing:
             operation.close()
             raise APIError(503, "STOPPING", "应用正在退出，请稍后重新连接。")
         task = asyncio.create_task(operation)
         self.tasks.add(task)
 
-        def release(done: asyncio.Task[Any]) -> None:
+        def release(done: asyncio.Task[object]) -> None:
             self.tasks.discard(done)
             if not done.cancelled() and (error := done.exception()) is not None:
                 logger.warning("Background operation ended: %s", type(error).__name__)
@@ -40,7 +43,7 @@ class Execution:
     async def admit(self, operation: Coroutine[Any, Any, dict[str, Any]],
                     matches: Callable[[str, dict[str, Any]], bool]) -> dict[str, Any]:
         """Return a durable acceptance or replay receipt, leaving execution owned by this service."""
-        receipt = asyncio.get_running_loop().create_future()
+        receipt: asyncio.Future[dict[str, object]] = asyncio.get_running_loop().create_future()
         identity = object()
 
         async def receive(kind: str, payload: dict[str, Any]) -> None:

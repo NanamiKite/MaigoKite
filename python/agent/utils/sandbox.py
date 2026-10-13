@@ -12,12 +12,13 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO, Literal, cast
 
 from agent.errors import UserFacingError
 from agent.security.sensitive_paths import is_sensitive_path, validate_windows_path
@@ -257,11 +258,15 @@ class SandboxExecutor:
         start = time.monotonic()
         # Only command tools request durable workspace logs. Search subprocesses
         # retain their existing temporary output and do not create artifacts.
-        def output_file():
+        def output_file() -> BinaryIO:
             if self.output_directory is None:
-                return tempfile.TemporaryFile()
-            return tempfile.NamedTemporaryFile(mode="w+b", prefix="command_", suffix=".log",
-                                               dir=self.output_directory, delete=False)
+                return cast(BinaryIO, tempfile.TemporaryFile())
+            return cast(BinaryIO, tempfile.NamedTemporaryFile(
+                mode="w+b", prefix="command_", suffix=".log", dir=self.output_directory, delete=False,
+            ))
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = subprocess.CREATE_NO_WINDOW
         with output_file() as stdout_file, output_file() as stderr_file:
             spawning = asyncio.create_task(asyncio.create_subprocess_exec(
                 *argv,
@@ -272,7 +277,7 @@ class SandboxExecutor:
                 cwd=str(self.workdir),
                 env=self._minimal_environment() if env is None else env,
                 start_new_session=os.name == "posix",
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=creationflags,
             ))
             # Cancellation during CreateProcess/fork must still acquire the
             # process handle so the same owner can stop and reap the child.
@@ -288,7 +293,7 @@ class SandboxExecutor:
             capture_error: OSError | None = None
             stop_output = asyncio.Event()
 
-            async def drain(reader: asyncio.StreamReader, destination: Any) -> None:
+            async def drain(reader: asyncio.StreamReader, destination: BinaryIO) -> None:
                 nonlocal output_bytes, output_limit_exceeded, capture_error
                 while chunk := await reader.read(65536):
                     remaining = self.log_limit - output_bytes
@@ -307,21 +312,24 @@ class SandboxExecutor:
                         output_limit_exceeded = True
                         stop_output.set()
 
-            readers = [asyncio.create_task(drain(process.stdout, stdout_file)),
-                       asyncio.create_task(drain(process.stderr, stderr_file))]
+            # Both output pipes are explicitly requested at subprocess creation.
+            readers = [asyncio.create_task(drain(cast(asyncio.StreamReader, process.stdout), stdout_file)),
+                       asyncio.create_task(drain(cast(asyncio.StreamReader, process.stderr), stderr_file))]
             completion = asyncio.gather(process.wait(), *readers)
             output_stop = asyncio.create_task(stop_output.wait())
             try:
                 if stdin_prefix is not None:
-                    process.stdin.write(stdin_prefix)
-                    await asyncio.wait_for(process.stdin.drain(), timeout=5)
+                    stdin = cast(asyncio.StreamWriter, process.stdin)
+                    stdin.write(stdin_prefix)
+                    await asyncio.wait_for(stdin.drain(), timeout=5)
                 if cancelled_during_spawn:
                     raise asyncio.CancelledError
                 if on_spawn is not None:
                     on_spawn(process, stdout_file, stderr_file, stop or self._kill_process_group)
                 # Keep draining during cancellation/timeout cleanup: a child
                 # blocked on a full pipe must not prevent wait() from finishing.
-                done, _ = await asyncio.wait({completion, output_stop}, timeout=timeout,
+                waiters: set[asyncio.Future[list[int | None]] | asyncio.Task[Literal[True]]] = {completion, output_stop}
+                done, _ = await asyncio.wait(waiters, timeout=timeout,
                                              return_when=asyncio.FIRST_COMPLETED)
                 timed_out = not done
                 if completion in done:
@@ -665,7 +673,7 @@ class SandboxExecutor:
 
     @staticmethod
     async def _kill_process_group(process: asyncio.subprocess.Process) -> None:
-        if os.name == "posix":
+        if sys.platform != "win32":
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:

@@ -76,6 +76,8 @@ GET    /workspaces/{workspace_id}/conversations/{conversation_id}/snapshot
 
 发送消息返回已创建的 `task_id`；增量结果通过事件流提供。
 
+请求可选携带 `output_schema`，只约束本次任务的最终结果；省略或为 null 时仍为普通聊天。它不是对话或模型全局设置，详见下方“结构化任务结果”。结构化请求的幂等指纹同时覆盖 Schema；相同键更换 Schema 返回 409，普通聊天原有指纹保持兼容。
+
 `POST .../fork` 需 `Idempotency-Key`（1–128 个无空格可打印 ASCII 字符），body 为 `{}` 或
 `{"message_id":"msg_..."}`。省略消息 ID 时选择最新持久消息；分岔点须为助手回复，源会话有活动/待审批任务时返回 409。
 201 返回新 `Conversation`，含 `forked_from_conversation_id / forked_from_message_id`。同源会话同键同参数返回原分岔；换参数使用旧键返回 409。
@@ -99,6 +101,7 @@ GET    /workspaces/{workspace_id}/conversations/{conversation_id}/snapshot
 ```text
 GET  /workspaces/{workspace_id}/tasks?conversation_id={conversation_id}
 GET  /workspaces/{workspace_id}/tasks/{task_id}
+GET  /workspaces/{workspace_id}/tasks/{task_id}/result
 GET  /workspaces/{workspace_id}/tasks/{task_id}/inspection
 POST /workspaces/{workspace_id}/tasks/{task_id}/cancel
 GET  /workspaces/{workspace_id}/conversations/{conversation_id}/events/history?after={sequence}
@@ -121,6 +124,51 @@ DELETE /workspaces/{workspace_id}/approvals/{approval_id}/authorization
 授权列表返回 `{"authorizations":[...]}`，项包括 `approval_id / conversation_id / task_id / scope / expires_at / resource`；撤销返回 204。两接口要求 owner 且校验主体，不删除原审批审计；任务/会话授权最长 8 小时。每次执行重新核对权限和回执，详见 [工具权限](../agent-capabilities/security/tool-permission.md#窄范围复用)。
 
 GUI 审批卡已接 scope 选择，只展示该审批版本允许的选项；会话管理接授权列表与撤销。快照额外解析 `reuse_scope_json` 为同一 DTO。完全访问显式确认后发送 `danger_full_access`，旧自动模式仅保留显示，不冒充完全访问。本次没有运行交互验收。
+
+#### 结构化任务结果
+
+向现有消息入口 `POST /api/v1/workspaces/personal/conversations/{conversation_id}/messages` 发送：
+
+```json
+{
+  "content": "读取工作区 README，返回摘要与待办建议。",
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "summary": {"type": "string"},
+      "action_items": {"type": "array", "items": {"type": "string"}}
+    },
+    "required": ["summary", "action_items"],
+    "additionalProperties": false
+  }
+}
+```
+
+仍返回 202 与 `task_id`；工具、审批、提问及取消沿用原入口，不新增工作流执行框架。首版复用 LangChain `ToolStrategy`，需要所选服务/模型支持工具调用；不根据厂商名称承诺支持，也不静默降为未经校验的文本。`/tool` 直接执行命令不支持同时指定输出 Schema。
+
+Schema 须为 JSON Schema 2020-12，根类型为 object，最多 16 KiB / 32 层。支持嵌套类型、required、枚举等标准约束及本地片段引用；不支持 `$id`、外部引用或顶层 `oneOf`（LangChain 将其解释为多个结果工具，首版只接受单一结果）。引用校验不访问网络或文件。结果最多 256 KiB / 64 层，NaN/Infinity 不接受；`format` 按标准注解处理，不承诺业务字段的真实性。无效 Schema 在准入前拒绝，不创建任务或调用模型。
+
+`GET /api/v1/workspaces/{workspace_id}/tasks/{task_id}/result` 返回：
+
+```json
+{
+  "task_id": "task_...",
+  "status": "succeeded",
+  "ready": true,
+  "output_mode": "json_schema",
+  "schema": {"type": "object"},
+  "value": {"summary": "项目摘要", "action_items": ["补充安装说明"]},
+  "error": ""
+}
+```
+
+示例中的 schema 为节选；实际响应返回该任务完整原始 Schema。接口受既有工作区身份和任务归属检查保护。运行、待审批、失败、取消或尚未提交结果时返回 `ready=false / value=null`；普通聊天为 `output_mode=text / schema=null / ready=false`。下游必须同时检查 `status=succeeded` 和 `ready=true`，不解析消息、思考或工具进度作为结果。失败时 `error` 为安全产品诊断；未知/越权任务返回 404。
+
+任务列表与单任务 DTO 增加 `output_mode / result_ready`；`task.started` 带输出模式，结构化提交后的 `task.succeeded` 带 `result_ready=true`。JSON 结果仍同步为助手消息以兼容既有聊天展示，只有独立结果接口是工作流消费入口。流式文字仍可表示执行进度，不是已校验结果。内部结果工具不进入产品工具目录、审批或 `tool.*` 记录；校验不通过、多个结果、结果与尚待执行工具混交时任务失败，不自动修补、重试整个任务或提供半成品。
+
+Schema 随任务准入固定保存，审批/提问续接和重启恢复读取同一份约束；同 Schema 的提交也不会共享下一任务的执行状态。结果、对应助手消息和成功状态同事务提交，停止先提交则不保存结果，成功先提交则停止不撤销结果。事件通知晚于事务；通知失败后以查询结果与快照为准。
+
+若最终 checkpoint 已完成而结果事务尚未提交，最新 interrupted 任务可经既有 owner/version 恢复入口只补存结果，不重放工具；仍未完成的执行保留现有文件读写恢复限制，不新增浏览器/MCP 副作用重放。`structured_output / task_result` 能力位表示后端入口已接通，不表示所有 Provider 已实测。前端配置入口、自动串联步骤及运行验收本批不包含。
 
 ### 3.4 用户记忆与数据摘要
 

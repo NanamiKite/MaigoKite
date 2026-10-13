@@ -55,7 +55,6 @@ const en: Record<string, string> = {
   '模型已切换为 {0}': 'Model switched to {0}',
   安全: 'Safety',
   提示词安全审查: 'Prompt safety review',
-  '当前对话不执行安全审查。': 'Safety review is not performed in conversations.',
   '当前服务不支持安全设置，请更新服务后重试。': 'This service does not support safety settings. Update it and try again.',
   保存安全设置: 'Save safety settings',
   决策模型: 'Decision model',
@@ -68,13 +67,13 @@ const en: Record<string, string> = {
   审查规则: 'Review rules',
   审查请求格式: 'Review request format',
   'JEV 布局': 'JEV layout',
-  'Message 对象（0.8B 推荐）': 'Message object (recommended for 0.8B)',
-  '内嵌（4B 推荐）': 'Inline (recommended for 4B)',
-  'Message 把待审增量放进 state.message，内嵌放进问题指令；按决策模型实测选择。':
-    'Message puts the reviewed delta in state.message; inline embeds it in the question instructions. Choose based on measurements for your decision model.',
+  消息对象: 'Message object',
+  内嵌指令: 'Inline instructions',
+  'OpenAI 兼容': 'OpenAI-compatible',
   审查状态文本: 'Review state text',
   留空使用默认值: 'Leave blank to use the default',
   风险阈值: 'Risk threshold',
+  风险阈值说明: 'About the risk threshold',
   '风险分值高于此值时需要人工确认。': 'Risk scores above this threshold require manual confirmation.',
   可信模型: 'Trusted models',
   '可信模型 ID': 'Trusted model ID',
@@ -529,7 +528,8 @@ const en: Record<string, string> = {
   '工作区没有未提交变更。': 'No uncommitted changes.',
   工作抽屉: 'Workspace drawer',
   工作方式: 'Mode',
-  '工具仍遵循当前权限。': 'Tools follow the current permissions.',
+  '已启用 {0}/{1}': '{0}/{1} enabled',
+  操作失败: 'Operation failed',
   工具耗时: 'Tool time',
   已保存: 'Saved',
   已停止: 'Stopped',
@@ -542,7 +542,6 @@ const en: Record<string, string> = {
   '已选 {0} 个': '{0} selected',
   已选模型: 'Selected models',
   已配置: 'Configured',
-  '已配置的搜索服务优先使用。': 'Configured search providers take priority.',
   已配置的模型: 'Configured models',
   '已配置；留空继续使用': 'Configured; leave blank to keep',
   已驳回: 'Denied',
@@ -1263,7 +1262,39 @@ const en: Record<string, string> = {
   '速记快捷键在桌面应用中设置。': 'Set the quick-note shortcut in the desktop app.',
   保存失败: 'Could not save',
   暂无说明: 'No description available',
-  模型工具说明: 'Tool instructions for the model',
+  工具说明: 'Tool details',
+  '模型指令（原文）': 'Model instructions (original)',
+  '服务说明（原文）': 'Service description (original)',
+  '按路径读取文本文件，支持指定编码。较大的 UTF-8 文件可以分段继续读取，长内容不会一次全部载入。':
+    'Read a text file by path using the specified encoding. Large UTF-8 files can be read in successive pages instead of loading all their content at once.',
+  '在指定路径创建文件或覆盖已有内容，可指定编码并按需创建父文件夹。覆盖会替换原文件内容。':
+    'Create a file or overwrite an existing file at the specified path. Supports a chosen encoding and creating parent folders as needed. Overwriting replaces the original content.',
+  '替换文件中完全匹配的文字，空格和换行也必须一致。可以限制替换次数，或替换全部匹配项。':
+    'Replace exact text matches in a file, including spaces and line breaks. Limit the number of replacements or replace every match.',
+  '按文件名或路径模式查找文件。遵循忽略规则，跳过隐藏文件，不跟随符号链接。':
+    'Find files by filename or path pattern. Respects ignore rules, skips hidden files and does not follow symbolic links.',
+  '在文件或文件夹中搜索文字，支持正则表达式、忽略大小写和显示匹配处的前后内容。遵循忽略规则，跳过隐藏文件和二进制文件，不跟随符号链接。':
+    'Search text in files or folders using regular expressions, case-insensitive matching and surrounding lines. Respects ignore rules, skips hidden and binary files and does not follow symbolic links.',
+  '在指定工作目录执行命令，返回标准输出、错误输出和退出码。支持 PowerShell 或直接运行程序；受限权限下使用沙箱，联网或沙箱外执行可能需要批准。':
+    'Run a command in the specified working directory and return standard output, error output and the exit code. Supports PowerShell or direct program execution. Restricted modes use a sandbox; network access or execution outside it may require approval.',
+  '通过 Tavily、Google 或 DuckDuckGo 搜索网页，返回标题、链接和摘要。Tavily 和 Google 需要配置搜索凭证，DuckDuckGo 无需密钥。':
+    'Search the web with Tavily, Google or DuckDuckGo and return titles, links and summaries. Tavily and Google require search credentials; DuckDuckGo does not require a key.',
+  '读取公开 HTTP(S) 网页并转换为便于阅读的文本，不运行网页脚本。需要登录或交互的网页可使用浏览器工具。':
+    'Read a public HTTP(S) page and convert it to readable text without running page scripts. Use the browser tool for pages that need sign-in or interaction.',
+  '打开网页、读取内容、填写表单、点击、按键和截图，也可以上传或下载工作区文件。可保留登录状态；需要登录时，由你在浏览器窗口中操作。':
+    'Open pages, read content, fill forms, click, press keys and take screenshots. Upload or download workspace files and retain sign-in state. Sign in yourself in the browser window when needed.',
+  '列出已安装的本地技能，或读取某个技能的操作指引。读取指引不会自动执行技能目录中的程序。':
+    'List installed local skills or read the instructions for one skill. Reading instructions does not automatically run programs in the skill folder.',
+  '在当前工作区查看、添加、更新或清空待办事项，也可以标记完成。清空会删除该工作区的待办记录。':
+    'View, add, update or clear the current workspace TODO list, or mark items complete. Clearing deletes the workspace TODO records.',
+  '暂停当前任务一段时间后继续，适合需要等待的操作。':
+    'Pause the current task for a specified time, then continue. Useful for operations that need a short wait.',
+  '当任务需要你的补充信息或选择时提出问题，并等待回答后继续。可以提供候选答案，也可以直接填写回复。':
+    'Ask for information or a choice needed to continue the task, and wait for your answer. Choose a suggested answer or write your own reply.',
+  '把独立的资料查找任务交给只读子助手。子助手仅能读取、查找和搜索工作区文件，不能修改文件或继续派发任务；使用的模型、派发数量和并发数由当前对话设置限制。':
+    'Delegate an independent investigation to a read-only subagent. It can only read, find and search workspace files, not change files or delegate further. The conversation settings limit model selection, dispatch count and concurrency.',
+  '查看当前对话允许子助手使用的已配置模型，包含模型名称与准确标识。列表不包含服务地址或密钥，也不代表模型服务当前一定可连接。':
+    'List configured models allowed for subagents in the current conversation, including model names and exact IDs. The list contains no service URLs or keys and does not guarantee live connectivity.',
   向你提问: 'Ask you a question',
   '向你提问，等待回答后继续。': 'Ask a question and wait for your answer before continuing.',
   派发子任务: 'Delegate a subtask',

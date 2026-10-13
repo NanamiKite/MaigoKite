@@ -41,7 +41,8 @@ if TYPE_CHECKING:
     from agent.runtime.subagents import ChildContext
 
 
-class ContextBudgetExceeded(UserFacingError):
+# The class name is persisted and sent as error_type in compaction/task events.
+class ContextBudgetExceeded(UserFacingError):  # noqa: N818
     """A request needs smaller inputs, not silent loss of its instructions."""
 
     def __init__(self, message: str, *, reason: str = "") -> None:
@@ -192,10 +193,17 @@ class _SummaryObservation(AsyncCallbackHandler):
         self.error: BaseException | None = None
 
     async def on_chat_model_start(self, serialized: Any, messages: Any, *, run_id: Any, **kwargs: Any) -> None:
-        if any(count_tokens_approximately(batch, use_usage_metadata_scaling=False) > self.input_budget for batch in messages):
+        if any(
+            count_tokens_approximately(batch, use_usage_metadata_scaling=False) > self.input_budget
+            for batch in messages
+        ):
             raise ContextBudgetExceeded("摘要请求本身超过输入预算，原始历史未替换。请缩小工具返回或导入范围。")
         await _charge_call(self.context)
-        await _emit(self.context, "model.call.started", {"call_id": str(run_id), "purpose": "summary", **model_identity(self.model)})
+        await _emit(
+            self.context,
+            "model.call.started",
+            {"call_id": str(run_id), "purpose": "summary", **model_identity(self.model)},
+        )
 
     async def on_llm_end(self, response: Any, *, run_id: Any, **kwargs: Any) -> None:
         await _emit(self.context, "model.call.completed", {"call_id": str(run_id), "purpose": "summary"})
@@ -232,7 +240,9 @@ class SafeSummarizationMiddleware(SummarizationMiddleware):
     System instructions remain outside the lossy summary.
     """
 
-    def __init__(self, model: Any, *, input_budget: int, system_prompt: str = "", tools: list[Any] | None = None) -> None:
+    def __init__(
+        self, model: Any, *, input_budget: int, system_prompt: str = "", tools: list[Any] | None = None
+    ) -> None:
         super().__init__(model=model, trigger=("tokens", input_budget), trim_tokens_to_summarize=None)
         self.input_budget = input_budget
         self.system_prompt = system_prompt
@@ -318,7 +328,11 @@ class SafeSummarizationMiddleware(SummarizationMiddleware):
                                                if item.id in protected_inputs)])
         # Keep the active user turn verbatim. Native middleware owns safe tool-pair
         # partitioning. There is no fixed post-compaction window-filling target.
-        recent = max(count_tokens_approximately(conversation[latest_index:], use_usage_metadata_scaling=False), min(history_budget // 4, 8000), 1)
+        recent = max(
+            count_tokens_approximately(conversation[latest_index:], use_usage_metadata_scaling=False),
+            min(history_budget // 4, 8000),
+            1,
+        )
         if force:
             recent = max(count_tokens_approximately(conversation[latest_index:], use_usage_metadata_scaling=False), 1)
         observer = _SummaryObservation(context, input_budget, configured=self.input_budget)
@@ -368,7 +382,9 @@ class SafeSummarizationMiddleware(SummarizationMiddleware):
         if observer.error is not None:
             # Native summarization can swallow provider failures into text. Do
             # not mistake that for a successful checkpoint replacement.
-            raise ContextBudgetExceeded("上下文压缩失败：摘要请求失败，原始历史未替换；请检查实际窗口和摘要输入大小。") from observer.error
+            raise ContextBudgetExceeded(
+                "上下文压缩失败：摘要请求失败，原始历史未替换；请检查实际窗口和摘要输入大小。"
+            ) from observer.error
         if update is None:
             await _emit(context, "context.compaction.skipped", {"reason": "no_compressible_history"})
             return None
@@ -428,7 +444,9 @@ class ContextBudgetMiddleware(AgentMiddleware[AgentState[object], ContextT]):
             context.context_capacity = capacity
             fixed = [SystemMessage(self.summarizer.system_prompt)] if self.summarizer.system_prompt else []
             overhead = count_tokens_approximately(
-                fixed, tools=output_budget_tools(self.summarizer.budget_tools, context), use_usage_metadata_scaling=False,
+                fixed,
+                tools=output_budget_tools(self.summarizer.budget_tools, context),
+                use_usage_metadata_scaling=False,
             )
             context.result_budget = (effective_input_budget(model, self.max_tokens, capacity), overhead)
         return await handler(request)
@@ -566,7 +584,9 @@ class ContextBudgetMiddleware(AgentMiddleware[AgentState[object], ContextT]):
                 "请缩小读取范围、减少工具，或增大模型服务的实际加载窗口。原始历史未丢弃。"
             )
         await _charge_call(context)
-        await _emit(context, "model.call.started", {"call_id": call_id, "purpose": "response", **model_identity(request.model)})
+        await _emit(
+            context, "model.call.started", {"call_id": call_id, "purpose": "response", **model_identity(request.model)}
+        )
         clock = _TokenClock()
         callbacks = request.model.callbacks
         if callbacks is None or isinstance(callbacks, list):

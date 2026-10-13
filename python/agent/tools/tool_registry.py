@@ -1,8 +1,11 @@
 """Single registry for native and MCP tools."""
 from __future__ import annotations
-from typing import Any
+
 from collections.abc import Sequence
+from typing import Any
+
 from agent.tools.base import BaseTool
+
 
 class ToolRegistry:
     DEFAULT_TOOLS = (

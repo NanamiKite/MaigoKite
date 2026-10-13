@@ -265,12 +265,13 @@ class Credentials:
     async def prepare(self, workspace: str, conversation_id: str, task_id: str = "", *,
                       models_only: bool = False, tool_name: str = "") -> None:
         conversation = await self.core.get_conversation(workspace, conversation_id)
-        policy = conversation
+        subagent_models_json = conversation["subagent_model_ids_json"]
         if task_id:
-            policy = await self.core.get_task(workspace, task_id)
-            if policy["conversation_id"] != conversation_id:
+            task = await self.core.get_task(workspace, task_id)
+            if task["conversation_id"] != conversation_id:
                 raise APIError(409, "TASK_MISMATCH", "任务不属于当前对话。")
-        model_ids = {conversation.get("model_id") or "", *json.loads(policy.get("subagent_model_ids_json") or "[]")}
+            subagent_models_json = task["subagent_model_ids_json"]
+        model_ids = {conversation.get("model_id") or "", *json.loads(subagent_models_json or "[]")}
         for model_id in model_ids:
             await self.restore_model(workspace, model_id)
         if models_only:

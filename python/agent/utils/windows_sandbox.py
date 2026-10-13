@@ -111,7 +111,9 @@ async def execute(executor: SandboxExecutor, args: list[str], timeout: float, *,
     if any(Path(path).is_relative_to(executor.workspace_root) for path in bridge):
         # A deny on just bridge.mjs cannot protect every mutable ancestor or
         # its imported SDK. Keep the trusted host outside all workspace grants.
-        raise UserFacingError("沙箱宿主 Node.js 和 scripts/windows-sandbox 必须位于当前工作区之外；请使用独立工作目录（如 .workspace）。")
+        raise UserFacingError(
+            "沙箱宿主 Node.js 和 scripts/windows-sandbox 必须位于当前工作区之外；请使用独立工作目录（如 .workspace）。"
+        )
     local = os.environ.get("LOCALAPPDATA")
     if not local:
         raise UserFacingError("LOCALAPPDATA 不可用，无法保存 Windows 沙箱的宿主状态。")
@@ -169,10 +171,12 @@ async def execute(executor: SandboxExecutor, args: list[str], timeout: float, *,
                             # Allow SDK ACL revocation and Job close before the
                             # product's cancellation/timeout can become terminal.
                             await asyncio.wait_for(asyncio.shield(process.wait()), 90)
-                        except (OSError, TimeoutError):
+                        except OSError, TimeoutError:
                             await executor._kill_process_group(process)
                             await process.wait()
-                            raise UserFacingError("Windows 沙箱清理未确认；已停止宿主桥接，请检查沙箱 ACL 恢复状态。") from None
+                            raise UserFacingError(
+                                "Windows 沙箱清理未确认；已停止宿主桥接，请检查沙箱 ACL 恢复状态。"
+                            ) from None
                     try:
                         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
                     except (OSError, ValueError):
@@ -180,7 +184,9 @@ async def execute(executor: SandboxExecutor, args: list[str], timeout: float, *,
                     if receipt.get("cleanup_complete") is not True:
                         raise UserFacingError("Windows 沙箱 ACL 清理失败，不能把本次运行报告为成功。")
 
-                payload = json.dumps({"argv": resolved, "cwd": str(executor.workdir), "config": config}, ensure_ascii=False)
+                payload = json.dumps(
+                    {"argv": resolved, "cwd": str(executor.workdir), "config": config}, ensure_ascii=False
+                )
                 if len(payload.encode("utf-8")) > 1024 * 1024:
                     raise UserFacingError("Windows 沙箱路径规则过多，请缩小工作区。")
                 environment = bridge_environment()

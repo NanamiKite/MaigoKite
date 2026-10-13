@@ -12,13 +12,12 @@ import socket
 import tempfile
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 from agent.errors import UserFacingCancellation, UserFacingError
-
 
 _CLEANUP_PENDING = (
     "浏览器页面清理未确认，已禁止继续操作该会话；外部动作可能尚未停止。"
@@ -26,12 +25,17 @@ _CLEANUP_PENDING = (
 )
 
 
-class BrowserRuntimeUnavailable(RuntimeError):
+class BrowserRuntimeUnavailableError(RuntimeError):
     """Raised when the optional browser runtime cannot be started."""
 
 
-class BrowserSessionUnavailable(KeyError):
+class BrowserSessionUnavailableError(KeyError):
     """A page handle expired or belonged to a previous Core process."""
+
+
+# Keep existing imports and exception handlers bound to the same classes.
+BrowserRuntimeUnavailable = BrowserRuntimeUnavailableError
+BrowserSessionUnavailable = BrowserSessionUnavailableError
 
 
 async def _require_public_http_url(url: str) -> None:
@@ -227,10 +231,9 @@ class BrowserRuntime:
             try:
                 context = await asyncio.shield(opening)
             except asyncio.CancelledError:
-                try:
+                # Preserve the explicit stop, not a late launch error.
+                with suppress(Exception):
                     context = await asyncio.shield(opening)
-                except Exception:
-                    pass  # Preserve the explicit stop, not a late launch error.
                 raise
             # Own the context before navigation; a failed/cancelled opening must
             # remain reclaimable even if Playwright's first close attempt fails.
@@ -246,8 +249,14 @@ class BrowserRuntime:
             self._pages[session_id] = page
             self._last_used[session_id] = asyncio.get_running_loop().time()
             self._ensure_reaper()
-            return {**await self.snapshot(session_id), "profile": profile, "visible": visible,
-                    "login_hint": "Complete login in the browser window, then ask the agent to continue." if visible else ""}
+            return {
+                **await self.snapshot(session_id),
+                "profile": profile,
+                "visible": visible,
+                "login_hint": "Complete login in the browser window, then ask the agent to continue."
+                if visible
+                else "",
+            }
         except BaseException as exc:
             if context is not None:
                 # Startup may have been cancelled before normal registration.
@@ -287,7 +296,16 @@ class BrowserRuntime:
             raise ValueError("browser file path is outside the allowed workspace")
         return target
 
-    async def upload(self, session_id: str, selector: str, path: str, *, expected_url: str, workspace_root: str | Path | None = None, unrestricted: bool = False) -> dict[str, Any]:
+    async def upload(
+        self,
+        session_id: str,
+        selector: str,
+        path: str,
+        *,
+        expected_url: str,
+        workspace_root: str | Path | None = None,
+        unrestricted: bool = False,
+    ) -> dict[str, Any]:
         page = self._require_page(session_id)
         if page.url != expected_url:
             raise UserFacingError("审批后页面地址已变化，未上传文件；请重新查看页面并申请审批。")
@@ -297,7 +315,16 @@ class BrowserRuntime:
         await page.locator(selector).first.set_input_files(str(target), timeout=10_000)
         return {"session_id": session_id, "url": page.url, "path": str(target), "uploaded": True}
 
-    async def download(self, session_id: str, selector: str, path: str, *, expected_url: str, workspace_root: str | Path | None = None, unrestricted: bool = False) -> dict[str, Any]:
+    async def download(
+        self,
+        session_id: str,
+        selector: str,
+        path: str,
+        *,
+        expected_url: str,
+        workspace_root: str | Path | None = None,
+        unrestricted: bool = False,
+    ) -> dict[str, Any]:
         page = self._require_page(session_id)
         if page.url != expected_url:
             raise UserFacingError("审批后页面地址已变化，未触发下载；请重新查看页面并申请审批。")

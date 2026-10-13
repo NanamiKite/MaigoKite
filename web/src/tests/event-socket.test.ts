@@ -5,6 +5,7 @@ import { api, type AgentEvent } from '@/api/client'
 
 const event = (sequence: number, type = 'task.succeeded'): AgentEvent => ({
   schema_version: 1, event_id: `e-${sequence}`, sequence, type,
+  occurred_at: '2026-10-13T00:00:00Z',
   conversation_id: 'c', task_id: 't', payload: {},
 })
 const ready = { ...event(0, 'stream.ready'), event_id: 'ready' }
@@ -113,13 +114,29 @@ describe('event acknowledgement and replay', () => {
 })
 
 describe('WebSocket frame boundary', () => {
+  it.each([
+    ['a missing timestamp', { ...event(1), occurred_at: undefined }],
+    ['a missing text payload', event(1, 'message.delta')],
+  ])('rejects a durable event with %s before calling the consumer', (_description, frame) => {
+    vi.stubGlobal('WebSocket', class { close = vi.fn() })
+    const consume = vi.fn()
+    const socket = api.connectEvents('c', consume)
+
+    expect(() => socket.onmessage!(new MessageEvent('message', { data: JSON.stringify(frame) }))).not.toThrow()
+    expect(consume).not.toHaveBeenCalled()
+    expect(socket.close).toHaveBeenCalledTimes(1)
+  })
+
   it('ignores invalid JSON but does not swallow consumer exceptions as malformed frames', () => {
     vi.stubGlobal('WebSocket', class { close = vi.fn() })
     const consume = vi.fn().mockImplementation(() => { throw new Error('consumer defect') })
     const socket = api.connectEvents('c', consume)
     expect(() => socket.onmessage!(new MessageEvent('message', { data: '{broken' }))).not.toThrow()
     expect(consume).not.toHaveBeenCalled()
+    expect(socket.close).toHaveBeenCalledTimes(1)
     expect(() => socket.onmessage!(new MessageEvent('message', { data: JSON.stringify(event(1)) }))).toThrow('consumer defect')
     expect(consume).toHaveBeenCalledTimes(1)
+    expect(consume).toHaveBeenCalledWith(event(1))
+    expect(socket.close).toHaveBeenCalledTimes(1)
   })
 })

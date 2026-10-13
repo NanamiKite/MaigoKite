@@ -18,7 +18,9 @@ async def _validate_public_url(url: str) -> None:
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
         raise ValueError("only public HTTP(S) URLs without embedded credentials are allowed")
-    addresses = await asyncio.to_thread(socket.getaddrinfo, parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+    addresses = await asyncio.to_thread(
+        socket.getaddrinfo, parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80)
+    )
     for address in addresses:
         ip = ipaddress.ip_address(address[4][0])
         if not ip.is_global:
@@ -93,10 +95,7 @@ class WebFetchTool(BaseTool):
 
                 # Try to detect charset
                 content_type = resp.headers.get("content-type", "")
-                if "charset=" in content_type:
-                    encoding = content_type.split("charset=")[-1].strip()
-                else:
-                    encoding = "utf-8"
+                encoding = content_type.split("charset=")[-1].strip() if "charset=" in content_type else "utf-8"
 
                 html_text = resp.content.decode(encoding, errors="replace")
 

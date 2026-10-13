@@ -41,9 +41,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y ripgrep bubblewrap
-      - name: Install locked Python development dependencies
+      - name: Install locked Python check dependencies
         id: dependencies
-        run: uv sync --locked --extra dev --no-default-groups
+        # Whole-source type checking includes optional adapters. These extras
+        # belong to the check environment, not the default application install.
+        run: uv sync --locked --extra dev --extra vectorstores --no-default-groups
       - name: Ruff
         id: ruff
         shell: bash

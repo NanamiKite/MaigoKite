@@ -28,7 +28,9 @@ class FileReadParams(BaseModel):
     offset: int = Field(default=0, ge=0, description="Byte offset from a previous next_offset. Paging requires UTF-8.")
 
 
-async def _file_read_impl(path: str, encoding: str = "utf-8", max_bytes: int = 16_000, offset: int = 0) -> dict[str, Any]:
+async def _file_read_impl(
+    path: str, encoding: str = "utf-8", max_bytes: int = 16_000, offset: int = 0
+) -> dict[str, Any]:
     """Read file contents with a configurable size limit.
 
     Args:
@@ -96,7 +98,8 @@ async def _file_read_impl(path: str, encoding: str = "utf-8", max_bytes: int = 1
 
 FILE_READ_DESCRIPTION = (
     "Read the contents of a file at the given path. "
-    "Reads one bounded page. Use next_offset to continue a UTF-8 file; prefer targeted search before reading large files."
+    "Reads one bounded page. Use next_offset to continue a UTF-8 file; "
+    "prefer targeted search before reading large files."
 )
 
 

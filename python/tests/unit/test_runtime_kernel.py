@@ -9,6 +9,7 @@ from agent.tools.base import ExecutionContext
 from agent.tools.native.browser import BrowserTool
 from agent.tools.native.skill import SkillTool
 from agent.tools.permission_mgr import PermissionManager, RiskLevel
+from pydantic import ValidationError
 
 
 def test_skill_registry_discovers_declarative_skills(tmp_path: Path) -> None:
@@ -89,28 +90,82 @@ async def test_task_event_journal_and_restart_reconciliation(tmp_path: Path) -> 
     database = tmp_path / "agent.db"
     repository = SQLiteRepository(database)
     await repository.open()
-    conversation = await repository.create_conversation("personal", "test")
-    await repository.create_task_state("task_1", "personal", conversation["id"], "continue work", "running", "input")
-    first = await repository.append_task_event(
-        "task.started", {"task_id": "task_1", "conversation_id": conversation["id"]}
-    )
-    second = await repository.append_task_event(
-        "tool.started", {"task_id": "task_1", "conversation_id": conversation["id"]}
-    )
-    assert first["sequence"] == 1
-    assert second["sequence"] == 2
-    await repository.close()
+    try:
+        conversation = await repository.create_conversation("personal", "test")
+        await repository.create_task_state(
+            "task_1", "personal", conversation["id"], "continue work", "running", "input"
+        )
+        first = await repository.append_task_event(
+            "task.started",
+            {"task_id": "task_1", "conversation_id": conversation["id"], "input_text": "input", "trace_id": "trace_1"},
+        )
+        second = await repository.append_task_event(
+            "tool.started",
+            {
+                "task_id": "task_1",
+                "conversation_id": conversation["id"],
+                "tool_call_id": "call_1",
+                "tool_name": "file_read",
+                "arguments": {"path": "sample.txt"},
+            },
+        )
+        assert first["sequence"] == 1
+        assert second["sequence"] == 2
+    finally:
+        await repository.close()
 
     reopened = SQLiteRepository(database)
     await reopened.open()
-    interrupted = await reopened.recover_interrupted_tasks()
-    events = await reopened.list_task_events("personal", conversation["id"], 1)
-    task = await reopened.get_task("personal", "task_1")
-    await reopened.close()
+    try:
+        interrupted = await reopened.recover_interrupted_tasks()
+        events = await reopened.list_task_events("personal", conversation["id"], 1)
+        task = await reopened.get_task("personal", "task_1")
+    finally:
+        await reopened.close()
 
     assert interrupted[0]["id"] == "task_1"
     assert task["status"] == "interrupted"
     assert [item["sequence"] for item in events] == [2]
+    assert events[0]["payload"]["tool_call_id"] == "call_1"
+    assert events[0]["payload"]["arguments"] == {"path": "sample.txt"}
+
+
+@pytest.mark.parametrize(
+    ("event_type", "payload", "invalid_fields"),
+    [
+        pytest.param("task.started", {}, {"input_text", "trace_id"}, id="task-missing-fields"),
+        pytest.param("task.started", {"input_text": "input", "trace_id": 7}, {"trace_id"}, id="task-invalid-trace"),
+        pytest.param("tool.started", {}, {"tool_call_id", "tool_name", "arguments"}, id="tool-missing-fields"),
+        pytest.param(
+            "tool.started",
+            {"tool_call_id": "call_1", "tool_name": "file_read", "arguments": "sample.txt"},
+            {"arguments"},
+            id="tool-invalid-arguments",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_event_journal_rejects_invalid_payloads_without_persisting(
+    tmp_path: Path, event_type: str, payload: dict[str, object], invalid_fields: set[str]
+) -> None:
+    repository = SQLiteRepository(tmp_path / "agent.db")
+    await repository.open()
+    try:
+        conversation = await repository.create_conversation("personal", "test")
+        await repository.create_task_state("task_1", "personal", conversation["id"], "task", "running", "input")
+        with pytest.raises(ValidationError) as rejected:
+            await repository.append_task_event(
+                event_type, {"task_id": "task_1", "conversation_id": conversation["id"], **payload}
+            )
+        assert {error["loc"][0] for error in rejected.value.errors()} == invalid_fields
+        assert await repository.list_task_events("personal", conversation["id"], 0) == []
+        accepted = await repository.append_task_event(
+            "task.started",
+            {"task_id": "task_1", "conversation_id": conversation["id"], "input_text": "input", "trace_id": "trace_1"},
+        )
+        assert accepted["sequence"] == 1
+    finally:
+        await repository.close()
 
 
 @pytest.mark.asyncio

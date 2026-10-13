@@ -65,7 +65,7 @@ class ReasoningChatOpenAI(ChatOpenAI):
             if isinstance(usage, BaseModel):
                 usage = usage.model_dump()
             fields = [
-                getattr(choice, "message").model_dump(exclude={"parsed"}, warnings=False)
+                choice.message.model_dump(exclude={"parsed"}, warnings=False)
                 for choice in getattr(response, "choices", [])
             ]
         for generation, source in zip(result.generations, fields, strict=False):

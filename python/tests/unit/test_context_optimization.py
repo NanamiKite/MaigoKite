@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from agent.config_manager import ConfigManager
+from agent.data_contracts import JSONObject
 from agent.models.context_capacity import ContextCapacity
 from agent.models.runtime import ChatModelRuntime, ChatModelSettings
 from agent.models.usage import message_usage
@@ -16,7 +16,7 @@ from agent.runtime import LangGraphRuntime, ProductToolSpec, RuntimeRunRequest
 from agent.runtime.context import ContextBudgetExceeded, ContextBudgetMiddleware, SafeSummarizationMiddleware
 from agent.skill_registry import SkillDefinition, SkillRegistry
 from agent.tools.native.skill import SkillTool
-from langchain.agents.middleware.types import ModelRequest
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -27,9 +27,11 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from langgraph.runtime import Runtime
 from pydantic import Field
 
 from tests.fixtures.chat_model import FakeModel
+from tests.fixtures.runtime_context import BudgetContext
 
 
 class InspectModel(BaseChatModel):
@@ -93,17 +95,16 @@ class InspectModel(BaseChatModel):
 
 @pytest.mark.asyncio
 async def test_context_budget_preserves_messages_and_counts_tools():
-    # The deleted legacy trim projection is not part of the runtime anymore.
-    # Exercise the native middleware boundary without retaining a second context manager.
+    # Count tools without altering conversation messages or stable system instructions.
     messages = [HumanMessage("hello"), AIMessage("answer"), HumanMessage("next")]
     original = list(messages)
     request = ModelRequest(model=InspectModel(), messages=messages, system_message=SystemMessage("stable rules"),
-                              tools=[], runtime=SimpleNamespace(context=SimpleNamespace(
+                              tools=[], runtime=Runtime(context=BudgetContext(
                                   context_capacity=ContextCapacity(256, "test", "known"))))
     seen = []
     async def handler(value):
         seen.append(value)
-        return SimpleNamespace(result=[])
+        return ModelResponse(result=[])
     await ContextBudgetMiddleware(500).awrap_model_call(request, handler)
     assert messages == original and len(seen) == 1
     assert seen[0].messages == original and seen[0].system_message == request.system_message
@@ -117,6 +118,45 @@ async def test_context_budget_preserves_messages_and_counts_tools():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("structured", [False, True])
+async def test_context_budget_counts_result_schema_before_model_call(structured: bool) -> None:
+    schema: JSONObject | None = {
+        "type": "object",
+        "properties": {
+            "answer": {"type": "string", "description": "result documentation " * 100},
+        },
+        "required": ["answer"],
+    } if structured else None
+    context = BudgetContext(
+        request=RuntimeRunRequest(output_schema=schema),
+        context_capacity=ContextCapacity(256, "test", "known"),
+    )
+    messages = [HumanMessage("short request")]
+    original = list(messages)
+    request = ModelRequest(
+        model=InspectModel(), messages=messages, tools=[], runtime=Runtime(context=context),
+    )
+    calls = 0
+
+    async def handler(value: ModelRequest[BudgetContext]) -> ModelResponse:
+        nonlocal calls
+        calls += 1
+        assert value.messages == original
+        assert value.tools == []
+        return ModelResponse(result=[])
+
+    middleware = ContextBudgetMiddleware[BudgetContext](256)
+    if structured:
+        with pytest.raises(ContextBudgetExceeded):
+            await middleware.awrap_model_call(request, handler)
+    else:
+        await middleware.awrap_model_call(request, handler)
+    assert calls == (0 if structured else 1)
+    assert messages == original
+    assert context.request.output_schema == schema
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("tool_result", [False, True])
 async def test_oversized_current_turn_fails_without_slicing(tool_result):
     messages = [HumanMessage("用户指令" * (1 if tool_result else 1000))]
@@ -127,7 +167,7 @@ async def test_oversized_current_turn_fails_without_slicing(tool_result):
         ])
     original = list(messages)
     request = ModelRequest(model=InspectModel(), messages=messages, system_message=None, tools=[],
-                              runtime=SimpleNamespace(context=SimpleNamespace(
+                              runtime=Runtime(context=BudgetContext(
                                   context_capacity=ContextCapacity(50, "test", "known"))))
     async def forbidden(_request):
         raise AssertionError("oversized request reached the model")
@@ -182,7 +222,7 @@ async def test_summary_failure_preserves_original_state_and_system_rules():
         HumanMessage("current request"),
     ]
     state = {"messages": messages}
-    runtime = SimpleNamespace(context=SimpleNamespace(context_capacity=ContextCapacity(8000, "test", "known")))
+    runtime = Runtime(context=BudgetContext(context_capacity=ContextCapacity(8000, "test", "known")))
     middleware = SafeSummarizationMiddleware(
         InspectModel(summary_error=True),
         input_budget=8000,
@@ -206,7 +246,7 @@ async def test_summary_request_over_budget_preserves_history_without_model_call(
     state = {"messages": messages}
     with pytest.raises(ContextBudgetExceeded, match="压缩失败"):
         await middleware.abefore_model(
-            state, SimpleNamespace(context=SimpleNamespace(
+            state, Runtime(context=BudgetContext(
                 context_capacity=ContextCapacity(1024, "test", "known"))))
     assert model.requests == []
     assert state["messages"] == messages
@@ -227,7 +267,7 @@ async def test_compaction_keeps_latest_user_request_and_tool_pair():
         input_budget=8000,
     )
     update = await middleware.abefore_model(
-        {"messages": messages}, SimpleNamespace(context=SimpleNamespace(
+        {"messages": messages}, Runtime(context=BudgetContext(
             context_capacity=ContextCapacity(8000, "test", "known"))),
     )
     assert update is not None

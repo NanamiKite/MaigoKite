@@ -24,7 +24,10 @@ from langchain.agents.middleware.types import ModelRequest
 from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
+from langgraph.runtime import Runtime
+from pydantic import ValidationError
 from tests.fixtures.chat_model import FakeModel
+from tests.fixtures.runtime_context import BudgetContext
 
 
 @pytest.mark.parametrize(
@@ -47,7 +50,7 @@ async def test_small_model_rejected_before_network_without_slicing():
         model=FakeModel(profile={"max_input_tokens": 512}),
         messages=messages,
         tools=[],
-        runtime=SimpleNamespace(context=SimpleNamespace()),
+        runtime=Runtime(context=BudgetContext()),
     )
 
     async def forbidden(_):
@@ -255,12 +258,18 @@ async def test_event_pages_preserve_snapshot_watermark_and_identity(tmp_path):
         assert snapshot["last_sequence"] == 1005
         first = await repo.list_task_events("personal", cid, limit=1000)
         assert len(first) == 1000
-        late = await repo.append_task_event("message.completed", payload)
+        with pytest.raises(ValidationError, match="message_id"):
+            await repo.append_task_event("message.completed", payload)
+        assert await repo.list_task_events("personal", cid, 1005) == []
+        assert (await repo.conversation_snapshot("personal", cid))["last_sequence"] == 1005
+        message = await repo.append_message(cid, "assistant", payload["content"])
+        late = await repo.append_task_event("message.completed", {**payload, "message_id": message["id"]})
         second = await repo.list_task_events("personal", cid, first[-1]["sequence"], limit=1000)
         assert [event["sequence"] for event in first + second] == list(range(1, 1007))
         assert [event["id"] for event in first + second] == [item["event_id"] for item in receipts + [late]]
         assert await repo.list_task_events("personal", cid, late["sequence"]) == []
         assert [item["id"] for item in await repo.list_task_events("personal", cid, 1005)] == [late["event_id"]]
+        assert second[-1]["payload"]["message_id"] == message["id"]
     finally:
         await repo.close()
 

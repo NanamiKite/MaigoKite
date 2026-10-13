@@ -43,10 +43,14 @@ class PolicyDecision:
     allow_network: bool = False
 
 
-class PermissionRequired(PermissionError):
+class PermissionRequiredError(PermissionError):
     def __init__(self, decision: PolicyDecision) -> None:
         super().__init__(decision.reason)
         self.decision = decision
+
+
+# Existing callers can keep catching the original exported name.
+PermissionRequired = PermissionRequiredError
 
 
 class PermissionManager:
@@ -166,7 +170,9 @@ class PermissionManager:
             }
             risk = RiskLevel(max(int(risk), int(action_risks.get(action, RiskLevel.L5))))
             if action in {"upload", "download"} and not normalized.get("url"):
-                return PolicyDecision("deny", RiskLevel.L5, "upload/download requires the current snapshot URL", normalized)
+                return PolicyDecision(
+                    "deny", RiskLevel.L5, "upload/download requires the current snapshot URL", normalized
+                )
             if action == "open" and (normalized.get("profile") or normalized.get("visible")):
                 risk = RiskLevel.L5
             if action in {"screenshot", "upload", "download"} and "path" in normalized:
@@ -175,13 +181,24 @@ class PermissionManager:
                     target = self.workspace_root / target
                 target = target.resolve()
                 if not unrestricted and is_sensitive_path(target):
-                    return PolicyDecision("deny", RiskLevel.L5, "protected credential path cannot be transferred or overwritten", normalized)
+                    return PolicyDecision(
+                        "deny",
+                        RiskLevel.L5,
+                        "protected credential path cannot be transferred or overwritten",
+                        normalized,
+                    )
                 try:
                     target.relative_to(self.workspace_root)
                 except ValueError:
                     outside_workspace = True
-                if self.allowlist and self.allowlist.restricts_paths and not self.allowlist.is_path_allowed(str(target)):
-                    return PolicyDecision("deny", RiskLevel.L5, "browser file path is not in the configured allowlist", normalized)
+                if (
+                    self.allowlist
+                    and self.allowlist.restricts_paths
+                    and not self.allowlist.is_path_allowed(str(target))
+                ):
+                    return PolicyDecision(
+                        "deny", RiskLevel.L5, "browser file path is not in the configured allowlist", normalized
+                    )
                 normalized["path"] = str(target)
         if tool_name == "glob":
             normalized.setdefault("root_dir", ".")
@@ -195,11 +212,15 @@ class PermissionManager:
                     resolved = self.workspace_root / resolved
                 resolved = resolved.resolve()
                 if not unrestricted and is_sensitive_path(resolved):
-                    return PolicyDecision("deny", RiskLevel.L5, "protected credential path is not available to agent tools", normalized)
+                    return PolicyDecision(
+                        "deny", RiskLevel.L5, "protected credential path is not available to agent tools", normalized
+                    )
                 if not unrestricted and tool_name in {"file_write", "file_edit"} and any(
                     part.casefold() == ".git" for part in resolved.parts
                 ):
-                    return PolicyDecision("deny", RiskLevel.L5, "direct writes to Git metadata are not allowed", normalized)
+                    return PolicyDecision(
+                        "deny", RiskLevel.L5, "direct writes to Git metadata are not allowed", normalized
+                    )
                 try:
                     resolved.relative_to(self.workspace_root)
                 except ValueError:
@@ -260,7 +281,9 @@ class PermissionManager:
                 if not candidate.is_absolute():
                     candidate = command_dir / candidate
                 if not unrestricted and (is_sensitive_path(candidate) or is_sensitive_path(candidate.resolve())):
-                    return PolicyDecision("deny", RiskLevel.L5, "command addresses a protected credential path", normalized)
+                    return PolicyDecision(
+                        "deny", RiskLevel.L5, "command addresses a protected credential path", normalized
+                    )
             executable = shell if is_script else Path(parts[0]).name
             # Normal workspace commands rely on a real process sandbox, not a
             # growing list of trusted interpreters. Legacy workspace_auto keeps
@@ -274,9 +297,12 @@ class PermissionManager:
             if executable == "git" and (len(parts) < 2 or parts[1] not in {"status", "diff", "log", "show"}):
                 risk = RiskLevel.L5
                 if not unrestricted and not escalate:
-                    return PolicyDecision("deny", risk,
-                                          "Git metadata is read-only in the sandbox; request require_escalated for this exact command",
-                                          normalized)
+                    return PolicyDecision(
+                        "deny",
+                        risk,
+                        "Git metadata is read-only in the sandbox; request require_escalated for this exact command",
+                        normalized,
+                    )
             dangerous_options = {"--pre", "--pre-glob", "--ext-diff", "--textconv", "--output", "-o"}
             if any(
                 argument in dangerous_options or any(argument.startswith(prefix + "=") for prefix in dangerous_options)
@@ -333,7 +359,9 @@ class PermissionManager:
         # Old full_access was workspace-confined. Never let an old config or
         # old client silently authorize host access under the new semantics.
         if effective_mode == "workspace_auto" and (outside_workspace or escalate):
-            return PolicyDecision("deny", RiskLevel.L5, "legacy mode remains workspace-confined; explicitly select a new mode", normalized)
+            return PolicyDecision(
+                "deny", RiskLevel.L5, "legacy mode remains workspace-confined; explicitly select a new mode", normalized
+            )
         resource_scope = str(
             normalized.get("path")
             or normalized.get("root_dir")
@@ -357,12 +385,18 @@ class PermissionManager:
             auto = False
         if unrestricted:
             auto = True
-        sandbox_mode: PermissionMode = "danger_full_access" if unrestricted or outside_workspace or escalate else "workspace"
+        sandbox_mode: PermissionMode = (
+            "danger_full_access" if unrestricted or outside_workspace or escalate else "workspace"
+        )
         reuse = self._reuse_scope(tool_name, normalized, risk, effective_mode)
         if approved or auto:
             return PolicyDecision("allow", risk, "allowed by policy", normalized, resource_scope, reuse,
                                   sandbox_mode=sandbox_mode, allow_network=allow_network)
-        reason = "operation crosses the workspace boundary" if outside_workspace or escalate else "explicit approval required"
+        reason = (
+            "operation crosses the workspace boundary"
+            if outside_workspace or escalate
+            else "explicit approval required"
+        )
         return PolicyDecision("approval_required", risk, reason, normalized, resource_scope, reuse,
                               sandbox_mode=sandbox_mode, allow_network=allow_network)
 
@@ -380,7 +414,12 @@ class PermissionManager:
                 url = urlsplit(str(args.get("url", "")))
                 if url.scheme not in {"http", "https"} or not url.hostname or url.username or url.password:
                     return None
-                operation = {"origin": f"{url.scheme}://{url.hostname.lower()}:{url.port or (443 if url.scheme == 'https' else 80)}"}
+                operation = {
+                    "origin": (
+                        f"{url.scheme}://{url.hostname.lower()}:"
+                        f"{url.port or (443 if url.scheme == 'https' else 80)}"
+                    )
+                }
             except ValueError:
                 return None
             if name == "browser":

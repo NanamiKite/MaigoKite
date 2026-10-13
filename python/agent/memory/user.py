@@ -7,7 +7,9 @@ from agent.repository import SQLiteRepository
 
 
 class UserMemory:
-    def __init__(self, repository: SQLiteRepository, workspace_id: str = "personal", user_id: str = "local-user") -> None:
+    def __init__(
+        self, repository: SQLiteRepository, workspace_id: str = "personal", user_id: str = "local-user"
+    ) -> None:
         self._repository = repository
         self._workspace_id = workspace_id
         self._user_id = user_id

@@ -21,7 +21,9 @@ class Observer:
 class ConsoleObserver(Observer):
     async def on_event(self, event_type: str, data: dict[str, Any]) -> None:
         level = getattr(logging, str(data.get("level", "INFO")).upper(), logging.INFO)
-        logging.getLogger("maigokite.agent").log(level, "%s %s", event_type, json.dumps(data, ensure_ascii=False, default=str))
+        logging.getLogger("maigokite.agent").log(
+            level, "%s %s", event_type, json.dumps(data, ensure_ascii=False, default=str)
+        )
 
     async def on_metric(self, name: str, value: float, labels: dict[str, str] | None = None) -> None:
         await self.on_event("metric", {"name": name, "value": value, "labels": labels or {}})

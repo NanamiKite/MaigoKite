@@ -49,12 +49,28 @@ class BashParams(BaseModel):
         description="Working directory; outside-workspace access requires approval or full access.",
     )
     sandbox_permissions: Literal["use_default", "require_escalated"] = Field(
-        default="use_default", description="Request one host execution only when needed. Also request network_access=true because host execution cannot isolate networking. Both require approval, never grant it.",
+        default="use_default",
+        description=(
+            "Request one host execution only when needed. Also request network_access=true "
+            "because host execution cannot isolate networking. Both require approval, never grant it."
+        ),
     )
-    network_access: bool = Field(default=False, description="Request network access for this command; requires approval in confined modes.")
-    max_output_bytes: int = Field(default=8000, ge=256, le=32_000,
-                                  description="Preview bytes per stream. Logs share an 8 MiB total cap; exceeding it stops the command.")
-    interactive: bool = Field(default=False, description="Allow user stdin from the process panel. Requires approval; not a terminal or detached job. Not supported by the native Windows sandbox; do not escalate just to enable it. Timeout still applies.")
+    network_access: bool = Field(
+        default=False, description="Request network access for this command; requires approval in confined modes."
+    )
+    max_output_bytes: int = Field(
+        default=8000,
+        ge=256,
+        le=32_000,
+        description="Preview bytes per stream. Logs share an 8 MiB total cap; exceeding it stops the command.",
+    )
+    interactive: bool = Field(
+        default=False,
+        description=(
+            "Allow user stdin from the process panel. Requires approval; not a terminal or detached job. "
+            "Not supported by the native Windows sandbox; do not escalate just to enable it. Timeout still applies."
+        ),
+    )
 
 
 BASH_DESCRIPTION = (
@@ -62,7 +78,8 @@ BASH_DESCRIPTION = (
     "Direct argv has no shell expansion. Linux restricted commands use a workspace sandbox with no network. "
     "Windows restricted commands use the optional native SRT backend when installed and enabled; "
     "otherwise report sandbox unavailable. Never silently fall back to host execution. "
-    "Request network_access for networking within the sandbox, or require_escalated plus network_access for host execution; policy decides approval. "
+    "Request network_access for networking within the sandbox, "
+    "or require_escalated plus network_access for host execution; policy decides approval. "
     "Returns bounded stdout/stderr, exit code and log paths. Use file_read with offset to inspect more output."
 )
 
@@ -116,11 +133,14 @@ class ExecCommandTool(BaseTool):
                 shell=str(arguments.get("shell", "auto")),
             )
         except SandboxUnavailableError as exc:
-            return ToolResult.failure({}, public_error(exc), error_code="SANDBOX_UNAVAILABLE",
-                                      user_hint=exc.user_hint)
+            return ToolResult.failure({}, public_error(exc), error_code="SANDBOX_UNAVAILABLE", user_hint=exc.user_hint)
         except FileNotFoundError as exc:
-            return ToolResult.failure({}, public_error(exc), error_code="COMMAND_UNAVAILABLE",
-                                      user_hint="请检查程序安装和 PATH。pwsh 需要 PowerShell 7；powershell 指 Windows PowerShell 5.1。")
+            return ToolResult.failure(
+                {},
+                public_error(exc),
+                error_code="COMMAND_UNAVAILABLE",
+                user_hint="请检查程序安装和 PATH。pwsh 需要 PowerShell 7；powershell 指 Windows PowerShell 5.1。",
+            )
 
         parts = [f"Exit code {result.exit_code}"]
         if result.timed_out:

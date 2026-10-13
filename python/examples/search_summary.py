@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from typing import Any, Awaitable, Callable
-
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import HumanMessage
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from agent.models.native_model import build_chat_model, close_chat_models
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import HumanMessage
 
 Search = Callable[[str], Awaitable[list[dict[str, Any]]]]
 

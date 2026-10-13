@@ -7,7 +7,7 @@ that turn raw LLM text into strongly-typed Python objects.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
@@ -51,11 +51,11 @@ class PlanStep(BaseModel):
     """
 
     description: str = Field(description="Human-readable step description")
-    tool: Optional[str] = Field(
+    tool: str | None = Field(
         default=None,
         description="Optional tool name for this step",
     )
-    arguments: Optional[dict[str, Any]] = Field(
+    arguments: dict[str, Any] | None = Field(
         default=None,
         description="Optional arguments for the tool",
     )

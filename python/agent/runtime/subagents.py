@@ -40,8 +40,19 @@ class DelegationError(UserFacingError):
 
 
 class DelegateArgs(BaseModel):
-    task: str = Field(min_length=1, max_length=12000, description="Self-contained read-only task, relevant paths and desired findings. No parent history is copied.")
-    model_id: str = Field(default="", max_length=100, description="Exact configured model_id from list_subagent_models. Omit to use the parent model. Never guess IDs or substitute a different requested model.")
+    task: str = Field(
+        min_length=1,
+        max_length=12000,
+        description="Self-contained read-only task, relevant paths and desired findings. No parent history is copied.",
+    )
+    model_id: str = Field(
+        default="",
+        max_length=100,
+        description=(
+            "Exact configured model_id from list_subagent_models. Omit to use the parent model. "
+            "Never guess IDs or substitute a different requested model."
+        ),
+    )
     label: str = Field(default="", max_length=80, description="Short display name for this investigation.")
 
 
@@ -74,7 +85,9 @@ class _ReadOnlyTools(AgentMiddleware[AgentState[object], ChildContext]):
                 raise PermissionError("父任务权限或工作区已改变，请重新发起任务。")
             child.execution_metadata = {
                 **child.execution_metadata,
-                "enabled_tools": sorted(set(child.execution_metadata["enabled_tools"]) & set(fresh.get("enabled_tools", []))),
+                "enabled_tools": sorted(
+                    set(child.execution_metadata["enabled_tools"]) & set(fresh.get("enabled_tools", []))
+                ),
             }
         task = await adapter.repository.get_task(child.request.workspace_id, child.request.task_id)
         if task["status"] == "cancelled":
@@ -91,7 +104,9 @@ class _ReadOnlyTools(AgentMiddleware[AgentState[object], ChildContext]):
     ) -> ModelResponse:
         await self.refresh_authority(request.runtime.context)
         enabled = request.runtime.context.execution_metadata["enabled_tools"]
-        return await handler(request.override(tools=[tool for tool in request.tools if getattr(tool, "name", "") in enabled]))
+        return await handler(
+            request.override(tools=[tool for tool in request.tools if getattr(tool, "name", "") in enabled])
+        )
 
     async def awrap_tool_call(
         self, request: ToolCallRequest,
@@ -239,7 +254,9 @@ class DelegateTool(BaseTool):
                 graph = self.graph
                 if model_id and model_id != self.model_info.get("model_id"):
                     if model_id not in parent.subagent_model_ids:
-                        raise DelegationError("该模型未获本轮子 Agent 授权，请在对话设置中允许后重新发起任务；未替换模型。")
+                        raise DelegationError(
+                            "该模型未获本轮子 Agent 授权，请在对话设置中允许后重新发起任务；未替换模型。"
+                        )
                     if adapter.model_resolver is None or adapter.model_catalog is None:
                         raise DelegationError("当前运行环境不支持独立子 Agent 模型。")
                     catalog = await adapter.model_catalog(parent.request.workspace_id)
@@ -250,16 +267,26 @@ class DelegateTool(BaseTool):
                     # or closes shared transports, and no fallback route is tried.
                     key, model = await adapter.model_resolver(parent.request.workspace_id, model_id, "")
                     graph = adapter.readonly_graph(key, model)
-                    selected = {**selected, "model": getattr(model, "model_name", None) or getattr(model, "model", selected["model"])}
+                    selected = {
+                        **selected,
+                        "model": getattr(model, "model_name", None) or getattr(model, "model", selected["model"]),
+                    }
                 child = ChildContext(
-                    parent, call_id, replace(parent.request, permission_mode="read_only"),
+                    parent,
+                    call_id,
+                    replace(parent.request, permission_mode="read_only"),
                     # Do not copy credentials/process handles/grants into child tools.
-                    {"workspace_root": parent.execution_metadata["workspace_root"],
-                     "workspace_id": parent.request.workspace_id,
-                     "conversation_id": parent.request.conversation_id,
-                     "principal_id": parent.request.principal_id,
-                     "permission_mode": "read_only", "approved": False,
-                     "enabled_tools": sorted(READ_TOOLS & set(parent.execution_metadata.get("enabled_tools", READ_TOOLS)))},
+                    {
+                        "workspace_root": parent.execution_metadata["workspace_root"],
+                        "workspace_id": parent.request.workspace_id,
+                        "conversation_id": parent.request.conversation_id,
+                        "principal_id": parent.request.principal_id,
+                        "permission_mode": "read_only",
+                        "approved": False,
+                        "enabled_tools": sorted(
+                            READ_TOOLS & set(parent.execution_metadata.get("enabled_tools", READ_TOOLS))
+                        ),
+                    },
                     {**selected, "label": label},
                     result_token_limit=result_limit,
                 )
@@ -281,11 +308,26 @@ class DelegateTool(BaseTool):
                 answer, _reasoning = split_thinking(last.text)
                 if not answer.strip():
                     raise DelegationError("子 Agent 没有产出最终摘要。")
-                reason = last.response_metadata.get("finish_reason") or last.response_metadata.get("stop_reason") or last.response_metadata.get("done_reason")
-                summary = _bounded_result(answer, result_limit, incomplete=reason in {"length", "max_tokens", "max_output_tokens"})
-                await adapter._emit(parent, "subagent.completed", {"subagent_id": call_id, "summary": summary, **child.model_info})
-                return ToolMessage(content=summary, tool_call_id=call_id, name=self.name,
-                                   artifact={"summary": summary, "data": {"content": summary, "subagent_id": call_id, **child.model_info}})
+                reason = (
+                    last.response_metadata.get("finish_reason")
+                    or last.response_metadata.get("stop_reason")
+                    or last.response_metadata.get("done_reason")
+                )
+                summary = _bounded_result(
+                    answer, result_limit, incomplete=reason in {"length", "max_tokens", "max_output_tokens"}
+                )
+                await adapter._emit(
+                    parent, "subagent.completed", {"subagent_id": call_id, "summary": summary, **child.model_info}
+                )
+                return ToolMessage(
+                    content=summary,
+                    tool_call_id=call_id,
+                    name=self.name,
+                    artifact={
+                        "summary": summary,
+                        "data": {"content": summary, "subagent_id": call_id, **child.model_info},
+                    },
+                )
         except asyncio.CancelledError:
             await adapter._emit(parent, "subagent.cancelled", {"subagent_id": call_id, **selected, "label": label})
             raise
@@ -299,9 +341,16 @@ class DelegateTool(BaseTool):
                 summary = "子 Agent 执行超时，请缩小任务范围后重试；未切换模型。"
             else:
                 summary = f"子 Agent 执行失败（{type(exc).__name__}），请检查模型配置与任务预算；未切换模型。"
-            await adapter._emit(parent, "subagent.failed", {
-                "subagent_id": call_id, "message": summary, "requested_model_id": model_id, "label": label,
-            })
+            await adapter._emit(
+                parent,
+                "subagent.failed",
+                {
+                    "subagent_id": call_id,
+                    "message": summary,
+                    "requested_model_id": model_id,
+                    "label": label,
+                },
+            )
             return ToolMessage(content=summary, tool_call_id=call_id, name=self.name, status="error")
 
 
@@ -344,15 +393,21 @@ def _bounded_result(text: str, limit: int, *, incomplete: bool = False) -> str:
 
 
 class ModelLookupArgs(BaseModel):
-    model_id: str = Field(default="", max_length=100, description="Optional exact configured ID to inspect; omit to list available choices.")
+    model_id: str = Field(
+        default="",
+        max_length=100,
+        description="Optional exact configured ID to inspect; omit to list available choices.",
+    )
 
 
 class ListSubagentModelsTool(BaseTool):
     name = "list_subagent_models"
     description = (
-        "List configured models allowed for this turn's subagents, including exact IDs, display names and provider/model names. "
+        "List configured models allowed for this turn's subagents, "
+        "including exact IDs, display names and provider/model names. "
         "Use before selecting a model for delegate. Ambiguous names require user clarification. "
-        "No endpoint, credentials or authorization changes are exposed. A listed model is not a live connectivity guarantee."
+        "No endpoint, credentials or authorization changes are exposed. "
+        "A listed model is not a live connectivity guarantee."
     )
     risk_level = 1
 
@@ -369,14 +424,23 @@ class ListSubagentModelsTool(BaseTool):
     def to_langchain_tool(self) -> StructuredTool:
         async def invoke(runtime: ToolRuntime[object], model_id: str = "") -> ToolMessage:
             parent = cast("_RunContext", runtime.context)
-            catalog = await parent.adapter.model_catalog(parent.request.workspace_id) if parent.adapter.model_catalog else []
+            catalog = (
+                await parent.adapter.model_catalog(parent.request.workspace_id) if parent.adapter.model_catalog else []
+            )
             # Empty allowlist means parent model only, never all configured models.
             available = {item["model_id"]: item for item in catalog if item["model_id"] in parent.subagent_model_ids}
             if self.model_info:
                 available[str(self.model_info.get("model_id", ""))] = {**self.model_info, "is_parent": True}
             models = [item for key, item in available.items() if not model_id or key == model_id]
-            payload = {"models": models, "default": "Omit delegate.model_id to follow the parent model.",
-                       "guidance": "If the requested model is missing, ask the user to configure/allow it; do not substitute."}
-            return ToolMessage(content=json.dumps(payload, ensure_ascii=False), tool_call_id=str(runtime.tool_call_id), name=self.name)
+            payload = {
+                "models": models,
+                "default": "Omit delegate.model_id to follow the parent model.",
+                "guidance": "If the requested model is missing, ask the user to configure/allow it; do not substitute.",
+            }
+            return ToolMessage(
+                content=json.dumps(payload, ensure_ascii=False), tool_call_id=str(runtime.tool_call_id), name=self.name
+            )
 
-        return StructuredTool.from_function(coroutine=invoke, name=self.name, description=self.description, args_schema=ModelLookupArgs)
+        return StructuredTool.from_function(
+            coroutine=invoke, name=self.name, description=self.description, args_schema=ModelLookupArgs
+        )

@@ -89,7 +89,9 @@ def build_chat_model(provider: str, model: str, **extra: Any) -> BaseChatModel:
             kwargs["base_url"] = base_url
         if extra.get("timeout"):
             kwargs["timeout"] = extra["timeout"]
-        kwargs.update({k: v for k, v in extra.items() if k not in ("temperature", "max_tokens", "api_key", "base_url", "timeout")})
+        kwargs.update(
+            {k: v for k, v in extra.items() if k not in ("temperature", "max_tokens", "api_key", "base_url", "timeout")}
+        )
         # Core owns each model's transports, including remote compatible routes.
         # Creating these explicitly avoids closing an SDK-cached shared transport.
         endpoint = base_url or os.getenv("OPENAI_API_BASE") or os.getenv("OPENAI_BASE_URL")
@@ -100,9 +102,13 @@ def build_chat_model(provider: str, model: str, **extra: Any) -> BaseChatModel:
         proxy = extra.get("openai_proxy", None if _is_loopback_endpoint(endpoint) else os.getenv("OPENAI_PROXY"))
         kwargs["openai_proxy"] = None
         if kwargs.get("http_client") is None and kwargs.get("client") is None:
-            kwargs["http_client"] = httpx.Client(timeout=timeout, **({"proxy": proxy} if proxy else provider_http_options(endpoint)))
+            kwargs["http_client"] = httpx.Client(
+                timeout=timeout, **({"proxy": proxy} if proxy else provider_http_options(endpoint))
+            )
         if kwargs.get("http_async_client") is None and kwargs.get("async_client") is None:
-            kwargs["http_async_client"] = httpx.AsyncClient(timeout=timeout, **({"proxy": proxy} if proxy else provider_http_options(endpoint, asynchronous=True)))
+            kwargs["http_async_client"] = httpx.AsyncClient(
+                timeout=timeout, **({"proxy": proxy} if proxy else provider_http_options(endpoint, asynchronous=True))
+            )
         kwargs.setdefault("http_socket_options", ())
         if provider_lower == "openai_compatible":
             from agent.models.compatible_reasoning import ReasoningChatOpenAI
@@ -122,7 +128,9 @@ def build_chat_model(provider: str, model: str, **extra: Any) -> BaseChatModel:
             kwargs["base_url"] = extra["base_url"]
         if extra.get("timeout"):
             kwargs["timeout"] = extra["timeout"]
-        kwargs.update({k: v for k, v in extra.items() if k not in ("temperature", "max_tokens", "api_key", "base_url", "timeout")})
+        kwargs.update(
+            {k: v for k, v in extra.items() if k not in ("temperature", "max_tokens", "api_key", "base_url", "timeout")}
+        )
         return OwnedStreamChatAnthropic(**kwargs)
 
     if provider_lower == "ollama":
@@ -142,7 +150,9 @@ def build_chat_model(provider: str, model: str, **extra: Any) -> BaseChatModel:
         kwargs["client_kwargs"] = {"timeout": extra["timeout"]} if extra.get("timeout") else {}
         kwargs["sync_client_kwargs"] = provider_http_options(endpoint)
         kwargs["async_client_kwargs"] = provider_http_options(endpoint, asynchronous=True)
-        kwargs.update({k: v for k, v in extra.items() if k not in ("temperature", "max_tokens", "api_key", "base_url", "timeout")})
+        kwargs.update(
+            {k: v for k, v in extra.items() if k not in ("temperature", "max_tokens", "api_key", "base_url", "timeout")}
+        )
         return ReasoningChatOllama(**kwargs)
 
     raise ValueError(

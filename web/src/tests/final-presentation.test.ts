@@ -111,12 +111,22 @@ describe('final secrets and tool presentation', () => {
     expect(wrapper.get('details').attributes('open')).toBeUndefined()
   })
   it('preserves failed search credentials for retry and clears them only after success', async () => {
-    vi.spyOn(api, 'saveCredential').mockRejectedValueOnce(new Error('offline')).mockResolvedValue(undefined)
-    const wrapper = mount(SearchToolSettingsPanel)
+    const save = vi.spyOn(api, 'saveCredential').mockRejectedValueOnce(new Error('offline')).mockResolvedValue(undefined)
+    const wrapper = mount(SearchToolSettingsPanel, {
+      attachTo: document.body,
+      global: { plugins: [await testRouter('/settings')] },
+    })
+    await wrapper.get('.search-settings > .card-header').trigger('click')
+    await wrapper.findAll('.search-provider > .card-header')[0].trigger('click')
+    expect(wrapper.get('.credential-form input').isVisible()).toBe(true)
     await wrapper.get('.credential-form input').setValue('new-search-key')
     await wrapper.get('.credential-form .primary-button').trigger('click'); await flushPromises()
+    expect(save).toHaveBeenNthCalledWith(1, 'tavily', 'new-search-key')
+    expect(wrapper.get('.field-error').text()).toContain('offline')
     expect((wrapper.get('.credential-form input').element as HTMLInputElement).value).toBe('new-search-key')
     await wrapper.get('.field-error button').trigger('click'); await flushPromises()
+    expect(save).toHaveBeenCalledTimes(2)
+    expect(save).toHaveBeenNthCalledWith(2, 'tavily', 'new-search-key')
     expect((wrapper.get('.credential-form input').element as HTMLInputElement).value).toBe('')
     expect(wrapper.get('.field-saved').text()).toBe('已保存')
   })
@@ -124,7 +134,13 @@ describe('final secrets and tool presentation', () => {
     useSettingsStore().credentials.tavily = { service: 'tavily', configured: true }
     mount(InkConfirm)
     const remove = vi.spyOn(api, 'deleteCredential').mockResolvedValue(undefined)
-    const wrapper = mount(SearchToolSettingsPanel)
+    const wrapper = mount(SearchToolSettingsPanel, {
+      attachTo: document.body,
+      global: { plugins: [await testRouter('/settings')] },
+    })
+    await wrapper.get('.search-settings > .card-header').trigger('click')
+    await wrapper.findAll('.search-provider > .card-header')[0].trigger('click')
+    expect(wrapper.get('.credential-form .danger-button').isVisible()).toBe(true)
     await wrapper.get('.credential-form .danger-button').trigger('click')
     await flushPromises()
     const dialog = document.querySelector<HTMLDialogElement>('dialog.ink-confirm')!

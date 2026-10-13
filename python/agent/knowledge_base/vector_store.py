@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import math
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from threading import Lock
 from typing import Any
 from uuid import UUID, uuid4
@@ -185,8 +186,9 @@ class _ChromaStore(IVectorStore):
     ) -> list[str]:
         ids = _batch_ids(documents, embeddings)
         if ids:
+            vectors: list[Sequence[float] | Sequence[int]] = [*embeddings]
             await asyncio.to_thread(
-                self._collection.add, ids=ids, embeddings=embeddings,
+                self._collection.add, ids=ids, embeddings=vectors,
                 documents=[doc.page_content for doc in documents],
                 metadatas=[{**doc.metadata, "id": doc_id} for doc, doc_id in zip(documents, ids, strict=True)],
             )
@@ -196,8 +198,9 @@ class _ChromaStore(IVectorStore):
         self, query_embedding: list[float], top_k: int = 5
     ) -> list[tuple[Document, float]]:
         _check_query(query_embedding, top_k)
+        vectors: list[Sequence[float] | Sequence[int]] = [query_embedding]
         result = await asyncio.to_thread(
-            self._collection.query, query_embeddings=[query_embedding], n_results=top_k,
+            self._collection.query, query_embeddings=vectors, n_results=top_k,
             include=["documents", "metadatas", "distances"],
         )
         documents, metadatas, distances = result["documents"], result["metadatas"], result["distances"]
@@ -219,8 +222,9 @@ class _ChromaStore(IVectorStore):
     ) -> list[str]:
         ids = _batch_ids(documents, embeddings)
         if ids:
+            vectors: list[Sequence[float] | Sequence[int]] = [*embeddings]
             await asyncio.to_thread(
-                self._collection.upsert, ids=ids, embeddings=embeddings,
+                self._collection.upsert, ids=ids, embeddings=vectors,
                 documents=[doc.page_content for doc in documents],
                 metadatas=[{**doc.metadata, "id": doc_id} for doc, doc_id in zip(documents, ids, strict=True)],
             )
@@ -285,7 +289,7 @@ class _QdrantStore(IVectorStore):
     async def delete(self, doc_ids: list[str]) -> None:
         if doc_ids:
             await self._client.delete(
-                collection_name=self._collection_name, points_selector=self._point_ids(doc_ids), wait=True,
+                collection_name=self._collection_name, points_selector=[*self._point_ids(doc_ids)], wait=True,
             )
 
     async def upsert(

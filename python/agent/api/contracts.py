@@ -8,10 +8,17 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from agent.data_contracts import (
-    ApprovalRecord, ApprovalScope, ApprovalStatus, ConversationRecord, JSONObject,
-    QuestionRecord, RiskLabel, TaskRecord, TaskStatus, approval_notice,
+    ApprovalRecord,
+    ApprovalScope,
+    ApprovalStatus,
+    ConversationRecord,
+    JSONObject,
+    QuestionRecord,
+    RiskLabel,
+    TaskRecord,
+    TaskStatus,
+    approval_notice,
 )
-
 from agent.data_contracts import PermissionMode as ActivePermissionMode
 from agent.errors import UserFacingError
 from agent.event_contracts import WireEvent, wire_event

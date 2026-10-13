@@ -9,9 +9,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from agent.security.sensitive_paths import is_sensitive_path, search_exclusions
 from agent.tools.base import BaseTool, ExecutionContext, ToolResult
 from agent.utils.sandbox import SandboxExecutor, SandboxUnavailableError
-from agent.security.sensitive_paths import is_sensitive_path, search_exclusions
 
 
 class GrepParams(BaseModel):
@@ -29,7 +29,9 @@ class GrepTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Search text with ripgrep. Respects ignore files, skips hidden/binary files and does not follow symlinks."
+        return (
+            "Search text with ripgrep. Respects ignore files, skips hidden/binary files and does not follow symlinks."
+        )
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
@@ -62,11 +64,14 @@ class GrepTool(BaseTool):
             else:
                 result = await executor.execute_argv(command)
         except FileNotFoundError:
-            return ToolResult.failure({}, "ripgrep is not installed.", error_code="RIPGREP_UNAVAILABLE",
-                                      user_hint="文件搜索需要 ripgrep（rg）。Windows 请安装在工作区之外的可信 PATH 目录。")
+            return ToolResult.failure(
+                {},
+                "ripgrep is not installed.",
+                error_code="RIPGREP_UNAVAILABLE",
+                user_hint="文件搜索需要 ripgrep（rg）。Windows 请安装在工作区之外的可信 PATH 目录。",
+            )
         except SandboxUnavailableError as exc:
-            return ToolResult.failure({}, str(exc), error_code="SANDBOX_UNAVAILABLE",
-                                      user_hint=exc.user_hint)
+            return ToolResult.failure({}, str(exc), error_code="SANDBOX_UNAVAILABLE", user_hint=exc.user_hint)
         if result.timed_out or result.exit_code not in {0, 1}:
             return ToolResult.failure({}, result.stderr or "Content search failed.", error_code="FILE_SEARCH_FAILED")
         matches: list[tuple[str, int]] = []
@@ -96,11 +101,16 @@ class GrepTool(BaseTool):
             if event["type"] == "match":
                 matches.append((filename, number))
         hits: list[dict[str, Any]] = [
-            {"file": path, "line_number": number, "context": "\n".join(
-                lines[path][line] for line in range(max(1, number - args.context_lines), number + args.context_lines + 1)
-                if line in lines[path]
-            )}
-            for path, number in matches[:args.max_results]
+            {
+                "file": path,
+                "line_number": number,
+                "context": "\n".join(
+                    lines[path][line]
+                    for line in range(max(1, number - args.context_lines), number + args.context_lines + 1)
+                    if line in lines[path]
+                ),
+            }
+            for path, number in matches[: args.max_results]
         ]
         # Bound long matching lines too, without rewriting an earlier ToolMessage.
         budget = 16_000

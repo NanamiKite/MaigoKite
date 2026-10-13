@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import contextlib
 import math
 import os
 import platform
@@ -118,19 +119,31 @@ def process_sandbox_status(windows_settings: dict[str, Any] | None = None) -> di
 
         native = status(windows_settings or {})
         return {
-            **native, "platform": system, "backend": "srt-windows", "scope": "command_processes",
-            "experimental": True, "network_isolation": native["status"] == "available",
-            "dns_isolation": False, "interactive_stdin": False,
+            **native,
+            "platform": system,
+            "backend": "srt-windows",
+            "scope": "command_processes",
+            "experimental": True,
+            "network_isolation": native["status"] == "available",
+            "dns_isolation": False,
+            "interactive_stdin": False,
             "read_boundary": "dedicated_account_acl_and_explicit_denies",
-            "cpu_memory_limits": False, "per_process_rlimits_available": False,
-            "captured_log_limit_bytes": SandboxExecutor._LOG_LIMIT, "disk_quota": False,
+            "cpu_memory_limits": False,
+            "per_process_rlimits_available": False,
+            "captured_log_limit_bytes": SandboxExecutor._LOG_LIMIT,
+            "disk_quota": False,
             "other_boundaries": {
                 "windows_search": "trusted_ripgrep_and_checked_snapshot",
-                "native_files": "application_path_policy", "mcp_stdio": "trusted_host_process",
+                "native_files": "application_path_policy",
+                "mcp_stdio": "trusted_host_process",
                 "browser": "chromium_native_sandbox_not_workspace_isolation",
             },
-            "hint": "Windows 沙箱待逐次执行校验；请先完成显式安装。alpha 后端不隔离系统 DNS、公开可读路径或其他 SRT 客户端。"
-                    if native["status"] == "unverified" else SandboxUnavailableError().user_hint,
+            "hint": (
+                "Windows 沙箱待逐次执行校验；请先完成显式安装。"
+                "alpha 后端不隔离系统 DNS、公开可读路径或其他 SRT 客户端。"
+            )
+            if native["status"] == "unverified"
+            else SandboxUnavailableError().user_hint,
         }
     binary = shutil.which("bwrap") if system == "Linux" else None
     available = bool(binary and _bubblewrap_works(binary))
@@ -268,17 +281,21 @@ class SandboxExecutor:
         if sys.platform == "win32":
             creationflags = subprocess.CREATE_NO_WINDOW
         with output_file() as stdout_file, output_file() as stderr_file:
-            spawning = asyncio.create_task(asyncio.create_subprocess_exec(
-                *argv,
-                stdin=asyncio.subprocess.PIPE if interactive or stdin_prefix is not None else asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                limit=65536,
-                cwd=str(self.workdir),
-                env=self._minimal_environment() if env is None else env,
-                start_new_session=os.name == "posix",
-                creationflags=creationflags,
-            ))
+            spawning = asyncio.create_task(
+                asyncio.create_subprocess_exec(
+                    *argv,
+                    stdin=asyncio.subprocess.PIPE
+                    if interactive or stdin_prefix is not None
+                    else asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    limit=65536,
+                    cwd=str(self.workdir),
+                    env=self._minimal_environment() if env is None else env,
+                    start_new_session=os.name == "posix",
+                    creationflags=creationflags,
+                )
+            )
             # Cancellation during CreateProcess/fork must still acquire the
             # process handle so the same owner can stop and reap the child.
             cancelled_during_spawn = False
@@ -414,7 +431,10 @@ class SandboxExecutor:
                 or not isinstance(memory_mb, int) or memory_mb < 0):
             raise ValueError("limits require finite nonnegative CPU seconds and integer address-space MiB")
         if (cpu_seconds or memory_mb) and not _prlimit_binary():
-            raise UserFacingError("配置了 CPU/地址空间限制，但当前平台无法实施。此功能需要 Linux util-linux 的 prlimit；Windows 尚未支持。")
+            raise UserFacingError(
+                "配置了 CPU/地址空间限制，但当前平台无法实施。"
+                "此功能需要 Linux util-linux 的 prlimit；Windows 尚未支持。"
+            )
         self.cpu_seconds = math.ceil(cpu_seconds)
         self.address_space_mb = memory_mb
 
@@ -459,7 +479,10 @@ class SandboxExecutor:
             resolved = shutil.which(str(candidate))
             if resolved:
                 if os.name == "nt" and Path(resolved).suffix.casefold() in {".cmd", ".bat"}:
-                    raise ValueError("Windows batch files require shell=powershell or shell=pwsh; direct argv cannot safely quote cmd.exe syntax")
+                    raise ValueError(
+                        "Windows batch files require shell=powershell or shell=pwsh; "
+                        "direct argv cannot safely quote cmd.exe syntax"
+                    )
                 return [resolved, *args[1:]]
         raise FileNotFoundError(f"Executable not found in the tool PATH: {args[0]}")
 
@@ -580,9 +603,14 @@ class SandboxExecutor:
                     info = entry.stat(follow_symlinks=False)
                     if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
                         if os.name == "nt":
-                            raise UserFacingError("工作区含符号链接或 junction，当前 Windows ACL 后端无法保证其路径边界；请使用无重解析点的工作区。")
+                            raise UserFacingError(
+                                "工作区含符号链接或 junction，当前 Windows ACL 后端无法保证其路径边界；"
+                                "请使用无重解析点的工作区。"
+                            )
                         if sensitive or git:
-                            raise UserFacingError("工作区存在敏感名称或 .git 符号链接，无法安全遮蔽；命令未启动，请调整工作区。")
+                            raise UserFacingError(
+                                "工作区存在敏感名称或 .git 符号链接，无法安全遮蔽；命令未启动，请调整工作区。"
+                            )
                         continue
                     if sensitive:
                         if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
@@ -613,7 +641,9 @@ class SandboxExecutor:
             roots = [Path(value) for key in ("SYSTEMROOT", "PROGRAMFILES", "PROGRAMFILES(X86)")
                      if (value := os.environ.get(key))]
             roots.extend(Path(path) for path in self.windows_read_paths())
-            return directory.is_relative_to(self.workspace_root) or any(directory.is_relative_to(root) for root in roots)
+            return directory.is_relative_to(self.workspace_root) or any(
+                directory.is_relative_to(root) for root in roots
+            )
         return directory.is_relative_to(self.workspace_root) or any(
             directory.is_relative_to(Path(root)) for root in self._SYSTEM_MOUNTS
         )
@@ -674,10 +704,8 @@ class SandboxExecutor:
     @staticmethod
     async def _kill_process_group(process: asyncio.subprocess.Process) -> None:
         if sys.platform != "win32":
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
         else:
             if process.returncode is not None:
                 return

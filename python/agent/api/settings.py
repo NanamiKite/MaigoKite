@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import uuid
 from datetime import UTC, datetime
@@ -32,10 +33,8 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
     async def model_value(workspace: str, model: ChatModelSettings) -> dict[str, object]:
         configured = False
         if model.id:
-            try:
+            with contextlib.suppress(dto.APIError):
                 configured = bool(await credentials.model_key(workspace, model))
-            except dto.APIError:
-                pass
         env = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}.get(model.provider, "")
         return {**model.to_dict(), "credential_configured": configured or bool(os.getenv(env))}
 
@@ -78,18 +77,21 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
         settings = body.settings()
         secret = body.api_key
         if not secret and body.credential_source_id:
-            secret = await credentials.profile_key(workspace_id, body.credential_source_id, settings.provider, settings.base_url)
+            secret = await credentials.profile_key(
+                workspace_id, body.credential_source_id, settings.provider, settings.base_url
+            )
             if not secret:
                 raise dto.APIError(400, "CREDENTIAL_SOURCE_INVALID", "无法复用此配置的密钥，请确认接口与地址一致。")
         previous = None
         if settings.id:
-            try:
+            with contextlib.suppress(KeyError):
                 previous = await core.models.get_profile(workspace_id, settings.id)
-            except KeyError:
-                pass
         else:
             settings = replace(settings, id="model_" + uuid.uuid4().hex)
-        changed_endpoint = previous is not None and (previous.provider, normalize_base_url(previous.base_url)) != (settings.provider, settings.base_url)
+        changed_endpoint = previous is not None and (previous.provider, normalize_base_url(previous.base_url)) != (
+            settings.provider,
+            settings.base_url,
+        )
         # Revoke before changing the host; OS cleanup can fail without enabling reuse.
         if changed_endpoint:
             await credentials.revoke_model(workspace_id, cast(ChatModelSettings, previous))
@@ -125,12 +127,21 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
     @router.post("/models/actions/validate", dependencies=owner_only, response_model=None)
     async def validate(workspace_id: str, body: dto.ModelValidation) -> dict[str, object]:
         try:
-            key = body.api_key or body.chat.api_key or await credentials.profile_key(workspace_id, body.chat.id, body.chat.provider, body.chat.base_url)
+            key = (
+                body.api_key
+                or body.chat.api_key
+                or await credentials.profile_key(workspace_id, body.chat.id, body.chat.provider, body.chat.base_url)
+            )
             await core.validate_chat_model(body.chat.settings(), key)
             ok, message = True, "connection successful"
         except Exception as exc:
             ok, message = False, public_error(exc)
-        await audit(workspace_id, "model.connection.validated", body.chat.provider + ":" + body.chat.model, "success" if ok else "failed")
+        await audit(
+            workspace_id,
+            "model.connection.validated",
+            body.chat.provider + ":" + body.chat.model,
+            "success" if ok else "failed",
+        )
         return {"ok": ok, "message": message, "model": body.chat.model}
 
     @router.post("/models/actions/discover", dependencies=owner_only, response_model=None)
@@ -213,7 +224,7 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
             raise dto.APIError(400, "SAFETY_FORMAT_UNSUPPORTED", "不支持的决策模型请求格式。")
         if body.jev_layout not in SAFETY_JEV_LAYOUTS:
             raise dto.APIError(400, "SAFETY_LAYOUT_UNSUPPORTED", "不支持的 JEV 请求布局。")
-        value = await core.update_safety_settings(
+        await core.update_safety_settings(
             workspace_id, body.model_dump(exclude={"api_key", "credential_configured"})
         )
         if body.api_key:

@@ -127,7 +127,9 @@ class MCPClient:
     @property
     def is_running(self) -> bool:
         """Local SDK connection state, not a remote health or side-effect check."""
-        return self._session is not None and not self._stop.is_set() and self._owner is not None and not self._owner.done()
+        return (
+            self._session is not None and not self._stop.is_set() and self._owner is not None and not self._owner.done()
+        )
 
     def _get_session(self) -> ClientSession:
         if self._session is None or self._stop.is_set() or self._owner is None or self._owner.done():

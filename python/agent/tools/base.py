@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 from langchain.tools import ToolRuntime
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import StructuredTool
+from langchain_core.utils.pydantic import model_json_schema
 
 from agent.errors import public_error
 from agent.tools.execution_context import ExecutionMetadata
@@ -155,7 +156,7 @@ class ToolResult:
         action: dict[str, str] | None = None,
         raw: str | bytes | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> "ToolResult":
+    ) -> ToolResult:
         """Build a recoverable tool failure that the model may still reason about."""
         return cls(
             data,
@@ -169,7 +170,7 @@ class ToolResult:
         )
 
 
-class ToolResultStream:
+class ToolResultStream(ABC):
     """Streaming variant of ToolResult for long-running operations."""
 
     @abstractmethod
@@ -236,18 +237,12 @@ class LangChainStructuredToolBridge(BaseTool):
     @property
     def parameters_schema(self) -> dict[str, Any]:
         """Extract JSON schema from the underlying LangChain tool definition."""
-        schema = getattr(self._structured_tool, "args_schema", None)
-        if schema is not None:
-            if hasattr(schema, "model_json_schema"):
-                return schema.model_json_schema()
-        # Fallback: try the general schema() method
-        if schema is not None and hasattr(schema, "schema"):
-            return schema.schema()
-        # Last resort: attempt to retrieve from the model config
-        try:
-            return self._structured_tool.model_dump().get("args_schema", {})
-        except Exception:
-            return {}
+        schema = self._structured_tool.args_schema
+        if isinstance(schema, dict):
+            return schema
+        # The SDK handles both supported Pydantic schema versions. Invalid
+        # schemas must fail here rather than silently becoming an empty schema.
+        return model_json_schema(schema)
 
     async def execute(
         self, context: ExecutionContext, arguments: dict[str, Any]

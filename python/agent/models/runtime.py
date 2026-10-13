@@ -53,7 +53,7 @@ class ChatModelSettings:
     context_window: int | None = None
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any] | None) -> "ChatModelSettings":
+    def from_dict(cls, value: dict[str, Any] | None) -> ChatModelSettings:
         value = value or {}
         provider = str(value.get("provider", "")).strip().lower()
         provider = _PROVIDER_ALIASES.get(provider, provider)
@@ -512,8 +512,16 @@ class ChatModelRuntime:
     async def subagent_catalog(self, workspace_id: str) -> list[dict[str, Any]]:
         """Configured identities only: never send endpoints or credentials to a model."""
         profiles, _ = await self.list_settings(workspace_id)
-        return [{"model_id": item.id, "name": item.name, "provider": item.provider, "model": item.model, "is_default": item.is_default}
-                for item in profiles]
+        return [
+            {
+                "model_id": item.id,
+                "name": item.name,
+                "provider": item.provider,
+                "model": item.model,
+                "is_default": item.is_default,
+            }
+            for item in profiles
+        ]
 
     async def validate_connection(
         self,

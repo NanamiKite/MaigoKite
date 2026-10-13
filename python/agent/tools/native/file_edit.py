@@ -61,7 +61,7 @@ def _file_edit_impl(
     if not os.path.isfile(abs_path):
         raise FileNotFoundError(f"File not found: {path}")
 
-    with open(abs_path, "r", encoding=encoding) as f:
+    with open(abs_path, encoding=encoding) as f:
         content = f.read()
 
     if count == 0:

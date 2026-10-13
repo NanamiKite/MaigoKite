@@ -171,7 +171,17 @@ PowerShell 禁止执行脚本时，确认源码可信后可使用进程级 `powe
 | [GitHub Actions CI](../../.github/workflows/ci.yml) | PR 与主分支检查、Linux/Windows 源码构建；具体门禁见 [测试与验收](../testing/TestPlan.md#github-actions) |
 | `build.sh all` / `build.ps1 all` | Vue/Electron；Python 分发包另用 python 目标，不是完整桌面发布 |
 
-从根目录执行 `.venv/bin/ruff check python/` 和 `.venv/bin/mypy python/agent` 检查 Python 代码。报告须写明检查范围与实际结果；检查失败应保留非零退出码，不能记为“工具缺失”或“跳过”。平台限制和安装包验收要求见 [构建与发布指南](../deployment/ReleaseGuide.md)。
+全源码静态检查还覆盖预留的向量/检索适配器，因此检查环境须安装 `dev` 和 `vectorstores` 两组锁定依赖，与 CI 一致：
+
+```bash
+uv sync --locked --extra dev --extra vectorstores --no-default-groups
+uv run --no-sync ruff check python/
+uv run --no-sync mypy python/agent
+```
+
+这不会启动向量服务或把预留模块接入 Core；普通应用安装仍不需要这些可选依赖。检查环境可以通过 `UV_PROJECT_ENVIRONMENT` 放在独立目录，避免改变日常运行环境。不能用全局忽略缺失导入替代完整检查环境。
+
+报告须写明检查范围与实际结果；检查失败应保留非零退出码，不能记为“工具缺失”或“跳过”。平台限制和安装包验收要求见 [构建与发布指南](../deployment/ReleaseGuide.md)。
 
 HTTP 请求模型在 `python/agent/api/contracts.py`，FastAPI 提供 `/openapi.json`；不再维护 Proto 与跨语言生成代码。事件 DTO 继续见 [API 设计](../design/API.md)。新增持久字段仍须覆盖空库与旧库升级。
 

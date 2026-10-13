@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Callable, Coroutine
 from contextvars import ContextVar
@@ -48,7 +49,12 @@ class Execution:
         identity = object()
 
         async def receive(kind: str, payload: JSONObject) -> None:
-            if _admission.get() is identity and not receipt.done() and payload.get("event_id") and matches(kind, payload):
+            if (
+                _admission.get() is identity
+                and not receipt.done()
+                and payload.get("event_id")
+                and matches(kind, payload)
+            ):
                 receipt.set_result(payload)
 
         self.bus.subscribe("*", receive)
@@ -60,7 +66,8 @@ class Execution:
                 running = self.own(operation)
             finally:
                 _admission.reset(token)
-            await asyncio.wait({running, receipt}, return_when=asyncio.FIRST_COMPLETED)
+            pending: set[asyncio.Task[RunResult] | asyncio.Future[JSONObject]] = {running, receipt}
+            await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
             if running.done() and not running.cancelled() and running.exception() is not None:
                 running.result()
             if receipt.done():
@@ -133,7 +140,5 @@ class Execution:
             for job in jobs:
                 job.cancel()
             await asyncio.gather(*jobs, return_exceptions=True)
-            try:
+            with contextlib.suppress(OSError, RuntimeError, TimeoutError):
                 await asyncio.wait_for(socket.close(code=1013 if overflow.is_set() else 1000), 1)
-            except (OSError, RuntimeError, TimeoutError):
-                pass

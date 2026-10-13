@@ -8,12 +8,11 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from openai import AsyncOpenAI
 
 from agent.models.image_provider import IImageProvider, ImageResult
-
 
 # ------------------------------------------------------------------
 # Private helpers
@@ -78,7 +77,7 @@ class ImageAdapter(IImageProvider):
         model: str = "dall-e-3",
         size: str = "1024x1024",
         quality: str = "standard",
-        output_dir: Optional[Path] = None,
+        output_dir: Path | None = None,
         **extra: Any,
     ) -> None:
         if output_dir is not None:

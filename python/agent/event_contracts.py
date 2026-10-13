@@ -175,7 +175,7 @@ type KnownEvent = Annotated[
     Field(discriminator="type"),
 ]
 type WireEvent = KnownEvent | EventEnvelope
-_KNOWN_EVENT = TypeAdapter(KnownEvent)
+_KNOWN_EVENT: TypeAdapter[KnownEvent] = TypeAdapter(KnownEvent)
 
 
 def wire_event(value: Mapping[str, object]) -> WireEvent:

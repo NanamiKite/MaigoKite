@@ -9,16 +9,35 @@ import json
 import sqlite3
 import uuid
 from collections.abc import Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from agent.data_contracts import (
-    APPROVAL_RECORD, AUTHORIZATION_RECORD, CONVERSATION_RECORD, JSON_OBJECT,
-    MESSAGE_RECORD, PERMISSION_MODE, QUESTION_RECORD, SNAPSHOT_RECORD,
-    TASK_EVENT_RECORD, TASK_RECORD, TOOL_CALL_RECORD, ApprovalRecord, AuthorizationRecord,
-    ConversationRecord, ConversationSnapshotRecord, JSONObject, MessageRecord,
-    PermissionMode, QuestionRecord, TaskEventRecord, TaskRecord, TaskResultRecord, TaskStatus, ToolCallRecord,
+    APPROVAL_RECORD,
+    AUTHORIZATION_RECORD,
+    CONVERSATION_RECORD,
+    JSON_OBJECT,
+    MESSAGE_RECORD,
+    PERMISSION_MODE,
+    QUESTION_RECORD,
+    SNAPSHOT_RECORD,
+    TASK_EVENT_RECORD,
+    TASK_RECORD,
+    TOOL_CALL_RECORD,
+    ApprovalRecord,
+    AuthorizationRecord,
+    ConversationRecord,
+    ConversationSnapshotRecord,
+    JSONObject,
+    MessageRecord,
+    PermissionMode,
+    QuestionRecord,
+    TaskEventRecord,
+    TaskRecord,
+    TaskResultRecord,
+    TaskStatus,
+    ToolCallRecord,
 )
 from agent.errors import UserFacingError
 from agent.event_contracts import event_payload
@@ -27,7 +46,7 @@ from agent.structured_output import validate_output_schema, validated_result_jso
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def folder_memory_scope(folder_id: str, root_path: str) -> str:
@@ -59,12 +78,16 @@ class MessageConflictError(UserFacingError):
     """A submission key was reused for a different request."""
 
 
-class MessageReplay(Exception):
+class MessageReplayError(Exception):
     """Return an existing product task; never execute a submitted message twice."""
 
     def __init__(self, task: TaskRecord) -> None:
         self.task = task
         super().__init__(str(task["id"]))
+
+
+# Preserve the replay signal imported by Core and external repository callers.
+MessageReplay = MessageReplayError
 
 
 class SQLiteRepository:
@@ -435,10 +458,24 @@ class SQLiteRepository:
                            created_at,updated_at,folder_id,thinking,max_subagent_calls,max_concurrent_subagents,
                            subagent_model_ids_json,forked_from_conversation_id,forked_from_message_id,fork_request_hash)
                            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (branch_id, workspace_id, source["title"][:190] + " · 分岔", source["model_id"], mode,
-                         source["response_mode"], now, now, source["folder_id"], source["thinking"],
-                         source["max_subagent_calls"], source["max_concurrent_subagents"], source["subagent_model_ids_json"],
-                         conversation_id, pivot["id"], request_hash),
+                        (
+                            branch_id,
+                            workspace_id,
+                            source["title"][:190] + " · 分岔",
+                            source["model_id"],
+                            mode,
+                            source["response_mode"],
+                            now,
+                            now,
+                            source["folder_id"],
+                            source["thinking"],
+                            source["max_subagent_calls"],
+                            source["max_concurrent_subagents"],
+                            source["subagent_model_ids_json"],
+                            conversation_id,
+                            pivot["id"],
+                            request_hash,
+                        ),
                     )
                     db.executemany(
                         "INSERT INTO messages(id,conversation_id,role,content,created_at) VALUES(?,?,?,?,?)",
@@ -570,8 +607,16 @@ class SQLiteRepository:
                 db.execute("DELETE FROM workspace_folders WHERE workspace_id=? AND id=?", (workspace_id, folder_id))
                 db.execute(
                     "INSERT INTO audit_events VALUES(?,?,?,?,?,?,?,?)",
-                    (f"audit_{uuid.uuid4().hex}", workspace_id, actor, "workspace_folder.deleted", folder_id,
-                     "success", json.dumps({"retained_conversations": len(conversations), "destination_folder_id": ""}), now),
+                    (
+                        f"audit_{uuid.uuid4().hex}",
+                        workspace_id,
+                        actor,
+                        "workspace_folder.deleted",
+                        folder_id,
+                        "success",
+                        json.dumps({"retained_conversations": len(conversations), "destination_folder_id": ""}),
+                        now,
+                    ),
                 )
 
     async def delete_conversation(self, workspace_id: str, conversation_id: str) -> list[str]:
@@ -701,7 +746,8 @@ class SQLiteRepository:
                     (content[:28], conversation_id, conversation_id),
                 )
             self._db().execute(
-                "INSERT INTO messages(id,conversation_id,role,content,created_at) VALUES(:id,:conversation_id,:role,:content,:created_at)",
+                "INSERT INTO messages(id,conversation_id,role,content,created_at) "
+                "VALUES(:id,:conversation_id,:role,:content,:created_at)",
                 message,
             )
             self._db().execute("UPDATE conversations SET updated_at=? WHERE id=?", (_now(), conversation_id))
@@ -887,9 +933,22 @@ class SQLiteRepository:
                        created_at,updated_at,max_subagent_calls,max_concurrent_subagents,model_call_limit,subagent_model_ids_json,
                        output_schema_json)
                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (task_id, workspace_id, conversation_id, prompt[:80] or "Agent task", "running", prompt,
-                     request_hash, now, now, conversation["max_subagent_calls"],
-                     conversation["max_concurrent_subagents"], model_call_limit, conversation["subagent_model_ids_json"], schema_json),
+                    (
+                        task_id,
+                        workspace_id,
+                        conversation_id,
+                        prompt[:80] or "Agent task",
+                        "running",
+                        prompt,
+                        request_hash,
+                        now,
+                        now,
+                        conversation["max_subagent_calls"],
+                        conversation["max_concurrent_subagents"],
+                        model_call_limit,
+                        conversation["subagent_model_ids_json"],
+                        schema_json,
+                    ),
                 )
                 db.execute(
                     "INSERT INTO messages(id,conversation_id,role,content,created_at) VALUES(?,?,?,?,?)",
@@ -905,7 +964,9 @@ class SQLiteRepository:
         async with self._lock:
             db = self._db()
             with db:
-                task = db.execute("SELECT * FROM tasks WHERE workspace_id=? AND id=?", (workspace_id, task_id)).fetchone()
+                task = db.execute(
+                    "SELECT * FROM tasks WHERE workspace_id=? AND id=?", (workspace_id, task_id)
+                ).fetchone()
                 call = db.execute(
                     "SELECT * FROM tool_calls WHERE workspace_id=? AND task_id=? AND id=? AND tool_name='delegate'",
                     (workspace_id, task_id, call_id),
@@ -932,7 +993,9 @@ class SQLiteRepository:
         async with self._lock:
             db = self._db()
             with db:
-                task = db.execute("SELECT * FROM tasks WHERE workspace_id=? AND id=?", (workspace_id, task_id)).fetchone()
+                task = db.execute(
+                    "SELECT * FROM tasks WHERE workspace_id=? AND id=?", (workspace_id, task_id)
+                ).fetchone()
                 if task is None or task["status"] != "running":
                     raise UserFacingError("任务已停止，不能继续请求模型。")
                 if not task["model_call_limit"]:
@@ -968,10 +1031,16 @@ class SQLiteRepository:
         task = await self.get_task(workspace_id, task_id)
         ready = task["status"] == "succeeded" and task.get("output_result_json") is not None
         return {
-            "task_id": task_id, "status": task["status"], "ready": ready,
+            "task_id": task_id,
+            "status": task["status"],
+            "ready": ready,
             "output_mode": "json_schema" if task.get("output_schema_json") else "text",
-            "schema": JSON_OBJECT.validate_json(task["output_schema_json"], strict=True) if task.get("output_schema_json") else None,
-            "value": JSON_OBJECT.validate_json(task["output_result_json"], strict=True) if ready and task["output_result_json"] is not None else None,
+            "schema": JSON_OBJECT.validate_json(task["output_schema_json"], strict=True)
+            if task.get("output_schema_json")
+            else None,
+            "value": JSON_OBJECT.validate_json(task["output_result_json"], strict=True)
+            if ready and task["output_result_json"] is not None
+            else None,
             "error": task["last_error"],
         }
 
@@ -986,7 +1055,9 @@ class SQLiteRepository:
         async with self._lock:
             db = self._db()
             with db:
-                row = db.execute("SELECT * FROM tasks WHERE workspace_id=? AND id=?", (workspace_id, task_id)).fetchone()
+                row = db.execute(
+                    "SELECT * FROM tasks WHERE workspace_id=? AND id=?", (workspace_id, task_id)
+                ).fetchone()
                 if row is None:
                     raise KeyError(task_id)
                 if row["status"] in {"cancelled", "failed", "succeeded", "timed_out", "expired", "rejected"}:
@@ -1009,7 +1080,13 @@ class SQLiteRepository:
                        version=version+1,updated_at=? WHERE workspace_id=? AND id=?""",
                     (encoded, now, workspace_id, task_id),
                 )
-                task = TASK_RECORD.validate_python(dict(db.execute("SELECT * FROM tasks WHERE workspace_id=? AND id=?", (workspace_id, task_id)).fetchone()))
+                task = TASK_RECORD.validate_python(
+                    dict(
+                        db.execute(
+                            "SELECT * FROM tasks WHERE workspace_id=? AND id=?", (workspace_id, task_id)
+                        ).fetchone()
+                    )
+                )
             return task, message
 
     async def resume_interrupted_task(self, workspace_id: str, task_id: str, version: int) -> None:
@@ -1063,10 +1140,15 @@ class SQLiteRepository:
     async def latest_conversation_task(self, workspace_id: str, conversation_id: str) -> TaskRecord | None:
         """Creation order, not updated_at: a resumed old task is not a new turn."""
         async with self._lock:
-            row = self._db().execute(
-                "SELECT * FROM tasks WHERE workspace_id=? AND conversation_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1",
-                (workspace_id, conversation_id),
-            ).fetchone()
+            row = (
+                self._db()
+                .execute(
+                    "SELECT * FROM tasks WHERE workspace_id=? AND conversation_id=? "
+                    "ORDER BY created_at DESC,rowid DESC LIMIT 1",
+                    (workspace_id, conversation_id),
+                )
+                .fetchone()
+            )
         return TASK_RECORD.validate_python(dict(row)) if row is not None else None
 
     async def append_task_event(self, event_type: str, payload: Mapping[str, object]) -> JSONObject:
@@ -1192,7 +1274,9 @@ class SQLiteRepository:
                        updated_at=? WHERE id=?""",
                     (reason, now, item["id"]),
                 )
-                item.update({"status": "interrupted", "last_error": reason, "updated_at": now, "version": item["version"] + 1})
+                item.update(
+                    {"status": "interrupted", "last_error": reason, "updated_at": now, "version": item["version"] + 1}
+                )
                 interrupted.append(TASK_RECORD.validate_python(item))
             self._db().commit()
         return interrupted
@@ -1235,7 +1319,9 @@ class SQLiteRepository:
                        WHERE task_id=? AND status='waiting_approval'""",
                     (now, item["id"]),
                 )
-                item.update({"status": "interrupted", "last_error": reason, "updated_at": now, "version": item["version"] + 1})
+                item.update(
+                    {"status": "interrupted", "last_error": reason, "updated_at": now, "version": item["version"] + 1}
+                )
                 interrupted.append(TASK_RECORD.validate_python(item))
             self._db().commit()
         return interrupted
@@ -1381,7 +1467,9 @@ class SQLiteRepository:
                     return dict(existing)
                 if task["status"] != "running":
                     raise ValueError("task is not running; resolve its pending interaction or send a new turn")
-                count = db.execute("SELECT COUNT(*) FROM task_inputs WHERE task_id=? AND status='queued'", (task_id,)).fetchone()[0]
+                count = db.execute(
+                    "SELECT COUNT(*) FROM task_inputs WHERE task_id=? AND status='queued'", (task_id,)
+                ).fetchone()[0]
                 if count >= 20:
                     raise ValueError("too many pending messages")
                 item = {"id": f"input_{uuid.uuid4().hex}", "task_id": task_id, "content": content.strip(),
@@ -1495,16 +1583,24 @@ class SQLiteRepository:
             ).fetchall()
             last_sequence = db.execute("SELECT COALESCE(MAX(sequence),0) FROM task_events WHERE task_id=?",
                                        (task_id,)).fetchone()[0]
-            questions = db.execute("SELECT id,tool_call_id,title,options_json,status,version,answer FROM questions WHERE task_id=?",
-                                   (task_id,)).fetchall()
+            questions = db.execute(
+                "SELECT id,tool_call_id,title,options_json,status,version,answer FROM questions WHERE task_id=?",
+                (task_id,),
+            ).fetchall()
             usage_events = db.execute("""SELECT id,event_type,payload_json FROM task_events WHERE task_id=?
                 AND event_type IN ('model.usage','model.call.started','model.call.failed','context.compacted')
                 ORDER BY sequence""", (task_id,)).fetchall()
         projection: dict[str, Any] = {
             "plan": None, "context": None, "changes": [], "summary": None,
             "usage": aggregate_usage_events([dict(row) for row in usage_events]),
-            "questions": [{**{key: row[key] for key in row.keys() if key != "options_json"},
-                           "options": json.loads(row["options_json"])} for row in questions],
+            # sqlite3.Row iterates values; convert to a mapping before selecting columns.
+            "questions": [
+                {
+                    **{key: value for key, value in dict(row).items() if key != "options_json"},
+                    "options": json.loads(row["options_json"]),
+                }
+                for row in questions
+            ],
             "truncated": len(calls) > 50 or len(approvals) > 50 or len(events) > 100,
         }
         for event in reversed(events[:100]):
@@ -1552,18 +1648,31 @@ class SQLiteRepository:
                           (workspace_id, conversation_id)).fetchone() is None:
                 raise KeyError(conversation_id)
             rows = {
-                "messages": db.execute("SELECT * FROM messages WHERE conversation_id=? ORDER BY created_at DESC,rowid DESC LIMIT 201",
-                                       (conversation_id,)).fetchall(),
-                "tasks": db.execute("SELECT * FROM tasks WHERE workspace_id=? AND conversation_id=? ORDER BY created_at DESC,rowid DESC LIMIT 201",
-                                    (workspace_id, conversation_id)).fetchall(),
-                "approvals": db.execute("""SELECT a.*,t.tool_name,t.arguments_json FROM approvals a
+                "messages": db.execute(
+                    "SELECT * FROM messages WHERE conversation_id=? ORDER BY created_at DESC,rowid DESC LIMIT 201",
+                    (conversation_id,),
+                ).fetchall(),
+                "tasks": db.execute(
+                    "SELECT * FROM tasks WHERE workspace_id=? AND conversation_id=? "
+                    "ORDER BY created_at DESC,rowid DESC LIMIT 201",
+                    (workspace_id, conversation_id),
+                ).fetchall(),
+                "approvals": db.execute(
+                    """SELECT a.*,t.tool_name,t.arguments_json FROM approvals a
                     JOIN tool_calls t ON t.id=a.tool_call_id WHERE a.workspace_id=? AND a.conversation_id=?
-                    AND a.status='pending' ORDER BY a.created_at DESC LIMIT 201""", (workspace_id, conversation_id)).fetchall(),
-                "questions": db.execute("SELECT * FROM questions WHERE workspace_id=? AND conversation_id=? AND status='pending' ORDER BY created_at DESC LIMIT 201",
-                                        (workspace_id, conversation_id)).fetchall(),
+                    AND a.status='pending' ORDER BY a.created_at DESC LIMIT 201""",
+                    (workspace_id, conversation_id),
+                ).fetchall(),
+                "questions": db.execute(
+                    "SELECT * FROM questions WHERE workspace_id=? AND conversation_id=? "
+                    "AND status='pending' ORDER BY created_at DESC LIMIT 201",
+                    (workspace_id, conversation_id),
+                ).fetchall(),
             }
-            sequence = db.execute("SELECT COALESCE(MAX(sequence),0) FROM task_events WHERE workspace_id=? AND conversation_id=?",
-                                  (workspace_id, conversation_id)).fetchone()[0]
+            sequence = db.execute(
+                "SELECT COALESCE(MAX(sequence),0) FROM task_events WHERE workspace_id=? AND conversation_id=?",
+                (workspace_id, conversation_id),
+            ).fetchone()[0]
         result: dict[str, Any] = {"last_sequence": int(sequence), "truncated": False}
         remaining = 900_000
         for name, values in rows.items():
@@ -1636,7 +1745,7 @@ class SQLiteRepository:
         reuse_scope: dict[str, Any] | None = None,
     ) -> ApprovalRecord:
         approval_id = f"approval_{uuid.uuid4().hex}"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         normalized = json.dumps(arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         arguments_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
         async with self._lock:
@@ -1739,10 +1848,19 @@ class SQLiteRepository:
                    ORDER BY a.created_at DESC LIMIT 200""",
             (workspace_id, conversation_id, principal_id, _now(), task_id, task_id),
         ).fetchall()
-        return [AUTHORIZATION_RECORD.validate_python({"approval_id": row["id"], "conversation_id": row["conversation_id"],
-                 "task_id": row["task_id"], "scope": row["authorization_scope"],
-                 "expires_at": row["authorization_expires_at"],
-                 "resource": json.loads(row["reuse_scope_json"])}) for row in rows]
+        return [
+            AUTHORIZATION_RECORD.validate_python(
+                {
+                    "approval_id": row["id"],
+                    "conversation_id": row["conversation_id"],
+                    "task_id": row["task_id"],
+                    "scope": row["authorization_scope"],
+                    "expires_at": row["authorization_expires_at"],
+                    "resource": json.loads(row["reuse_scope_json"]),
+                }
+            )
+            for row in rows
+        ]
 
     async def revoke_authorization(self, workspace_id: str, approval_id: str, principal_id: str) -> None:
         async with self._lock:
@@ -1854,7 +1972,7 @@ class SQLiteRepository:
         if not isinstance(note, str) or len(note) > 2000:
             raise ValueError("approval note must not exceed 2000 characters")
         note = note.strip()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         async with self._lock:
             row = (
                 self._db()

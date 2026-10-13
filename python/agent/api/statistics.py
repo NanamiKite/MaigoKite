@@ -89,18 +89,20 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
                     "openrouter": "https://openrouter.ai/api/v1/key"}[service]
         try:
             # Isolated short-lived client; never close clients shared by active model runs.
-            async with httpx.AsyncClient(timeout=8, follow_redirects=False) as client:
-                async with client.stream("GET", endpoint, headers={"Authorization": f"Bearer {secret}"}) as response:
-                    if response.status_code in (401, 403):
-                        raise APIError(502, "BALANCE_AUTH_FAILED", "额度查询被拒绝，请检查此服务的密钥。")
-                    if response.status_code != 200:
-                        raise APIError(502, "BALANCE_FAILED", "暂时无法查询额度，请稍后重试。")
-                    data = bytearray()
-                    async for chunk in response.aiter_bytes():
-                        data.extend(chunk)
-                        if len(data) > 65536:
-                            raise APIError(502, "BALANCE_FAILED", "额度查询返回异常，请稍后重试。")
-                    body = json.loads(data)
+            async with (
+                httpx.AsyncClient(timeout=8, follow_redirects=False) as client,
+                client.stream("GET", endpoint, headers={"Authorization": f"Bearer {secret}"}) as response,
+            ):
+                if response.status_code in (401, 403):
+                    raise APIError(502, "BALANCE_AUTH_FAILED", "额度查询被拒绝，请检查此服务的密钥。")
+                if response.status_code != 200:
+                    raise APIError(502, "BALANCE_FAILED", "暂时无法查询额度，请稍后重试。")
+                data = bytearray()
+                async for chunk in response.aiter_bytes():
+                    data.extend(chunk)
+                    if len(data) > 65536:
+                        raise APIError(502, "BALANCE_FAILED", "额度查询返回异常，请稍后重试。")
+                body = json.loads(data)
         except APIError:
             raise
         except (httpx.HTTPError, ValueError) as exc:

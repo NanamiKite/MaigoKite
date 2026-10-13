@@ -24,9 +24,12 @@ class BrowserTool(BaseTool):
             "fill fields, click or press keys, save a screenshot inside the workspace, or close the session. "
             "Upload a workspace file to an input selector, or download by clicking a selector to a new workspace path. "
             "For upload/download, supply url from the latest snapshot to bind approval to that page. "
-            "Open with a named profile to retain login across restarts; visible=true opens a window for the user to log in. "
-            "Never request passwords in chat. Reuse the session_id in this conversation; close before reopening a profile. "
-            "Sessions are bounded and idle pages expire. Reopen the named profile if its session expired; login data is retained."
+            "Open with a named profile to retain login across restarts; "
+            "visible=true opens a window for the user to log in. "
+            "Never request passwords in chat. Reuse the session_id in this conversation; "
+            "close before reopening a profile. "
+            "Sessions are bounded and idle pages expire. "
+            "Reopen the named profile if its session expired; login data is retained."
         )
 
     @property
@@ -86,7 +89,10 @@ class BrowserTool(BaseTool):
             # Page IDs are process-local; only a named profile's login data
             # survives restart/idle cleanup. Give the model a recovery action,
             # not an opaque KeyError it may retry with the same expired handle.
-            hint = "浏览器页面已关闭、过期或随服务重启失效。请重新打开目标 URL；需要保留登录态时使用原 profile，不要重试旧 session_id。"
+            hint = (
+                "浏览器页面已关闭、过期或随服务重启失效。请重新打开目标 URL；"
+                "需要保留登录态时使用原 profile，不要重试旧 session_id。"
+            )
             return ToolResult.failure(
                 {"action": action}, hint,
                 error_code="BROWSER_SESSION_EXPIRED", user_hint=hint,

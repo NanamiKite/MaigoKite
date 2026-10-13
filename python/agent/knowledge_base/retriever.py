@@ -11,6 +11,7 @@ from typing import Any
 
 from langchain_core.documents import Document
 from langchain_core.language_models import BaseLanguageModel
+from langchain_core.messages import AIMessage
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.vectorstores import VectorStore
 from langchain_core.vectorstores import VectorStoreRetriever as LCVectorStoreRetriever
@@ -82,7 +83,12 @@ class ContextualCompressionRetriever(IRetriever):
     can be scoped before any documents are sent to the compressor model.
     """
 
-    def __init__(self, base_retriever: BaseRetriever, llm: BaseLanguageModel, top_k: int = 20) -> None:
+    def __init__(
+        self,
+        base_retriever: BaseRetriever,
+        llm: BaseLanguageModel[AIMessage] | BaseLanguageModel[str],
+        top_k: int = 20,
+    ) -> None:
         try:
             from langchain_classic.retrievers import ContextualCompressionRetriever as LCCompressionRetriever
             from langchain_classic.retrievers.document_compressors import LLMChainExtractor
@@ -132,7 +138,7 @@ class EnsembleRetriever(IRetriever):
     """
 
     def __init__(
-        self, vector_store: VectorStore, llm: BaseLanguageModel | None = None,
+        self, vector_store: VectorStore, llm: BaseLanguageModel[AIMessage] | BaseLanguageModel[str] | None = None,
         top_k: int = 5, *, keyword_retriever: BaseRetriever | None = None,
     ) -> None:
         if llm is not None:

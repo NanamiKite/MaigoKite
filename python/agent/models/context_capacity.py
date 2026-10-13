@@ -83,7 +83,13 @@ async def _ollama_capacity(model: Any) -> ContextCapacity:
         return ContextCapacity(tokens, "ollama.model_info" if tokens else None,
                                "known" if tokens else "unsupported_metadata")
     except OllamaResponseError as error:
-        status = "unauthorized" if error.status_code in {401, 403} else "model_not_found" if error.status_code == 404 else "metadata_unavailable"
+        status = (
+            "unauthorized"
+            if error.status_code in {401, 403}
+            else "model_not_found"
+            if error.status_code == 404
+            else "metadata_unavailable"
+        )
         return ContextCapacity(status=status)
     except (httpx.HTTPError, ConnectionError, TimeoutError):
         return ContextCapacity(status="metadata_unavailable")

@@ -9,8 +9,6 @@ can override the defaults without modifying this module.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 
 # ---------------------------------------------------------------------------
@@ -79,7 +77,7 @@ _DEFAULT_SAFETY_CHECK_PROMPT = (
 
 def agent_step_template(
     *,
-    prompt: Optional[str] = None,
+    prompt: str | None = None,
 ) -> ChatPromptTemplate:
     """Return a :class:`ChatPromptTemplate` for the agent's next-step planning.
 
@@ -116,7 +114,7 @@ def tool_call_format() -> PromptTemplate:
 
 def reflection_template(
     *,
-    prompt: Optional[str] = None,
+    prompt: str | None = None,
 ) -> PromptTemplate:
     """Return a :class:`PromptTemplate` for self-reflection after an action.
 
@@ -138,7 +136,7 @@ def reflection_template(
 
 def summarize_template(
     *,
-    prompt: Optional[str] = None,
+    prompt: str | None = None,
 ) -> PromptTemplate:
     """Return a :class:`PromptTemplate` for compressing conversation history.
 
@@ -160,7 +158,7 @@ def summarize_template(
 
 def safety_check_template(
     *,
-    prompt: Optional[str] = None,
+    prompt: str | None = None,
 ) -> PromptTemplate:
     """Return a :class:`PromptTemplate` for validating user input safety.
 

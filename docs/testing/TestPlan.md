@@ -34,7 +34,7 @@
 
 [CI 工作流](../../.github/workflows/ci.yml) 在所有 PR、`main`/`master` 推送及手动触发时运行。同一 PR/分支启动新运行时，会取消旧运行。
 
-Python 使用 3.14，通过 `uv sync --locked --extra dev` 安装开发依赖；Node 使用 24.x，通过 `npm ci` 安装依赖。不配置模型凭据或仓库 Secret。CI 和 `scripts/run_tests.sh` 显式排除 `test_runtime_spike_live.py`，其余模型测试使用测试替身或本机 HTTP/SSE 服务，不产生模型 API 费用。
+Python 使用 3.14。CI 通过 `uv sync --locked --extra dev --extra vectorstores --no-default-groups` 安装检查依赖，让全源码 mypy 能读取可选适配器的 SDK 类型；普通应用安装仍不包含 `vectorstores`，安装检查依赖不表示这些模块已接入 Core 或通过行为验收。Node 使用 24.x，通过 `npm ci` 安装依赖。不配置模型凭据或仓库 Secret。CI 和 `scripts/run_tests.sh` 显式排除 `test_runtime_spike_live.py`，其余模型测试使用测试替身或本机 HTTP/SSE 服务，不产生模型 API 费用。
 
 | 检查 | 范围 |
 | --- | --- |

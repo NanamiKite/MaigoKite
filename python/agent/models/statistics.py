@@ -59,7 +59,13 @@ def _metrics(calls: list[dict[str, Any]]) -> dict[str, Any]:
             valid_cache &= "input_tokens" in usage and usage["cache_read_tokens"] <= usage["input_tokens"]
     count = len(calls)
     cache_pct = None
-    if count and cache_reported == count and reports["input_tokens"] == count and valid_cache and tokens.get("input_tokens", 0):
+    if (
+        count
+        and cache_reported == count
+        and reports["input_tokens"] == count
+        and valid_cache
+        and tokens.get("input_tokens", 0)
+    ):
         cache_pct = tokens["cache_read_tokens"] / tokens["input_tokens"] * 100
     return {"calls": count, "failed_calls": sum(call["failed"] for call in calls),
             "reported_calls": reported, "cache_reported_calls": cache_reported,
@@ -86,7 +92,9 @@ def project_statistics(events: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         if identity is not None:
             # Fill gaps only from the same call's receipts, never from current settings.
             previous = call["identity"]
-            call["identity"] = tuple(new or old for new, old in zip(identity, previous)) if previous else identity
+            call["identity"] = (
+                tuple(new or old for new, old in zip(identity, previous, strict=True)) if previous else identity
+            )
         if kind == "model.call.started":
             call["started"] = True
             call["time"] = event["occurred_at"]

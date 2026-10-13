@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
 import subprocess
@@ -87,7 +88,9 @@ def list_files(root: Path, relative: str) -> dict[str, object]:
                 info = item.stat(follow_symlinks=False)
                 if getattr(info, "st_file_attributes", 0) & 0x400:
                     continue
-                entries.append(entry(Path(item.path), root, info, "directory" if item.is_dir(follow_symlinks=False) else "file"))
+                entries.append(
+                    entry(Path(item.path), root, info, "directory" if item.is_dir(follow_symlinks=False) else "file")
+                )
             except OSError:
                 continue
     entries.sort(key=lambda row: (row["type"] != "directory", row["name"].lower()))
@@ -147,14 +150,28 @@ def browse(path: str, show_hidden: bool) -> dict[str, object]:
 
 
 async def git(root: Path, *args: str) -> bytes:
-    env = {key: os.environ[key] for key in ("PATH", "SYSTEMROOT", "WINDIR", "PATHEXT", "TMPDIR", "TEMP", "TMP") if key in os.environ}
+    env = {
+        key: os.environ[key]
+        for key in ("PATH", "SYSTEMROOT", "WINDIR", "PATHEXT", "TMPDIR", "TEMP", "TMP")
+        if key in os.environ
+    }
     env.update({"LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"})
     creationflags = 0
     if sys.platform == "win32":
         creationflags = subprocess.CREATE_NO_WINDOW
-    process = await asyncio.create_subprocess_exec("git", "--literal-pathspecs", "-c", "core.fsmonitor=false", "-C", str(root), *args,
-                                                   env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-                                                   creationflags=creationflags)
+    process = await asyncio.create_subprocess_exec(
+        "git",
+        "--literal-pathspecs",
+        "-c",
+        "core.fsmonitor=false",
+        "-C",
+        str(root),
+        *args,
+        env=env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+        creationflags=creationflags,
+    )
     stdout = cast(asyncio.StreamReader, process.stdout)
     output = bytearray()
     try:
@@ -167,10 +184,8 @@ async def git(root: Path, *args: str) -> bytes:
                 raise dto.APIError(400, "GIT_FAILED", "无法读取此工作区的 Git 状态。")
     finally:
         if process.returncode is None:
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 process.kill()
-            except ProcessLookupError:
-                pass
         await process.wait()
     return bytes(output)
 
@@ -178,7 +193,14 @@ async def git(root: Path, *args: str) -> bytes:
 def change_status(code: str) -> str:
     if code == "??":
         return "untracked"
-    return next((name for chars, name in (("D", "deleted"), ("RC", "renamed"), ("A", "added")) if any(char in code for char in chars)), "modified")
+    return next(
+        (
+            name
+            for chars, name in (("D", "deleted"), ("RC", "renamed"), ("A", "added"))
+            if any(char in code for char in chars)
+        ),
+        "modified",
+    )
 
 
 async def changes(root: Path) -> dict[str, object]:
@@ -214,7 +236,11 @@ async def diff(root: Path, path: str) -> dict[str, object]:
     if code == "??":
         value = await to_thread.run_sync(partial(preview, root, path, DIFF_LIMIT))
         lines = value["content"].splitlines(keepends=True)
-        text = "" if value["binary"] else f"--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{len(lines)} @@\n" + "".join("+" + line for line in lines)
+        text = (
+            ""
+            if value["binary"]
+            else f"--- /dev/null\n+++ b/{path}\n@@ -0,0 +1,{len(lines)} @@\n" + "".join("+" + line for line in lines)
+        )
         truncated = value["truncated"]
     else:
         output = await git(root, "diff", "--cached", "--no-ext-diff", "--no-textconv", "--unified=3", "--", path)
@@ -264,7 +290,9 @@ def routes(core: AgentCore, execution: Execution) -> APIRouter:
         workspace_id: str, body: dto.EntryCreate, response: Response, folder_id: str = "", path: str = "",
     ) -> FileEntry:
         response.headers["Cache-Control"] = "no-store"
-        return await to_thread.run_sync(partial(new_entry, await root(workspace_id, folder_id), path, body.name, body.type))
+        return await to_thread.run_sync(
+            partial(new_entry, await root(workspace_id, folder_id), path, body.name, body.type)
+        )
 
     @router.post("/files/open-folder", status_code=202, dependencies=[Depends(owner)], response_model=None)
     async def open_folder(workspace_id: str, folder_id: str = "", path: str = "") -> Response | dict[str, object]:
@@ -286,10 +314,8 @@ def routes(core: AgentCore, execution: Execution) -> APIRouter:
                 return await process.wait()
             finally:
                 if process.returncode is None:
-                    try:
+                    with contextlib.suppress(ProcessLookupError):
                         process.terminate()
-                    except ProcessLookupError:
-                        pass
                     await process.wait()
 
         running = execution.own(launch())
@@ -310,12 +336,23 @@ def routes(core: AgentCore, execution: Execution) -> APIRouter:
 
     @router.get("/runtime-status", dependencies=[Depends(owner)], response_model=None)
     async def status(workspace_id: str, request: Request, folder_id: str = "") -> dict[str, object]:
-        return {"workspace_id": workspace_id, "workspace_root": str(await root(workspace_id, folder_id)),
-                "workspace_source": "selection" if folder_id else "environment" if os.getenv("MAIGOKITE_WORKSPACE_ROOT") else "configuration",
-                "environment": core.config.get("app.environment", "development"),
-                "backend": {"status": "serving" if core._initialized else "unavailable", "version": request.app.version},
-                "sandbox": await to_thread.run_sync(process_sandbox_status, core.config.get("tools.windows_sandbox", {})),
-                "restart": {"pending": False, "required_for": ["启动配置与服务端口"],
-                            "hot_applied": ["工作区选择", "模型", "权限", "扩展", "界面称呼"], "note": ""}}
+        return {
+            "workspace_id": workspace_id,
+            "workspace_root": str(await root(workspace_id, folder_id)),
+            "workspace_source": "selection"
+            if folder_id
+            else "environment"
+            if os.getenv("MAIGOKITE_WORKSPACE_ROOT")
+            else "configuration",
+            "environment": core.config.get("app.environment", "development"),
+            "backend": {"status": "serving" if core._initialized else "unavailable", "version": request.app.version},
+            "sandbox": await to_thread.run_sync(process_sandbox_status, core.config.get("tools.windows_sandbox", {})),
+            "restart": {
+                "pending": False,
+                "required_for": ["启动配置与服务端口"],
+                "hot_applied": ["工作区选择", "模型", "权限", "扩展", "界面称呼"],
+                "note": "",
+            },
+        }
 
     return router

@@ -11,8 +11,8 @@ from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Request, WebSocket
 from fastapi.exceptions import RequestValidationError, ResponseValidationError, WebSocketRequestValidationError
-from pydantic import ValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import ValidationError
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException
 from starlette.middleware.cors import CORSMiddleware

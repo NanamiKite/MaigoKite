@@ -18,8 +18,18 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from agent.browser_runtime import BrowserRuntime
 from agent.config_manager import ConfigManager
 from agent.data_contracts import (
-    JSON_OBJECT, RUN_METADATA, ApprovalNotice, ApprovalRecord, ConversationRecord,
-    MessageRecord, RunMetadata, RunResult, TaskEventRecord, TaskRecord, approval_notice,
+    JSON_OBJECT,
+    RUN_METADATA,
+    ApprovalNotice,
+    ApprovalRecord,
+    ConversationRecord,
+    JSONObject,
+    MessageRecord,
+    RunMetadata,
+    RunResult,
+    TaskEventRecord,
+    TaskRecord,
+    approval_notice,
 )
 from agent.event_bus import EventBus
 from agent.extensions import ExtensionConfig, startup_config
@@ -179,8 +189,12 @@ class AgentCore:
         self.event_bus.set_sink(self.repository.append_task_event)
         try:
             applied = await self.repository.get_workspace_setting("personal", "extensions.applied_config")
-            self._extension_config = ExtensionConfig.model_validate(applied) if applied is not None else await self._read_extension_config()
-            registry, self._skills, self._skill_inventory, self._skill_errors = await self._load_tool_registry(self._extension_config)
+            self._extension_config = (
+                ExtensionConfig.model_validate(applied) if applied is not None else await self._read_extension_config()
+            )
+            registry, self._skills, self._skill_inventory, self._skill_errors = await self._load_tool_registry(
+                self._extension_config
+            )
             await self._initialize_mcp_servers(
                 registry, self._extension_config, self._extension_env, self._mcp_clients, self._mcp_runtime,
             )
@@ -571,8 +585,8 @@ class AgentCore:
     ) -> dict[str, Any]:
         try:
             default_mode = self._policy.normalize_mode(default_mode)
-        except ValueError:
-            raise ValueError("invalid permission mode")
+        except ValueError as exc:
+            raise ValueError("invalid permission mode") from exc
         value = {"default_mode": default_mode}
         await self.repository.save_workspace_setting(workspace_id, "permissions.policy", value)
         return value
@@ -613,8 +627,8 @@ class AgentCore:
         mode = permission_mode or (await self.get_permission_settings(workspace_id))["default_mode"]
         try:
             mode = self._policy.normalize_mode(mode)
-        except ValueError:
-            raise ValueError("invalid permission mode")
+        except ValueError as exc:
+            raise ValueError("invalid permission mode") from exc
         if response_mode not in self.RESPONSE_MODES:
             raise ValueError("invalid response mode")
         if model_id:
@@ -635,8 +649,8 @@ class AgentCore:
     ) -> ConversationRecord:
         try:
             permission_mode = self._policy.normalize_mode(permission_mode)
-        except ValueError:
-            raise ValueError("invalid permission mode")
+        except ValueError as exc:
+            raise ValueError("invalid permission mode") from exc
         return await self.repository.update_conversation_permission(workspace_id, conversation_id, permission_mode)
 
     async def update_conversation_settings(
@@ -667,8 +681,8 @@ class AgentCore:
         if permission_mode is not None:
             try:
                 permission_mode = self._policy.normalize_mode(permission_mode)
-            except ValueError:
-                raise ValueError("invalid permission mode")
+            except ValueError as exc:
+                raise ValueError("invalid permission mode") from exc
         if response_mode is not None and response_mode not in self.RESPONSE_MODES:
             raise ValueError("invalid response mode")
         if model_id is not None and model_id:
@@ -793,9 +807,11 @@ class AgentCore:
                 raise ValueError("a conversation is required for an idempotent message")
             workspace_id = str(metadata.get("workspace_id", "personal"))
             await self.repository.get_conversation(workspace_id, conversation_id)
-            identity = "\x00".join((workspace_id, conversation_id, str(metadata.get("principal_id", "local-user")), key))
+            identity = "\x00".join(
+                (workspace_id, conversation_id, str(metadata.get("principal_id", "local-user")), key)
+            )
             metadata["task_id"] = "task_" + hashlib.sha256(identity.encode()).hexdigest()
-            payload = {"content": prompt, "attachments": metadata.get("attachments", [])}
+            payload: JSONObject = {"content": prompt, "attachments": [*metadata.get("attachments", [])]}
             if metadata["output_schema"] is not None:
                 # Preserve existing chat submission hashes; structured contracts
                 # are part of identity and cannot change under a reused key.
@@ -960,8 +976,12 @@ class AgentCore:
             "principal_id": principal_id,
             "permission_mode": self._policy.normalize_mode(conversation["permission_mode"]),
             "process_registry": self.processes,
-            "command_limits": JSON_OBJECT.validate_python(self.config.get("tools.command_limits", {}) or {}, strict=True),
-            "windows_sandbox": JSON_OBJECT.validate_python(self.config.get("tools.windows_sandbox", {}) or {}, strict=True),
+            "command_limits": JSON_OBJECT.validate_python(
+                self.config.get("tools.command_limits", {}) or {}, strict=True
+            ),
+            "windows_sandbox": JSON_OBJECT.validate_python(
+                self.config.get("tools.windows_sandbox", {}) or {}, strict=True
+            ),
             "approved": False,
             "workspace_root": folder["root_path"],
             "api_keys": api_keys,
@@ -1110,15 +1130,21 @@ class AgentCore:
                 continue
             if not active and status == "running" and call["task_status"] in {"interrupted", "cancelled", "failed"}:
                 status = str(call["task_status"])
-            jobs.append({
-                "id": str(call["id"]), "task_id": str(call["task_id"]),
-                "conversation_id": str(call["conversation_id"]), "command": str(json.loads(call["arguments_json"]).get("command", "")),
-                "status": status, "live": bool(active and active["live"]),
-                "live_logs_available": bool(active and active["live_logs_available"]),
-                "stdin_available": bool(active and active["stdin_available"]),
-                "log_tail": str(active["log_tail"]) if active else "\n".join(
-                    str(data.get(key) or "")[-4000:] for key in ("stdout", "stderr")),
-            })
+            jobs.append(
+                {
+                    "id": str(call["id"]),
+                    "task_id": str(call["task_id"]),
+                    "conversation_id": str(call["conversation_id"]),
+                    "command": str(json.loads(call["arguments_json"]).get("command", "")),
+                    "status": status,
+                    "live": bool(active and active["live"]),
+                    "live_logs_available": bool(active and active["live_logs_available"]),
+                    "stdin_available": bool(active and active["stdin_available"]),
+                    "log_tail": str(active["log_tail"])
+                    if active
+                    else "\n".join(str(data.get(key) or "")[-4000:] for key in ("stdout", "stderr")),
+                }
+            )
         return jobs
 
     async def stop_job(self, workspace_id: str, job_id: str, principal_id: str = "local-user") -> None:
@@ -1140,7 +1166,9 @@ class AgentCore:
     async def list_tasks(self, workspace_id: str, conversation_id: str = "", limit: int = 100) -> list[TaskRecord]:
         return await self.repository.list_tasks(workspace_id, conversation_id, limit)
 
-    async def submit_task_input(self, workspace_id: str, task_id: str, content: str, idempotency_key: str) -> dict[str, Any]:
+    async def submit_task_input(
+        self, workspace_id: str, task_id: str, content: str, idempotency_key: str
+    ) -> dict[str, Any]:
         if not self._initialized or self._langgraph_runtime is None:
             raise RuntimeError("Agent runtime is not ready")
         return await self._langgraph_runtime.submit_input(workspace_id, task_id, content, idempotency_key)
@@ -1247,7 +1275,9 @@ class AgentCore:
         enabled = await self.repository.get_preference(workspace_id, user_id, "memory.enabled." + str(scope))
         return {"folder_id": folder_id, "enabled": enabled is True}
 
-    async def set_memory_settings(self, workspace_id: str, user_id: str, folder_id: str, enabled: bool) -> dict[str, Any]:
+    async def set_memory_settings(
+        self, workspace_id: str, user_id: str, folder_id: str, enabled: bool
+    ) -> dict[str, Any]:
         scope = await self._memory_scope(workspace_id, folder_id)
         await self.repository.set_memory_enabled(workspace_id, user_id, str(scope), enabled)
         return {"folder_id": folder_id, "enabled": enabled}
@@ -1381,7 +1411,9 @@ class AgentCore:
                 for server in candidate.mcp_servers:
                     # Restoring a missing connection must not erase credentials
                     # owned by an unchanged, healthy connection we will reuse.
-                    values = credentials.get(server.namespace, self._extension_env.get(server.namespace, {}) if restore_only else {})
+                    values = credentials.get(
+                        server.namespace, self._extension_env.get(server.namespace, {}) if restore_only else {}
+                    )
                     if not isinstance(values, dict):
                         raise ValueError("MCP credentials must be named environment values")
                     env[server.namespace] = {}
@@ -1425,10 +1457,15 @@ class AgentCore:
                 # Tool visibility edits require discovery, not a new process.
                 # Command/cwd/environment or credential changes do require one.
                 selection_fields = {"enabled_tools", "disabled_tools"}
-                if (not server.enabled or client is None or not client.is_running
-                        or previous_server is None
-                        or previous_server.model_dump(exclude=selection_fields) != server.model_dump(exclude=selection_fields)
-                        or (not restore_only and client_secrets != env.get(namespace, {}))):
+                if (
+                    not server.enabled
+                    or client is None
+                    or not client.is_running
+                    or previous_server is None
+                    or previous_server.model_dump(exclude=selection_fields)
+                    != server.model_dump(exclude=selection_fields)
+                    or (not restore_only and client_secrets != env.get(namespace, {}))
+                ):
                     pending.append(server)
                     continue
                 clients[namespace] = client
@@ -1452,7 +1489,9 @@ class AgentCore:
                         tools = await registry.discover_mcp(client, namespace,
                             enabled_tools=server.enabled_tools, disabled_tools=server.disabled_tools)
                     names = [tool.name for tool in tools]
-                states.append({"namespace": namespace, "status": "running", "transport": "stdio", "tool_names": list(names)})
+                states.append(
+                    {"namespace": namespace, "status": "running", "transport": "stdio", "tool_names": list(names)}
+                )
             await self._initialize_mcp_servers(
                 registry, candidate.model_copy(update={"mcp_servers": pending}), env, clients, states,
             )
@@ -1464,13 +1503,16 @@ class AgentCore:
             runtime = await self._create_langgraph_runtime(registry, skills)
             # This is last-applied product configuration, NOT execution state.
             # Unapplied edits must not silently replace a pending approval's server after restart.
-            await self.repository.save_workspace_setting("personal", "extensions.applied_config", candidate.model_dump())
+            await self.repository.save_workspace_setting(
+                "personal", "extensions.applied_config", candidate.model_dump()
+            )
         except BaseException:
             self._extension_error = "扩展未能应用，保留原配置、聊天入口及已有连接；请检查失败服务后重试。"
             if runtime is not None:
                 self._retired_runtimes.append(runtime)
-            self._retired_mcp_clients.update({name: client for name, client in clients.items()
-                                             if client is not previous_clients.get(name)})
+            self._retired_mcp_clients.update(
+                {name: client for name, client in clients.items() if client is not previous_clients.get(name)}
+            )
             try:
                 await self._close_retired_extensions()
             except Exception:

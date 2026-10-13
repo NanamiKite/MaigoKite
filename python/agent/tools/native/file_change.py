@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import difflib
 import hashlib
 import stat
@@ -30,10 +31,8 @@ def file_change(path: str, before: bytes | None, encoding: str = "utf-8", worksp
     after = read_before_write(path)
     display_path = path
     if workspace_root:
-        try:
+        with contextlib.suppress(ValueError):
             display_path = Path(path).resolve().relative_to(Path(workspace_root).resolve()).as_posix()
-        except ValueError:
-            pass
     value: dict[str, Any] = {
         "path": display_path, "diff": "", "diff_truncated": True,
         "added": None, "removed": None,

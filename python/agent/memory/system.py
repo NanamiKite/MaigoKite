@@ -5,6 +5,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
+from agent.data_contracts import MessageRecord
+
 if TYPE_CHECKING:
     from agent.repository import SQLiteRepository
 
@@ -25,7 +27,7 @@ class IMemorySystem(ABC):
         ...
 
     @abstractmethod
-    async def query_conversation(self, n: int) -> list[dict[str, object]]:
+    async def query_conversation(self, n: int) -> list[MessageRecord]:
         ...
 
     @abstractmethod
@@ -66,7 +68,7 @@ class MemorySystem(IMemorySystem):
             self.conversation_id = conversation["id"]
         await self.repository.append_message(self.conversation_id, turn["role"], turn["content"])
 
-    async def query_conversation(self, n: int) -> list[dict[str, object]]:
+    async def query_conversation(self, n: int) -> list[MessageRecord]:
         if self.conversation_id is None:
             return []
         return await self.repository.list_messages(self.conversation_id, n)

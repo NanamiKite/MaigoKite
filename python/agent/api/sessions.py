@@ -5,6 +5,7 @@ import hashlib
 import json
 import uuid
 from collections.abc import Awaitable
+from contextlib import suppress
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Query, Request, Response, WebSocket
@@ -76,7 +77,9 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
             raise dto.APIError(400, "VALIDATION", "请至少提供一项对话设置。")
         if body.thinking:
             current = await core.get_conversation(workspace_id, conversation_id)
-            await credentials.restore_model(workspace_id, body.model_id if body.model_id is not None else current["model_id"])
+            await credentials.restore_model(
+                workspace_id, body.model_id if body.model_id is not None else current["model_id"]
+            )
         return dto.conversation(await core.update_conversation_settings(workspace_id, conversation_id, **changes))
 
     @router.delete("/conversations/{conversation_id}", status_code=204, response_model=None)
@@ -85,8 +88,14 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
         return Response(status_code=204)
 
     @router.post("/conversations/{conversation_id}/fork", status_code=201, response_model=dto.ConversationResponse)
-    async def fork(workspace_id: str, conversation_id: str, body: dto.Fork, request: Request) -> dto.ConversationResponse:
-        return dto.conversation(await core.fork_conversation(workspace_id, conversation_id, body.message_id, request_key(request, required=True)))
+    async def fork(
+        workspace_id: str, conversation_id: str, body: dto.Fork, request: Request
+    ) -> dto.ConversationResponse:
+        return dto.conversation(
+            await core.fork_conversation(
+                workspace_id, conversation_id, body.message_id, request_key(request, required=True)
+            )
+        )
 
     @router.get("/conversations/{conversation_id}/messages", response_model=dto.MessagesResponse)
     async def messages(workspace_id: str, conversation_id: str) -> dict[str, object]:
@@ -141,9 +150,18 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
     async def stream(socket: WebSocket, workspace_id: str, conversation_id: str = Query(min_length=1)) -> None:
         await execution.websocket(socket, workspace_id, conversation_id)
 
-    @router.get("/conversations/{conversation_id}/events/history", response_model=dto.EventsResponse, response_model_exclude_unset=True)
+    @router.get(
+        "/conversations/{conversation_id}/events/history",
+        response_model=dto.EventsResponse,
+        response_model_exclude_unset=True,
+    )
     async def events(workspace_id: str, conversation_id: str, after: int = Query(default=0, ge=0)) -> dict[str, object]:
-        return {"events": [dto.history_event(row) for row in await core.list_task_events(workspace_id, conversation_id, after, 1000)]}
+        return {
+            "events": [
+                dto.history_event(row)
+                for row in await core.list_task_events(workspace_id, conversation_id, after, 1000)
+            ]
+        }
 
     @router.get("/tasks", response_model=dto.TasksResponse)
     async def tasks(workspace_id: str, conversation_id: str = "") -> dict[str, object]:
@@ -168,8 +186,12 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
             raise dto.APIError(409, "TASK_NOT_RESUMABLE", "任务状态已改变，请刷新后重试。")
         await credentials.prepare(workspace_id, task["conversation_id"], task_id)
         trace = "resume_" + uuid.uuid4().hex
-        await interaction(execution.admit(core.resume_task(workspace_id, task_id, dto.Principal, body.version, trace),
-                                         lambda kind, payload: kind == "task.resumed" and payload.get("trace_id") == trace))
+        await interaction(
+            execution.admit(
+                core.resume_task(workspace_id, task_id, dto.Principal, body.version, trace),
+                lambda kind, payload: kind == "task.resumed" and payload.get("trace_id") == trace,
+            )
+        )
         return {"task_id": task_id, "conversation_id": task["conversation_id"], "status": "processing"}
 
     @router.get("/tasks/{task_id}/inspection", response_model=None)
@@ -190,7 +212,9 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
 
     @router.post("/tasks/{task_id}/inputs", status_code=202, response_model=None)
     async def submit_input(workspace_id: str, task_id: str, body: dto.TaskInput, request: Request) -> dict[str, object]:
-        value = await interaction(core.submit_task_input(workspace_id, task_id, body.content, request_key(request, required=True)))
+        value = await interaction(
+            core.submit_task_input(workspace_id, task_id, body.content, request_key(request, required=True))
+        )
         return dto.fields(value, "id task_id content status created_at")
 
     @router.get("/jobs", response_model=None)
@@ -211,7 +235,11 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
 
     @router.get("/approvals", response_model=dto.ApprovalsResponse)
     async def approvals(workspace_id: str, conversation_id: str = "") -> dict[str, object]:
-        return {"approvals": [dto.approval(row) for row in await repository.list_approvals(workspace_id, conversation_id or None)]}
+        return {
+            "approvals": [
+                dto.approval(row) for row in await repository.list_approvals(workspace_id, conversation_id or None)
+            ]
+        }
 
     @router.get("/approvals/{approval_id}", response_model=dto.ApprovalResponse)
     async def approval(workspace_id: str, approval_id: str) -> dto.ApprovalResponse:
@@ -225,12 +253,15 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
         if (body.decision == "deny" or not pending.get("reuse_scope")) and body.scope != "once":
             raise dto.APIError(400, "APPROVAL_SCOPE_UNAVAILABLE", "此决定仅支持单次操作。")
         if body.decision == "allow":
-            await credentials.prepare(workspace_id, pending["conversation_id"], pending["task_id"], tool_name=pending["tool_name"])
+            await credentials.prepare(
+                workspace_id, pending["conversation_id"], pending["task_id"], tool_name=pending["tool_name"]
+            )
         else:
-            try:
-                await credentials.prepare(workspace_id, pending["conversation_id"], pending["task_id"], models_only=True)
-            except (dto.APIError, KeyError, ValueError):
-                pass  # A locked keychain must never prevent refusal from being recorded.
+            # A locked keychain must never prevent refusal from being recorded.
+            with suppress(dto.APIError, KeyError, ValueError):
+                await credentials.prepare(
+                    workspace_id, pending["conversation_id"], pending["task_id"], models_only=True
+                )
         await interaction(execution.admit(core.decide_approval(workspace_id, approval_id, dto.Principal,
                                                               body.decision, body.version, body.note, body.scope),
             lambda kind, payload: kind == "approval.decided" and payload.get("approval_id") == approval_id
@@ -250,7 +281,9 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
 
     @router.get("/questions", response_model=dto.QuestionsResponse)
     async def questions(workspace_id: str, conversation_id: str = "") -> dict[str, object]:
-        return {"questions": [dto.question(row) for row in await repository.list_questions(workspace_id, conversation_id)]}
+        return {
+            "questions": [dto.question(row) for row in await repository.list_questions(workspace_id, conversation_id)]
+        }
 
     @router.post("/questions/{question_id}/answer", status_code=202, response_model=None)
     async def answer(workspace_id: str, question_id: str, body: dto.Answer) -> dict[str, object]:
@@ -258,9 +291,16 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
         if pending["status"] != "pending" or pending["version"] != body.version:
             raise dto.APIError(409, "QUESTION_NOT_PENDING", "提问状态已改变，请刷新后重试。")
         await credentials.prepare(workspace_id, pending["conversation_id"], pending["task_id"])
-        await interaction(execution.admit(core.answer_question(workspace_id, question_id, dto.Principal, body.answer, body.version),
-            lambda kind, payload: kind == "question.answered" and payload.get("question_id") == question_id
-            and payload.get("version") == body.version + 1))
+        await interaction(
+            execution.admit(
+                core.answer_question(workspace_id, question_id, dto.Principal, body.answer, body.version),
+                lambda kind, payload: (
+                    kind == "question.answered"
+                    and payload.get("question_id") == question_id
+                    and payload.get("version") == body.version + 1
+                ),
+            )
+        )
         return {"question_id": question_id, "task_id": pending["task_id"], "status": "processing"}
 
     @router.get("/audit-events", response_model=None)

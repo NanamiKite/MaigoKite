@@ -28,7 +28,7 @@ class MCPSettings(BaseModel):
     disabled_tools: list[str] = Field(default_factory=list, max_length=256)
 
     @model_validator(mode="after")
-    def validate_command(self) -> "MCPSettings":
+    def validate_command(self) -> MCPSettings:
         if not self.command.strip() or any(c in self.command for c in "\x00\r\n"):
             raise ValueError("MCP command must be one executable, not a shell command line")
         if any("\x00" in value or len(value) > 8192 for value in self.args):
@@ -62,7 +62,7 @@ class ManagedSkill(BaseModel):
     enabled: bool = True
 
     @model_validator(mode="after")
-    def validate_content(self) -> "ManagedSkill":
+    def validate_content(self) -> ManagedSkill:
         parsed = SkillRegistry.parse_content(self.content, f"managed:{self.name}/SKILL.md")
         if parsed.name != self.name:
             raise ValueError("Skill name must match its SKILL.md name")
@@ -85,7 +85,7 @@ class ExtensionConfig(BaseModel):
         return list(dict.fromkeys(values))
 
     @model_validator(mode="after")
-    def unique_names(self) -> "ExtensionConfig":
+    def unique_names(self) -> ExtensionConfig:
         for names in ([item.namespace for item in self.mcp_servers], [item.name for item in self.skills]):
             if len(names) != len(set(names)):
                 raise ValueError("Extension names must be unique")

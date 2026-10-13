@@ -34,7 +34,9 @@ class ProcessRegistry:
         result: dict[str, Any] = {"pid": item["process"].pid, "live": item["process"].returncode is None,
                                   "log_tail": "", "live_logs_available": can_read_logs}
         stdin = item["process"].stdin
-        result["stdin_available"] = bool(item["interactive"] and result["live"] and stdin is not None and not stdin.is_closing())
+        result["stdin_available"] = bool(
+            item["interactive"] and result["live"] and stdin is not None and not stdin.is_closing()
+        )
         if can_read_logs:
             # Use pread, or a separate file handle on Windows. Never seek on
             # the child's shared output handle while it is writing.

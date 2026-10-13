@@ -432,7 +432,7 @@ async def test_async_tool_cancellation_propagates_cleanup(tmp_path: Path) -> Non
     ) as adapter:
         handle = await adapter.start(
             "run the slow tool",
-            RuntimeRunRequest(permission_mode="full_access"),
+            RuntimeRunRequest(permission_mode="workspace"),
         )
         iterator = handle.events().__aiter__()
         seen = []
@@ -447,7 +447,9 @@ async def test_async_tool_cancellation_propagates_cleanup(tmp_path: Path) -> Non
             seen.append(event)
 
     assert cleaned.is_set()
+    assert handle.root_task.done()
     assert "tool.started" in [event.type for event in seen]
+    assert "approval.requested" not in [event.type for event in seen]
     assert "tool.completed" not in [event.type for event in seen]
     assert seen[-1].type == "task.cancelled"
 

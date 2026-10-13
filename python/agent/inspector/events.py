@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any
 
 
-class EventType(str, Enum):
+class EventType(StrEnum):
+    # Keep the existing diagnostic string form while serialized values stay unchanged.
+    __str__ = Enum.__str__
+
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     MEMORY_READ = "memory_read"

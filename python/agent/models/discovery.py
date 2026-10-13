@@ -98,7 +98,9 @@ async def discover_models(provider: str, base_url: str, api_key: str = "") -> li
     remaining = 2 * 1024 * 1024
     async with asyncio.timeout(20):
         url = httpx.URL(endpoint)
-        resolved = await asyncio.get_running_loop().getaddrinfo(url.host, url.port or (443 if url.scheme == "https" else 80), type=socket.SOCK_STREAM)
+        resolved = await asyncio.get_running_loop().getaddrinfo(
+            url.host, url.port or (443 if url.scheme == "https" else 80), type=socket.SOCK_STREAM
+        )
         # HTTP URL resolution yields AF_INET/AF_INET6 socket addresses, whose
         # first element is the textual host rather than an AF_UNIX path.
         addresses = list(dict.fromkeys(cast(str, row[4][0]) for row in resolved))
@@ -138,7 +140,16 @@ async def discover_models(provider: str, base_url: str, api_key: str = "") -> li
                         "owned_by": entry.get("owned_by") or "",
                     }
                     limit = entry.get("limit") or {}
-                    capacities = [entry.get(key) for key in ("context_window", "context_length", "contextWindow", "max_model_len", "max_input_tokens")]
+                    capacities = [
+                        entry.get(key)
+                        for key in (
+                            "context_window",
+                            "context_length",
+                            "contextWindow",
+                            "max_model_len",
+                            "max_input_tokens",
+                        )
+                    ]
                     capacities.append(limit.get("context") if isinstance(limit, dict) else None)
                     for capacity in capacities:
                         if type(capacity) is int and 0 < capacity <= 9007199254740991:
@@ -146,7 +157,11 @@ async def discover_models(provider: str, base_url: str, api_key: str = "") -> li
                             break
                     details = entry.get("details")
                     if isinstance(details, dict):
-                        item["details"] = " · ".join(str(details[key]) for key in ("family", "parameter_size", "quantization_level") if details.get(key))
+                        item["details"] = " · ".join(
+                            str(details[key])
+                            for key in ("family", "parameter_size", "quantization_level")
+                            if details.get(key)
+                        )
                     results[model_id] = item
                 if provider != "anthropic" or not payload.get("has_more"):
                     return sorted(results.values(), key=lambda item: item["id"].lower())

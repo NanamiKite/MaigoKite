@@ -5,10 +5,9 @@ import argparse
 import asyncio
 from pathlib import Path
 
+from agent.models.native_model import build_chat_model, close_chat_models
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
-
-from agent.models.native_model import build_chat_model, close_chat_models
 
 
 async def summarize_document(path: str | Path, provider: BaseChatModel) -> str:

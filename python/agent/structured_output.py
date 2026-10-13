@@ -62,7 +62,10 @@ def validate_output_schema(schema: object) -> JSONObject | None:
             resource = pending.pop()
             item = resource.contents
             if isinstance(item, dict):
-                if item.get("$schema", Draft202012Validator.META_SCHEMA["$id"]) != Draft202012Validator.META_SCHEMA["$id"]:
+                if (
+                    item.get("$schema", Draft202012Validator.META_SCHEMA["$id"])
+                    != Draft202012Validator.META_SCHEMA["$id"]
+                ):
                     raise ValueError("only JSON Schema 2020-12 is supported")
                 for key in ("$ref", "$dynamicRef"):
                     if key in item and (not isinstance(item[key], str) or not item[key].startswith("#")):

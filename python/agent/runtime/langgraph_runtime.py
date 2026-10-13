@@ -54,7 +54,17 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
 from langgraph.typing import ContextT
 
+from agent.data_contracts import (
+    ApprovalNotice,
+    ApprovalRecord,
+    AuthorizationRecord,
+    JSONObject,
+    PermissionMode,
+    TaskRecord,
+    approval_notice,
+)
 from agent.errors import UserFacingCancellation, UserFacingError, public_error
+from agent.event_contracts import event_payload
 from agent.models.context_capacity import ContextCapacity
 from agent.models.reasoning import ThinkTagStream, split_thinking, visible_reasoning
 from agent.repository import ConversationBusyError, SQLiteRepository
@@ -69,17 +79,11 @@ from agent.structured_output import (
     validated_result_json,
 )
 from agent.tools.base import BaseTool
+from agent.tools.execution_context import ExecutionMetadata
 from agent.tools.native.file_read import FileReadTool
 from agent.tools.native.file_write import FileWriteTool
 from agent.tools.permission_mgr import PermissionManager, PolicyDecision, RiskLevel
-
 from agent.tools.validator import ToolValidator, ValidationError
-from agent.tools.execution_context import ExecutionMetadata
-from agent.event_contracts import event_payload
-from agent.data_contracts import (
-    ApprovalNotice, ApprovalRecord, AuthorizationRecord, JSONObject,
-    PermissionMode, TaskRecord, approval_notice,
-)
 
 logger = logging.getLogger("maigokite.agent.runtime")
 
@@ -174,10 +178,10 @@ class RunHandle:
 
 @dataclass(slots=True)
 class _RunContext:
-    adapter: "LangGraphRuntime"
+    adapter: LangGraphRuntime
     request: RuntimeRunRequest
     queue: asyncio.Queue[MaigoKiteEvent | object]
-    execution_metadata: ExecutionMetadata = field(default_factory=dict)
+    execution_metadata: ExecutionMetadata = field(default_factory=ExecutionMetadata)
     latest_tool_calls: list[NativeToolCall] = field(default_factory=list)
     finished_tool_calls: set[str] = field(default_factory=set)
     terminal_emitted: bool = False
@@ -245,7 +249,13 @@ class _ProductToolMiddleware(AgentMiddleware[AgentState[object], _RunContext]):
             request = request.override(tools=[tool for tool in request.tools
                                              if getattr(tool, "name", "") in {*enabled, "write_todos"}])
         if context.max_subagent_calls == 0:
-            request = request.override(tools=[tool for tool in request.tools if getattr(tool, "name", "") not in {"delegate", "list_subagent_models"}])
+            request = request.override(
+                tools=[
+                    tool
+                    for tool in request.tools
+                    if getattr(tool, "name", "") not in {"delegate", "list_subagent_models"}
+                ]
+            )
         response = await handler(request)
         if context.request.output_schema is not None:
             result = response.model_response if isinstance(response, ExtendedModelResponse) else response
@@ -506,7 +516,9 @@ class LangGraphRuntime:
     def readonly_graph(self, key: str, model: BaseChatModel) -> Any:
         """Cache compiled native child graphs, not execution state or HTTP clients."""
         if key not in self._readonly_graphs:
-            self._readonly_graphs[key] = create_readonly_agent(model, self.tool_specs, self.context_max_tokens, self.max_model_calls)
+            self._readonly_graphs[key] = create_readonly_agent(
+                model, self.tool_specs, self.context_max_tokens, self.max_model_calls
+            )
         return self._readonly_graphs[key]
 
     def _create_graph(
@@ -517,9 +529,14 @@ class LangGraphRuntime:
             raise UserFacingError("工具名称与结构化结果保留名称冲突，请停用同名扩展。")
         child = create_readonly_agent(model, self.tool_specs, self.context_max_tokens, self.max_model_calls)
         info = {**(model_info or {}), "model": getattr(model, "model_name", None) or getattr(model, "model", "")}
-        runtime_tools = [DelegateTool(child, info).to_langchain_tool() if spec.tool.name == "delegate"
-                         else ListSubagentModelsTool(info).to_langchain_tool() if spec.tool.name == "list_subagent_models"
-                         else spec.runtime_tool for spec in self.tool_specs]
+        runtime_tools = [
+            DelegateTool(child, info).to_langchain_tool()
+            if spec.tool.name == "delegate"
+            else ListSubagentModelsTool(info).to_langchain_tool()
+            if spec.tool.name == "list_subagent_models"
+            else spec.runtime_tool
+            for spec in self.tool_specs
+        ]
         interrupt_on: dict[str, bool | InterruptOnConfig] = {
             spec.tool.name: InterruptOnConfig(
                 allowed_decisions=["approve", "reject"],
@@ -619,7 +636,7 @@ class LangGraphRuntime:
         if errors:
             raise ExceptionGroup("Runtime cleanup failed after draining runs", errors)
 
-    async def __aenter__(self) -> "LangGraphRuntime":
+    async def __aenter__(self) -> LangGraphRuntime:
         await self.open()
         return self
 
@@ -806,7 +823,9 @@ class LangGraphRuntime:
         await self.repository.check_message_replay(actual.workspace_id, actual.task_id, actual.request_hash)
         previous = await self.repository.latest_conversation_task(actual.workspace_id, actual.conversation_id)
         if previous and previous["status"] in {"created", "queued", "running", "waiting_approval", "retry_wait"}:
-            raise ConversationBusyError("conversation has unfinished work; finish or cancel it before sending another turn")
+            raise ConversationBusyError(
+                "conversation has unfinished work; finish or cancel it before sending another turn"
+            )
         if self.has_active_conversation(actual.conversation_id):
             raise ConversationBusyError("conversation is still finishing its previous run")
         # Resolve credentials/model before committing product state. Failure to
@@ -862,10 +881,22 @@ class LangGraphRuntime:
                 actual,
                 graph=graph,
                 initial_events=[
-                    ("task.started", {"trace_id": actual.trace_id, "input_text": prompt,
-                                      "output_mode": "json_schema" if actual.output_schema is not None else "text"}),
-                    ("context.history", {"source": history_source, "previous_task_id": previous["id"] if previous else None,
-                                         "execution_resumed": False}),
+                    (
+                        "task.started",
+                        {
+                            "trace_id": actual.trace_id,
+                            "input_text": prompt,
+                            "output_mode": "json_schema" if actual.output_schema is not None else "text",
+                        },
+                    ),
+                    (
+                        "context.history",
+                        {
+                            "source": history_source,
+                            "previous_task_id": previous["id"] if previous else None,
+                            "execution_resumed": False,
+                        },
+                    ),
                 ],
             )
         except asyncio.CancelledError:
@@ -878,7 +909,9 @@ class LangGraphRuntime:
             task = await self.repository.get_task(actual.workspace_id, actual.task_id)
             if task["status"] != "cancelled":
                 await self.repository.update_task_status(actual.task_id, "failed", public_error(exc))
-                await self._publish_event(actual, "task.failed", {"message": public_error(exc), "error_type": type(exc).__name__})
+                await self._publish_event(
+                    actual, "task.failed", {"message": public_error(exc), "error_type": type(exc).__name__}
+                )
             raise
 
     async def resume_approval(
@@ -1173,7 +1206,9 @@ class LangGraphRuntime:
         cancelled = product_task["status"] == "cancelled"
         queue: asyncio.Queue[MaigoKiteEvent | object] = asyncio.Queue()
         context = _RunContext(self, request, queue)
-        context.direct_tool = None if cancelled else self._direct_tool_call(str(product_task["input_text"]), request.task_id)
+        context.direct_tool = (
+            None if cancelled else self._direct_tool_call(str(product_task["input_text"]), request.task_id)
+        )
         self._require_open()
         for event_type, payload in initial_events:
             await self._emit(context, event_type, payload)
@@ -1203,7 +1238,12 @@ class LangGraphRuntime:
             raise ValueError("tool command format: /tool <name> <json-object>") from exc
         if not name or not isinstance(arguments, dict):
             raise ValueError("tool arguments must be a JSON object")
-        return {"id": f"{task_id}_direct", "name": "exec_command" if name == "bash" else name, "args": arguments, "type": "tool_call"}
+        return {
+            "id": f"{task_id}_direct",
+            "name": "exec_command" if name == "bash" else name,
+            "args": arguments,
+            "type": "tool_call",
+        }
 
     async def _drive(self, graph: Any, graph_input: Any, context: _RunContext) -> None:
         config = {"configurable": {"thread_id": context.request.task_id}}
@@ -1233,7 +1273,9 @@ class LangGraphRuntime:
                 }
             )
             await self._refresh_execution_metadata(context)
-            if context.max_subagent_calls == 0 or "delegate" not in context.execution_metadata.get("enabled_tools", self._specs_by_name):
+            if context.max_subagent_calls == 0 or "delegate" not in context.execution_metadata.get(
+                "enabled_tools", self._specs_by_name
+            ):
                 context.execution_metadata["enabled_tools"] = [
                     name for name in context.execution_metadata.get("enabled_tools", self._specs_by_name)
                     if name not in {"delegate", "list_subagent_models"}
@@ -1242,7 +1284,9 @@ class LangGraphRuntime:
             if graph_input is None:
                 snapshot = await graph.aget_state(config)
                 if not snapshot.values:
-                    raise RuntimeError("runtime checkpoint is missing; the decision is saved but execution cannot resume")
+                    raise RuntimeError(
+                        "runtime checkpoint is missing; the decision is saved but execution cannot resume"
+                    )
                 # A crash can follow the final checkpoint but precede the
                 # product-result transaction. Only project that finished state;
                 # do not invoke the graph or repeat completed tools.
@@ -1303,7 +1347,9 @@ class LangGraphRuntime:
                 )
                 if saved is not None:
                     context.final_saved = True
-                    await self._emit(context, "message.completed", {"content": saved["content"], "message_id": saved["id"]})
+                    await self._emit(
+                        context, "message.completed", {"content": saved["content"], "message_id": saved["id"]}
+                    )
             if str(task["status"]) == "cancelled":
                 await self._emit(
                     context,
@@ -1595,7 +1641,9 @@ class LangGraphRuntime:
                 "name": str(raw_call.get("name") or ""),
                 "args": dict(raw_call.get("args") or {}),
             }
-            if call["name"] == "delegate" and any(item["id"] == _tool_call_id(call) for item in context.latest_tool_calls):
+            if call["name"] == "delegate" and any(
+                item["id"] == _tool_call_id(call) for item in context.latest_tool_calls
+            ):
                 raise ValueError("delegate call IDs must be unique within a model turn")
             context.latest_tool_calls.append(call)
             try:
@@ -1821,8 +1869,13 @@ class LangGraphRuntime:
         arguments = dict(request.tool_call.get("args") or {})
         if await self.repository.task_inputs(context.request.workspace_id, context.request.task_id, pending=True):
             return ToolMessage(
-                content="New user input arrived. This proposed tool was not executed; reconsider it after reading the user's message.",
-                tool_call_id=_tool_call_id(request.tool_call), name=tool_name, status="error",
+                content=(
+                    "New user input arrived. This proposed tool was not executed; "
+                    "reconsider it after reading the user's message."
+                ),
+                tool_call_id=_tool_call_id(request.tool_call),
+                name=tool_name,
+                status="error",
             )
         record = (await self._review_records(context)).get(_tool_call_id(request.tool_call))
         await self._refresh_execution_metadata(context)
@@ -1882,9 +1935,16 @@ class LangGraphRuntime:
             )
         if decision.authorization_id:
             await self.repository.record_audit(
-                context.request.workspace_id, context.request.principal_id,
-                "authorization.used", decision.authorization_id, "allowed",
-                {"task_id": context.request.task_id, "tool_call_id": _tool_call_id(request.tool_call), "tool_name": tool_name},
+                context.request.workspace_id,
+                context.request.principal_id,
+                "authorization.used",
+                decision.authorization_id,
+                "allowed",
+                {
+                    "task_id": context.request.task_id,
+                    "tool_call_id": _tool_call_id(request.tool_call),
+                    "tool_name": tool_name,
+                },
             )
         # Only a successful product policy decision selects the execution
         # boundary. Tool arguments can request escalation, never grant it.

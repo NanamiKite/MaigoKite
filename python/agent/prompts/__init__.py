@@ -1,5 +1,6 @@
 """Prompt template registry and output parsers for MaigoKite Agent."""
 
+from agent.prompts.parsers import PlanOutputParser, ToolCallOutputParser
 from agent.prompts.templates import (
     agent_step_template,
     reflection_template,
@@ -7,7 +8,6 @@ from agent.prompts.templates import (
     summarize_template,
     tool_call_format,
 )
-from agent.prompts.parsers import PlanOutputParser, ToolCallOutputParser
 
 __all__ = [
     "agent_step_template",

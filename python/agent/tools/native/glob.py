@@ -8,9 +8,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from agent.security.sensitive_paths import is_sensitive_path, search_exclusions
 from agent.tools.base import BaseTool, ExecutionContext, ToolResult
 from agent.utils.sandbox import SandboxExecutor, SandboxUnavailableError
-from agent.security.sensitive_paths import is_sensitive_path, search_exclusions
 
 
 class GlobParams(BaseModel):
@@ -57,15 +57,22 @@ class GlobTool(BaseTool):
                     *([] if full_access else search_exclusions()), ".",
                 ])
         except FileNotFoundError:
-            return ToolResult.failure({}, "ripgrep is not installed.", error_code="RIPGREP_UNAVAILABLE",
-                                      user_hint="文件搜索需要 ripgrep（rg）。Windows 请安装在工作区之外的可信 PATH 目录。")
+            return ToolResult.failure(
+                {},
+                "ripgrep is not installed.",
+                error_code="RIPGREP_UNAVAILABLE",
+                user_hint="文件搜索需要 ripgrep（rg）。Windows 请安装在工作区之外的可信 PATH 目录。",
+            )
         except SandboxUnavailableError as exc:
-            return ToolResult.failure({}, str(exc), error_code="SANDBOX_UNAVAILABLE",
-                                      user_hint=exc.user_hint)
+            return ToolResult.failure({}, str(exc), error_code="SANDBOX_UNAVAILABLE", user_hint=exc.user_hint)
         if result.timed_out or result.exit_code not in {0, 1}:
             return ToolResult.failure({}, result.stderr or "File search failed.", error_code="FILE_SEARCH_FAILED")
         # A capped output can end in half a filename; never present it as real.
-        paths = [name for name in result.stdout.split("\0")[:-1] if full_access or not is_sensitive_path((root / name).resolve())]
+        paths = [
+            name
+            for name in result.stdout.split("\0")[:-1]
+            if full_access or not is_sensitive_path((root / name).resolve())
+        ]
         matches = [name.removeprefix("./") for name in paths[:args.max_results]]
         truncated = result.output_truncated or len(paths) > args.max_results
         return ToolResult(

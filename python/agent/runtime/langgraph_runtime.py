@@ -11,7 +11,7 @@ import json
 import logging
 import uuid
 from collections import defaultdict
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -73,8 +73,23 @@ from agent.tools.native.file_read import FileReadTool
 from agent.tools.native.file_write import FileWriteTool
 from agent.tools.permission_mgr import PermissionManager, PolicyDecision, RiskLevel
 
-logger = logging.getLogger("maigokite.agent.runtime")
 from agent.tools.validator import ToolValidator, ValidationError
+from agent.tools.execution_context import ExecutionMetadata
+from agent.event_contracts import event_payload
+from agent.data_contracts import (
+    ApprovalNotice, ApprovalRecord, AuthorizationRecord, JSONObject,
+    PermissionMode, TaskRecord, approval_notice,
+)
+
+logger = logging.getLogger("maigokite.agent.runtime")
+
+
+def _tool_call_id(call: NativeToolCall) -> str:
+    """ToolNode needs a nonempty ID to bind execution and approval to the same call."""
+    call_id = call["id"]
+    if not call_id:
+        raise ValueError("tool call is missing its ID")
+    return call_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,10 +97,10 @@ class MaigoKiteEvent:
     """A stable product event that does not expose LangGraph event classes."""
 
     type: str
-    payload: dict[str, Any]
+    payload: JSONObject
 
 
-EventPublisher = Callable[[str, dict[str, Any]], Awaitable[None]]
+EventPublisher = Callable[[str, Mapping[str, object]], Awaitable[None]]
 ModelResolver = Callable[[str, str, str], Awaitable[tuple[str, BaseChatModel]]]
 
 
@@ -95,10 +110,10 @@ class RuntimeRunRequest:
     conversation_id: str = ""
     task_id: str = ""
     principal_id: str = "local-user"
-    permission_mode: str = "read_only"
+    permission_mode: PermissionMode = "read_only"
     trace_id: str = ""
     request_hash: str = ""
-    output_schema: dict[str, Any] | None = None
+    output_schema: JSONObject | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,8 +177,8 @@ class _RunContext:
     adapter: "LangGraphRuntime"
     request: RuntimeRunRequest
     queue: asyncio.Queue[MaigoKiteEvent | object]
-    execution_metadata: dict[str, Any] = field(default_factory=dict)
-    latest_tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    execution_metadata: ExecutionMetadata = field(default_factory=dict)
+    latest_tool_calls: list[NativeToolCall] = field(default_factory=list)
     finished_tool_calls: set[str] = field(default_factory=set)
     terminal_emitted: bool = False
     reasoning_parts: list[str] = field(default_factory=list)
@@ -178,7 +193,7 @@ class _RunContext:
     direct_tool: NativeToolCall | None = None
     review_call_ids: set[str] = field(default_factory=set)
     boundary_review_ids: set[str] = field(default_factory=set)
-    authorizations: list[dict[str, Any]] = field(default_factory=list)
+    authorizations: list[AuthorizationRecord] = field(default_factory=list)
     max_subagent_calls: int = 0
     subagent_model_ids: list[str] = field(default_factory=list)
     child_slots: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(1))
@@ -194,7 +209,7 @@ class _RunContext:
 class _ProductToolMiddleware(AgentMiddleware[AgentState[object], _RunContext]):
     """Map official tool execution callbacks to MaigoKite product concerns."""
 
-    async def abefore_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+    async def abefore_model(self, state: AgentState[object], runtime: Runtime[_RunContext]) -> dict[str, Any] | None:
         context = runtime.context
         pending = await context.adapter.repository.task_inputs(
             context.request.workspace_id, context.request.task_id, pending=True,
@@ -204,7 +219,7 @@ class _ProductToolMiddleware(AgentMiddleware[AgentState[object], _RunContext]):
                     for item in pending if item["id"] not in known]
         return {"messages": messages} if messages else None
 
-    async def aafter_model(self, state: Any, runtime: Any) -> None:
+    async def aafter_model(self, state: AgentState[object], runtime: Runtime[_RunContext]) -> None:
         # after_model hooks run in reverse order: refresh before native HITL,
         # including permission changes made while the provider was streaming.
         await runtime.context.adapter._refresh_execution_metadata(runtime.context)
@@ -278,9 +293,9 @@ class _ProductToolMiddleware(AgentMiddleware[AgentState[object], _RunContext]):
             if request.tool_call["name"] == "write_todos":
                 # Framework-owned planning state, not a filesystem/workspace
                 # TODO mutation. ToolNode owns the returned Command update.
-                await context.adapter.repository.update_tool_call(request.tool_call["id"], "running")
+                await context.adapter.repository.update_tool_call(_tool_call_id(request.tool_call), "running")
                 await context.adapter._emit(context, "tool.started", {
-                    "tool_call_id": request.tool_call["id"], "tool_name": "write_todos",
+                    "tool_call_id": _tool_call_id(request.tool_call), "tool_name": "write_todos",
                     "arguments": request.tool_call.get("args", {}),
                 })
                 return await handler(request)
@@ -414,7 +429,7 @@ class LangGraphRuntime:
         system_prompt: str = "",
         context_max_tokens: int = 32000,
         max_model_calls: int = 8,
-        execution_metadata: Callable[[RuntimeRunRequest], Awaitable[dict[str, Any]]] | None = None,
+        execution_metadata: Callable[[RuntimeRunRequest], Awaitable[ExecutionMetadata]] | None = None,
         safety_settings: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
         safety_credential: Callable[[str], Awaitable[str]] | None = None,
     ) -> None:
@@ -496,7 +511,7 @@ class LangGraphRuntime:
 
     def _create_graph(
         self, model: BaseChatModel, model_info: dict[str, Any] | None = None,
-        *, output_schema: dict[str, Any] | None = None,
+        *, output_schema: JSONObject | None = None,
     ) -> Any:
         if output_schema is not None and OUTPUT_TOOL_NAME in self._specs_by_name:
             raise UserFacingError("工具名称与结构化结果保留名称冲突，请停用同名扩展。")
@@ -684,7 +699,7 @@ class LangGraphRuntime:
 
     async def _refresh_execution_metadata(self, context: _RunContext) -> None:
         fresh = (await self._execution_metadata(context.request) if self._execution_metadata
-                 else dict(context.execution_metadata))
+                 else context.execution_metadata.copy())
         original = context.execution_metadata.get("enabled_tools", self._specs_by_name)
         # Tool discovery stays stable for this run; revocations still apply.
         fresh["enabled_tools"] = sorted(set(original) & set(fresh.get("enabled_tools", original)))
@@ -719,7 +734,7 @@ class LangGraphRuntime:
         ):
             # Replay must consume the original native HITL batch. Newly gated
             # calls are checked separately at their actual execution boundary.
-            return tool_request.tool_call["id"] in context.review_call_ids
+            return _tool_call_id(tool_request.tool_call) in context.review_call_ids
         decision = self._policy_decision(
             str(tool_request.tool_call["name"]),
             dict(tool_request.tool_call.get("args") or {}),
@@ -905,7 +920,7 @@ class LangGraphRuntime:
             conversation_id=str(pending_task["conversation_id"]),
             task_id=str(pending_task["id"]),
             principal_id=principal_id,
-            permission_mode=str(conversation["permission_mode"]),
+            permission_mode=conversation["permission_mode"],
         )
         # Preflight permission grants before committing. A refusal must still
         # commit when model setup is unavailable: _drive reports a continuation
@@ -919,7 +934,7 @@ class LangGraphRuntime:
             if not snapshot.interrupts or proposal is None:
                 raise ValueError("approval has no matching runtime interrupt; cancel and start a new task")
             try:
-                calls = self._review_calls(snapshot.interrupts, [dict(call) for call in proposal.tool_calls])
+                calls = self._review_calls(snapshot.interrupts, proposal.tool_calls)
             except RuntimeError as exc:
                 raise ValueError("approval no longer matches the runtime checkpoint") from exc
             call = next((call for call in calls if call["id"] == pending["tool_call_id"]
@@ -984,7 +999,7 @@ class LangGraphRuntime:
             conversation_id=str(task["conversation_id"]),
             task_id=task_id,
             principal_id=principal_id,
-            permission_mode=str(conversation["permission_mode"]),
+            permission_mode=conversation["permission_mode"],
             trace_id=trace_id,
         )
         async with self._conversation_locks[request.conversation_id]:
@@ -1061,7 +1076,7 @@ class LangGraphRuntime:
             request = RuntimeRunRequest(
                 workspace_id=workspace_id, conversation_id=str(question["conversation_id"]),
                 task_id=str(question["task_id"]), principal_id=principal_id,
-                permission_mode=str(conversation["permission_mode"]),
+                permission_mode=conversation["permission_mode"],
             )
             graph = await self._graph_for(request)
             snapshot = await graph.aget_state({"configurable": {"thread_id": request.task_id}})
@@ -1131,7 +1146,7 @@ class LangGraphRuntime:
 
     async def list_pending_approvals(
         self, workspace_id: str, conversation_id: str | None = None
-    ) -> list[dict[str, Any]]:
+    ) -> list[ApprovalRecord]:
         return await self.repository.list_approvals(workspace_id, conversation_id)
 
     async def _launch(
@@ -1139,7 +1154,7 @@ class LangGraphRuntime:
         graph_input: Any,
         request: RuntimeRunRequest,
         *,
-        initial_events: Sequence[tuple[str, dict[str, Any]]] = (),
+        initial_events: Sequence[tuple[str, Mapping[str, object]]] = (),
         graph: Any = None,
     ) -> RunHandle:
         self._require_open()
@@ -1387,7 +1402,7 @@ class LangGraphRuntime:
         )
         return checkpoint is not None
 
-    async def cancel(self, workspace_id: str, task_id: str) -> dict[str, Any]:
+    async def cancel(self, workspace_id: str, task_id: str) -> TaskRecord:
         """Cancel and await an active root task before publishing completion."""
         # Validate ownership before touching an in-memory handle.
         task = await self.repository.get_task(workspace_id, task_id)
@@ -1575,19 +1590,19 @@ class LangGraphRuntime:
                 # LangChain's result binding is not a product capability and
                 # must not create an approval, tool audit row or execution event.
                 continue
-            call: dict[str, Any] = {
+            call: NativeToolCall = {
                 "id": str(raw_call.get("id") or f"call_{uuid.uuid4().hex}"),
                 "name": str(raw_call.get("name") or ""),
                 "args": dict(raw_call.get("args") or {}),
             }
-            if call["name"] == "delegate" and any(item["id"] == call["id"] for item in context.latest_tool_calls):
+            if call["name"] == "delegate" and any(item["id"] == _tool_call_id(call) for item in context.latest_tool_calls):
                 raise ValueError("delegate call IDs must be unique within a model turn")
             context.latest_tool_calls.append(call)
             try:
-                stored = await self.repository.get_tool_call(call["id"])
+                stored = await self.repository.get_tool_call(_tool_call_id(call))
             except KeyError:
                 await self.repository.create_tool_call(
-                    call["id"],
+                    _tool_call_id(call),
                     context.request.workspace_id,
                     context.request.conversation_id,
                     context.request.task_id,
@@ -1599,7 +1614,7 @@ class LangGraphRuntime:
                     context,
                     "tool.proposed",
                     {
-                        "tool_call_id": call["id"],
+                        "tool_call_id": _tool_call_id(call),
                         "tool_name": call["name"],
                         "arguments": call["args"],
                     },
@@ -1612,11 +1627,11 @@ class LangGraphRuntime:
                     raise ValueError("tool call ID already belongs to a different product operation")
                 if call["name"] == "delegate" and (
                     stored["arguments_json"] != json.dumps(call["args"], ensure_ascii=False, sort_keys=True)
-                    or call["id"] in context.finished_tool_calls
+                    or _tool_call_id(call) in context.finished_tool_calls
                 ):
                     raise ValueError("delegate call IDs cannot be reused for another dispatch")
 
-    def _matches_approval(self, record: dict[str, Any], name: str, decision: PolicyDecision) -> bool:
+    def _matches_approval(self, record: ApprovalRecord, name: str, decision: PolicyDecision) -> bool:
         return (
             record["tool_name"] == name
             and record["risk_level"] == decision.risk.name
@@ -1624,10 +1639,10 @@ class LangGraphRuntime:
         )
 
     @staticmethod
-    def _review_calls(interrupts: Any, ordered_calls: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _review_calls(interrupts: Any, ordered_calls: Sequence[NativeToolCall]) -> list[NativeToolCall]:
         """Match native HITL actions to the checkpoint's ordered call IDs."""
         remaining = list(ordered_calls)
-        calls: list[dict[str, Any]] = []
+        calls: list[NativeToolCall] = []
         for interrupt_value in interrupts:
             value = getattr(interrupt_value, "value", None)
             actions = value.get("action_requests") if isinstance(value, dict) else None
@@ -1646,8 +1661,8 @@ class LangGraphRuntime:
                 calls.append(remaining.pop(index))
         return calls
 
-    async def _review_records(self, context: _RunContext) -> dict[str, dict[str, Any]]:
-        records: dict[str, dict[str, Any]] = {}
+    async def _review_records(self, context: _RunContext) -> dict[str, ApprovalRecord]:
+        records: dict[str, ApprovalRecord] = {}
         for status in ("pending", "consumed", "rejected", "expired"):
             for record in await self.repository.list_approvals(
                 context.request.workspace_id, context.request.conversation_id, status
@@ -1666,13 +1681,13 @@ class LangGraphRuntime:
         same checkpoint and Repository decisions.
         """
         calls = self._review_calls(interrupts, context.latest_tool_calls)
-        context.review_call_ids = {call["id"] for call in calls}
+        context.review_call_ids = {_tool_call_id(call) for call in calls}
         boundary_interrupts = [item for item in interrupts if item.value.get("source") == "tool_boundary"]
         context.boundary_review_ids = {
-            call["id"] for call in self._review_calls(boundary_interrupts, context.latest_tool_calls)
+            _tool_call_id(call) for call in self._review_calls(boundary_interrupts, context.latest_tool_calls)
         }
         records = await self._review_records(context)
-        reviewed = [records.get(call["id"]) for call in calls]
+        reviewed = [records.get(_tool_call_id(call)) for call in calls]
         if any(record and record["status"] == "expired" for record in reviewed):
             raise PermissionError("approval has expired; start a new task")
         decisions: list[dict[str, Any]] = []
@@ -1703,13 +1718,13 @@ class LangGraphRuntime:
         return Command(resume=responses)
 
     @staticmethod
-    def _rejection_message(record: dict[str, Any]) -> str:
+    def _rejection_message(record: ApprovalRecord | None) -> str:
         message = (
             "The user rejected this operation. It was not executed. "
             "Do not retry it or bypass the refusal using another tool unless the user explicitly requests it. "
             "Continue the permitted parts of the task; if the goal requires this operation, explain the limitation."
         )
-        if record.get("note"):
+        if record is not None and record["note"]:
             message += f"\nUser's reason: {record['note']}"
         return message
 
@@ -1726,14 +1741,14 @@ class LangGraphRuntime:
             return
         records = await self._review_records(context)
         for call in self._review_calls(interrupts, context.latest_tool_calls):
-            approval = records.get(call["id"])
+            approval = records.get(_tool_call_id(call))
             if approval is not None and approval["status"] == "rejected":
                 # Keep the refused operation denied while reviewing siblings.
                 continue
             if approval is not None and approval["status"] == "consumed":
                 # Also correct this projection after a crash between committing
                 # the approval decision and exposing the next review item.
-                await self.repository.update_tool_call(call["id"], "waiting_approval")
+                await self.repository.update_tool_call(_tool_call_id(call), "waiting_approval")
                 continue
             if approval is not None and approval["status"] != "pending":
                 raise PermissionError("approval is no longer pending")
@@ -1749,7 +1764,7 @@ class LangGraphRuntime:
                     context.request.conversation_id,
                     context.request.principal_id,
                     context.request.task_id,
-                    call["id"],
+                    _tool_call_id(call),
                     decision.arguments,
                     decision.risk.name,
                     reuse_scope=decision.reuse_scope,
@@ -1761,7 +1776,7 @@ class LangGraphRuntime:
                     str(approval["id"]),
                     "pending",
                     {
-                        "tool_call_id": call["id"],
+                        "tool_call_id": _tool_call_id(call),
                         "tool_name": name,
                         "risk": decision.risk.name,
                     },
@@ -1772,7 +1787,7 @@ class LangGraphRuntime:
                 context,
                 "task.waiting_approval",
                 {
-                    "tool_call_id": call["id"],
+                    "tool_call_id": _tool_call_id(call),
                     "approval_id": approval["id"],
                 },
             )
@@ -1799,7 +1814,7 @@ class LangGraphRuntime:
         if task["status"] == "cancelled":
             return ToolMessage(
                 content="Task cancelled; this tool was not executed.",
-                tool_call_id=str(request.tool_call["id"]),
+                tool_call_id=_tool_call_id(request.tool_call),
                 name=tool_name,
                 status="error",
             )
@@ -1807,18 +1822,18 @@ class LangGraphRuntime:
         if await self.repository.task_inputs(context.request.workspace_id, context.request.task_id, pending=True):
             return ToolMessage(
                 content="New user input arrived. This proposed tool was not executed; reconsider it after reading the user's message.",
-                tool_call_id=str(request.tool_call["id"]), name=tool_name, status="error",
+                tool_call_id=_tool_call_id(request.tool_call), name=tool_name, status="error",
             )
-        record = (await self._review_records(context)).get(str(request.tool_call["id"]))
+        record = (await self._review_records(context)).get(_tool_call_id(request.tool_call))
         await self._refresh_execution_metadata(context)
-        authority = replace(context, execution_metadata=dict(context.execution_metadata))
+        authority = replace(context, execution_metadata=context.execution_metadata.copy())
         # Capture authority only after waiting for this tool's admission and
         # reading pending input/approvals. Earlier tools retain their own copy.
         request = replace(request, runtime=replace(request.runtime, context=authority))
         decision = self._policy_decision(tool_name, arguments, authority)
         approved = record if record is not None and record["status"] == "consumed" else None
         rejected = record if record is not None and record["status"] == "rejected" else None
-        if (request.tool_call["id"] in context.boundary_review_ids
+        if (_tool_call_id(request.tool_call) in context.boundary_review_ids
                 or (decision.outcome == "approval_required" and approved is None and rejected is None)):
             # A permission change can occur after after_model HITL, while an
             # earlier tool is executing. Suspend this ToolNode through native
@@ -1831,15 +1846,15 @@ class LangGraphRuntime:
             })
             if response["decisions"][0]["type"] == "reject":
                 return ToolMessage(
-                    content=self._rejection_message(rejected or {}),
-                    tool_call_id=str(request.tool_call["id"]), name=tool_name, status="error",
+                    content=self._rejection_message(rejected),
+                    tool_call_id=_tool_call_id(request.tool_call), name=tool_name, status="error",
                 )
         if rejected is not None:
             # Replaying a ToolNode after its interrupt was checkpointed away
             # must still respect the audit, even if the permission mode changed.
             return ToolMessage(
                 content=self._rejection_message(rejected),
-                tool_call_id=str(request.tool_call["id"]), name=tool_name, status="error",
+                tool_call_id=_tool_call_id(request.tool_call), name=tool_name, status="error",
             )
         if approved is not None or decision.outcome == "approval_required":
             # HITL owns suspension/resume. The product audit still owns the
@@ -1849,17 +1864,17 @@ class LangGraphRuntime:
             if approved is None or not self._matches_approval(approved, tool_name, decision):
                 return ToolMessage(
                     content="No matching approval for these tool parameters; this tool was not executed.",
-                    tool_call_id=str(request.tool_call["id"]), name=tool_name, status="error",
+                    tool_call_id=_tool_call_id(request.tool_call), name=tool_name, status="error",
                 )
         if decision.outcome != "allow":
             # ToolNode still projects the returned failure to the model and UI;
             # persist denial so it cannot be mistaken for a failed execution
             # or for the user's separate HITL rejection.
             await self.repository.update_tool_call(
-                str(request.tool_call["id"]), "denied", risk_level=decision.risk.name,
+                _tool_call_id(request.tool_call), "denied", risk_level=decision.risk.name,
             )
             return ToolMessage(
-                content=decision.reason, tool_call_id=str(request.tool_call["id"]),
+                content=decision.reason, tool_call_id=_tool_call_id(request.tool_call),
                 name=tool_name, status="error", artifact={
                     "summary": decision.reason, "error_code": "TOOL_DENIED",
                     "user_hint": "当前权限或工具设置不允许此操作，未执行。",
@@ -1869,7 +1884,7 @@ class LangGraphRuntime:
             await self.repository.record_audit(
                 context.request.workspace_id, context.request.principal_id,
                 "authorization.used", decision.authorization_id, "allowed",
-                {"task_id": context.request.task_id, "tool_call_id": request.tool_call["id"], "tool_name": tool_name},
+                {"task_id": context.request.task_id, "tool_call_id": _tool_call_id(request.tool_call), "tool_name": tool_name},
             )
         # Only a successful product policy decision selects the execution
         # boundary. Tool arguments can request escalation, never grant it.
@@ -1930,7 +1945,7 @@ class LangGraphRuntime:
         self,
         context: _RunContext,
         event_type: str,
-        payload: dict[str, Any],
+        payload: Mapping[str, object],
     ) -> None:
         async with context.event_lock:
             if context.terminal_emitted:
@@ -1944,47 +1959,21 @@ class LangGraphRuntime:
         self,
         request: RuntimeRunRequest,
         event_type: str,
-        payload: dict[str, Any],
-    ) -> dict[str, Any]:
-        base = {
+        payload: Mapping[str, object],
+    ) -> JSONObject:
+        base = event_payload(event_type, {
             "task_id": request.task_id,
             "conversation_id": request.conversation_id,
             **payload,
-        }
+        })
         if self._event_publisher is not None:
             await self._event_publisher(event_type, base)
             return base
         return await self.repository.append_task_event(event_type, base)
 
     @staticmethod
-    def _approval_payload(approval: dict[str, Any]) -> dict[str, Any]:
-        arguments = dict(approval.get("arguments") or {})
-        return {
-            "approval_id": approval["id"],
-            "task_id": approval["task_id"],
-            "conversation_id": approval["conversation_id"],
-            "tool_call_id": approval["tool_call_id"],
-            "tool_name": approval["tool_name"],
-            "arguments": arguments,
-            "resource_scope": str(
-                arguments.get("path")
-                or arguments.get("root_dir")
-                or arguments.get("workdir")
-                or arguments.get("url")
-                or "current workspace"
-            ),
-            "risk_level": approval["risk_level"],
-            "status": approval["status"],
-            "version": int(approval["version"]),
-            "expires_at": approval["expires_at"],
-            "note": approval.get("note", ""),
-            "decided_at": approval.get("decided_at") or "",
-            "reuse_scope": approval.get("reuse_scope") or {},
-            "allowed_scopes": ["once", "task", "session"] if approval.get("reuse_scope") else ["once"],
-            "authorization_scope": approval.get("authorization_scope", "once"),
-            "authorization_expires_at": approval.get("authorization_expires_at", ""),
-            "authorization_revoked_at": approval.get("authorization_revoked_at", ""),
-        }
+    def _approval_payload(approval: ApprovalRecord) -> ApprovalNotice:
+        return approval_notice(approval)
 
     @classmethod
     def _message_text(cls, message: Any) -> str:

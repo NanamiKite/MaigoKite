@@ -16,6 +16,34 @@
 | API → AgentCore | 同进程调用 | Python |
 | 智能体核心 ↔ MCP Server | MCP stdio | MCP Server |
 
+### 1.1 类型与数据契约
+
+固定业务记录、公开响应和第三方 SDK 数据分层处理，不共用一个万能字典：
+
+| 边界 | 当前实现 |
+|---|---|
+| SQLite → Repository/Core | `agent/data_contracts.py` 中的 TypedDict；任务、工具调用、会话、消息、审批、授权、提问、事件记录在离开持久化边界时由 Pydantic TypeAdapter 校验 |
+| Core/Runtime → 工具 | `RunMetadata` / `ExecutionMetadata` 描述已知字段；进程句柄、凭证保留在内部执行上下文，不作为 JSON 返回 |
+| API → UI | `api/contracts.py` 中的 Pydantic 响应模型；已覆盖会话 CRUD/分岔、消息查询、任务查询/取消/结果、审批查询、授权查询、提问查询和会话快照 |
+| Runtime → 事件存储/传输 | `event_contracts.py` 以事件名关联关键 payload；实时流和历史事件使用同一信封与校验规则 |
+| HTTP/WebSocket → 前端 | 从实际 FastAPI OpenAPI 生成 TypeScript 传输类型和 Ajv 独立校验函数；先校验 `unknown`，再交给视图层 |
+
+- JSON Schema、工具参数、用户结构化结果等动态字段使用递归 `JSONValue` / `JSONObject`，不是任意 Python 对象；事件不再使用 `default=str` 静默序列化未知对象。SDK 的消息与工具调用优先复用 SDK 自带类型。
+- 已声明的事件不能因 payload 校验失败退回「未知事件」分支。扩展事件保留合法 JSON payload；未纳入关键事件表的类型尚不具备业务字段级校验。
+- 请求格式错误为 400；已覆盖边界的内部记录或响应校验失败为 500 `CONTRACT_INVALID`，不回显验证异常中的原始数据。前端 HTTP 校验失败使用同名错误码，WebSocket 无效事件断开并走既有历史恢复流程，不冒充处理成功。
+- 快照继续保留既有 `arguments_json / reuse_scope_json / options_json` 协议，前端解码后再次按审批/提问模型校验。
+- 这是主执行链的收敛范围，不表示整个 API 已全部类型化。设置、扩展、进程、任务 inspection/input 等尚有动态响应；前端这些未迁移调用仍保留原泛型边界。视图状态允许尚未收到回执的局部记录，不等同于完整传输 DTO。
+
+更新响应模型或事件契约后，在已安装项目 Python/前端依赖的源码目录运行（Linux / PowerShell 相同）：
+
+```sh
+npm --prefix web run generate:contracts
+```
+
+默认使用仓库 `.venv`，也可用 `MAIGOKITE_PYTHON` 指定解释器。脚本仅构造路由导出 OpenAPI，不进入应用 lifespan、不打开用户数据库、不读取凭证或调用模型。生成文件位于 `web/src/api/generated/`，与契约修改一起提交，不手工编辑。普通启动/构建使用已生成的文件，不隐式启动后端生成契约。
+
+生成依赖复用 [openapi-typescript](https://openapi-ts.dev/node) 和 [Ajv standalone](https://ajv.js.org/standalone.html)，运行端不引入 schema 编译器。Pydantic 下限为 2.12，匹配项目 Python 3.14 的注解支持（[官方说明](https://pydantic.dev/articles/pydantic-v2-12-release)）。
+
 ## 2. 通用调用上下文
 
 外部请求应经过 API 层身份/资源校验形成可信上下文。以下是目标关联字段；当前请求仅携带部分主体/工作区字段，request/trace/deadline 尚未统一传播：

@@ -2,11 +2,19 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
+from agent.data_contracts import (
+    ApprovalRecord, ApprovalScope, ApprovalStatus, ConversationRecord, JSONObject,
+    QuestionRecord, RiskLabel, TaskRecord, TaskStatus, approval_notice,
+)
+
+from agent.data_contracts import PermissionMode as ActivePermissionMode
 from agent.errors import UserFacingError
+from agent.event_contracts import WireEvent, wire_event
 from agent.structured_output import validate_output_schema
 
 if TYPE_CHECKING:
@@ -63,11 +71,11 @@ class Attachment(Input):
 class SendMessage(Input):
     content: str = Field(min_length=1, max_length=10000)
     attachments: list[Attachment] = Field(default_factory=list, max_length=100)
-    output_schema: dict[str, Any] | None = None
+    output_schema: JSONObject | None = None
 
     @field_validator("output_schema")
     @classmethod
-    def check_output_schema(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+    def check_output_schema(cls, value: JSONObject | None) -> JSONObject | None:
         return validate_output_schema(value)
 
 
@@ -208,50 +216,222 @@ class EntryCreate(Input):
     type: Literal["file", "directory"]
 
 
+class Output(BaseModel):
+    # Public fields are explicitly declared. Internal row columns are ignored,
+    # not serialized; wrong types and missing required fields are server errors.
+    model_config = ConfigDict(strict=True, extra="ignore", allow_inf_nan=False)
+
+
+class ConversationResponse(Output):
+    id: str
+    workspace_id: str
+    title: str
+    model_id: str
+    permission_mode: ActivePermissionMode
+    response_mode: Literal["fast", "balanced", "thorough"]
+    thinking: str
+    folder_id: str
+    forked_from_conversation_id: str
+    forked_from_message_id: str
+    created_at: str
+    updated_at: str
+    message_count: int
+    archived: bool
+    memory_enabled: bool
+    max_subagent_calls: int
+    max_concurrent_subagents: int
+    subagent_model_ids: list[str]
+
+
+class TaskResponse(Output):
+    id: str
+    workspace_id: str
+    conversation_id: str
+    title: str
+    status: TaskStatus
+    input_text: str
+    last_error: str
+    version: int
+    created_at: str
+    updated_at: str
+    subagent_model_ids: list[str]
+    output_mode: Literal["text", "json_schema"]
+    result_ready: bool
+
+
+class TaskResultResponse(Output):
+    task_id: str
+    status: TaskStatus
+    ready: bool
+    output_mode: Literal["text", "json_schema"]
+    output_schema: JSONObject | None = Field(alias="schema")
+    value: JSONObject | None
+    error: str
+
+    @model_validator(mode="after")
+    def result_readiness(self) -> Self:
+        if self.ready:
+            if (self.status != "succeeded" or self.output_mode != "json_schema"
+                    or self.output_schema is None or self.value is None):
+                raise ValueError("ready requires a successful structured result")
+        elif self.value is not None:
+            raise ValueError("unready results cannot expose a value")
+        if (self.output_mode == "json_schema") != (self.output_schema is not None):
+            raise ValueError("output mode must match its contract")
+        return self
+
+
+class ApprovalFields(Output):
+    id: str
+    workspace_id: str
+    task_id: str
+    conversation_id: str
+    tool_call_id: str
+    tool_name: str
+    resource_scope: str
+    risk_level: RiskLabel
+    status: ApprovalStatus
+    version: int
+    expires_at: str
+    note: str
+    decided_at: str
+    allowed_scopes: list[ApprovalScope]
+    authorization_scope: ApprovalScope
+    authorization_expires_at: str
+    authorization_revoked_at: str
+
+
+class ApprovalResponse(ApprovalFields):
+    arguments: JSONObject
+    reuse_scope: JSONObject
+
+
+class SnapshotApproval(ApprovalFields):
+    arguments_json: str
+    reuse_scope_json: str
+
+
+class QuestionFields(Output):
+    id: str
+    workspace_id: str
+    conversation_id: str
+    task_id: str
+    tool_call_id: str
+    title: str
+    status: Literal["pending", "answered", "cancelled"]
+    version: int
+    answer: str
+    created_at: str
+
+
+class QuestionOption(Output):
+    label: str
+    recommended: bool = False
+
+
+class QuestionResponse(QuestionFields):
+    options: list[QuestionOption]
+
+
+class SnapshotQuestion(QuestionFields):
+    options_json: str
+
+
+class MessageResponse(Output):
+    id: str
+    conversation_id: str
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str
+    created_at: str
+
+
+class SnapshotResponse(Output):
+    messages: list[MessageResponse]
+    tasks: list[TaskResponse]
+    approvals: list[SnapshotApproval]
+    questions: list[SnapshotQuestion]
+    last_sequence: int
+    truncated: bool
+
+
+class QuestionsResponse(Output):
+    questions: list[QuestionResponse]
+
+
+class AuthorizationResponse(Output):
+    approval_id: str
+    conversation_id: str
+    task_id: str
+    scope: Literal["task", "session"]
+    expires_at: str
+    resource: JSONObject
+
+
+class ConversationsResponse(Output):
+    conversations: list[ConversationResponse]
+
+
+class TasksResponse(Output):
+    tasks: list[TaskResponse]
+
+
+class ApprovalsResponse(Output):
+    approvals: list[ApprovalResponse]
+
+
+class AuthorizationsResponse(Output):
+    authorizations: list[AuthorizationResponse]
+
+
+class EventsResponse(Output):
+    events: list[WireEvent]
+
+
+class MessagesResponse(Output):
+    messages: list[MessageResponse]
+
+
 def fields(item: dict[str, Any], names: str) -> dict[str, Any]:
     return {key: item[key] for key in names.split() if key in item}
 
 
-def conversation(item: dict[str, Any]) -> dict[str, Any]:
-    value = fields(item, "id workspace_id title model_id permission_mode response_mode thinking folder_id "
-                   "forked_from_conversation_id forked_from_message_id created_at updated_at message_count "
-                   "archived max_subagent_calls max_concurrent_subagents")
-    value["subagent_model_ids"] = json.loads(item.get("subagent_model_ids_json") or "[]")
-    value["archived"] = bool(item.get("archived", False))
-    value["memory_enabled"] = bool(item.get("memory_enabled", False))
-    return value
+def conversation(item: ConversationRecord) -> ConversationResponse:
+    return ConversationResponse.model_validate({
+        **item, "subagent_model_ids": json.loads(item["subagent_model_ids_json"]),
+        "archived": bool(item["archived"]), "memory_enabled": bool(item["memory_enabled"]),
+    })
 
 
-def task(item: dict[str, Any]) -> dict[str, Any]:
-    value = fields(item, "id workspace_id conversation_id title status input_text last_error version created_at updated_at")
-    value["subagent_model_ids"] = json.loads(item.get("subagent_model_ids_json") or "[]")
-    value["output_mode"] = "json_schema" if item.get("output_schema_json") else "text"
-    value["result_ready"] = item.get("status") == "succeeded" and bool(item.get("output_result_json"))
-    return value
+def task(item: TaskRecord) -> TaskResponse:
+    return TaskResponse.model_validate({
+        **item, "subagent_model_ids": json.loads(item["subagent_model_ids_json"]),
+        "output_mode": "json_schema" if item["output_schema_json"] else "text",
+        "result_ready": item["status"] == "succeeded" and item["output_result_json"] is not None,
+    })
 
 
-def approval(item: dict[str, Any]) -> dict[str, Any]:
-    from agent.core import AgentCore
-    value = AgentCore._approval_payload(item)
-    value["id"] = value.pop("approval_id")
-    value["workspace_id"] = item["workspace_id"]
-    return value
+def approval(item: ApprovalRecord) -> ApprovalResponse:
+    value = approval_notice(item)
+    return ApprovalResponse.model_validate({**value, "id": item["id"], "workspace_id": item["workspace_id"]})
 
 
-def question(item: dict[str, Any]) -> dict[str, Any]:
-    value = fields(item, "id workspace_id conversation_id task_id tool_call_id title status version answer created_at")
-    value["options"] = json.loads(item.get("options_json") or "[]")
-    return value
+def question(item: QuestionRecord) -> QuestionResponse:
+    return QuestionResponse.model_validate({**item, "options": json.loads(item["options_json"])})
 
 
-def event(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
-    return {"schema_version": 1, "type": kind, "event_id": payload["event_id"],
-            "sequence": payload["sequence"], "occurred_at": payload["occurred_at"],
-            "conversation_id": payload.get("conversation_id", ""), "task_id": payload.get("task_id", ""),
-            "payload": payload}
+def event(kind: str, payload: JSONObject) -> WireEvent:
+    return wire_event({
+        "schema_version": 1, "type": kind, "event_id": payload["event_id"],
+        "sequence": payload["sequence"], "occurred_at": payload["occurred_at"],
+        "conversation_id": payload.get("conversation_id", ""), "task_id": payload.get("task_id", ""),
+        "payload": payload,
+    })
 
 
-def history_event(row: dict[str, Any]) -> dict[str, Any]:
-    return {"schema_version": 1, "type": row["event_type"], "event_id": row["id"],
-            "sequence": row["sequence"], "occurred_at": row["occurred_at"],
-            "conversation_id": row["conversation_id"], "task_id": row["task_id"], "payload": row.get("payload", {})}
+def history_event(row: Mapping[str, object]) -> WireEvent:
+    return wire_event({
+        "schema_version": 1, "type": row["event_type"], "event_id": row["id"],
+        "sequence": row["sequence"], "occurred_at": row["occurred_at"],
+        "conversation_id": row["conversation_id"], "task_id": row["task_id"],
+        "payload": row.get("payload", {}),
+    })

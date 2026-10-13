@@ -1,7 +1,19 @@
-import { request, workspacePath } from './http'
+import { GatewayError, request, workspacePath } from './http'
+import type { components } from './generated/transport'
+import {
+  validateConversationResponse, validateConversationsResponse, validateTaskResponse,
+  validateTasksResponse, validateTaskResultResponse, validateApprovalsResponse,
+  validateAuthorizationsResponse, validateMessagesResponse, validateEventsResponse,
+  validateKnownEvent, validateEventEnvelope, validateSnapshotResponse,
+  validateApprovalResponse, validateQuestionResponse, validateQuestionsResponse,
+} from './generated/validators.js'
 import { mockConnect } from './mock'
 import type { ContextUsage, PlanItem } from './events'
 import { mapContextPayload } from './model-events'
+
+type Transport = components['schemas']
+export type TaskResult = Transport['TaskResultResponse']
+export type KnownAgentEvent = Transport['KnownEvent']
 export type PermissionMode = 'read_only' | 'workspace' | 'workspace_auto' | 'danger_full_access' | 'full_access'
 export type ApprovalScope = 'once' | 'task' | 'session'
 export interface ApprovalAuthorization {
@@ -86,7 +98,7 @@ export interface AgentEvent {
   occurred_at?: string
   conversation_id: string
   task_id?: string
-  payload: Record<string, unknown> & { content?: string; message?: string; code?: string }
+  payload: Record<string, unknown>
 }
 
 export interface Approval {
@@ -373,28 +385,9 @@ export interface ExtensionSettings {
   management_available?: boolean
 }
 
-export interface AgentTask {
-  id: string
-  workspace_id: string
-  conversation_id: string
-  title: string
-  status:
-    | 'created'
-    | 'queued'
-    | 'running'
-    | 'waiting_approval'
-    | 'retry_wait'
-    | 'succeeded'
-    | 'failed'
-    | 'cancelled'
-    | 'timed_out'
-    | 'interrupted'
-  input_text: string
-  last_error: string
-  version: number
-  created_at: string
-  updated_at: string
-}
+// View state also represents locally constructed turns before the server receipt.
+export type AgentTask = Omit<Transport['TaskResponse'], 'subagent_model_ids' | 'output_mode' | 'result_ready'>
+  & Partial<Pick<Transport['TaskResponse'], 'subagent_model_ids' | 'output_mode' | 'result_ready'>>
 
 export interface InstalledSkill {
   name: string
@@ -714,7 +707,7 @@ export const api = {
   },
   async listTasks(conversationId?: string): Promise<AgentTask[]> {
     const query = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : ''
-    const body = await request<{ tasks: AgentTask[] }>(`${path}/tasks${query}`)
+    const body = await request(`${path}/tasks${query}`, undefined, validateTasksResponse)
     return body.tasks || []
   },
   submitTaskInput(taskId: string, content: string, key: string): Promise<TaskInput> {
@@ -723,6 +716,9 @@ export const api = {
       headers: { 'Idempotency-Key': key },
       body: JSON.stringify({ content }),
     })
+  },
+  getTaskResult(taskId: string, signal?: AbortSignal): Promise<TaskResult> {
+    return request(`${path}/tasks/${encodeURIComponent(taskId)}/result`, { signal }, validateTaskResultResponse)
   },
   async listTaskInputs(taskId: string, signal?: AbortSignal): Promise<TaskInput[]> {
     const body = await request<{ inputs: TaskInput[] }>(
@@ -761,21 +757,21 @@ export const api = {
     })
   },
   cancelTask(taskId: string): Promise<AgentTask> {
-    return request(`${path}/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' })
+    return request(`${path}/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' }, validateTaskResponse)
   },
   async listTaskEvents(
     conversationId: string,
     after = 0,
     signal?: AbortSignal,
   ): Promise<AgentEvent[]> {
-    const body = await request<{ events: AgentEvent[] }>(
+    const body = await request(
       `${path}/conversations/${encodeURIComponent(conversationId)}/events/history?after=${after}`,
-      { signal },
+      { signal }, validateEventsResponse,
     )
     return body.events || []
   },
   async listConversations(): Promise<Conversation[]> {
-    const body = await request<{ conversations: Conversation[] }>(`${path}/conversations`)
+    const body = await request(`${path}/conversations`, undefined, validateConversationsResponse)
     return body.conversations || []
   },
   async listWorkspaceFolders(): Promise<WorkspaceFolder[]> {
@@ -797,7 +793,7 @@ export const api = {
     return request(`${path}/folders/${encodeURIComponent(folderId)}`, { method: 'DELETE' })
   },
   getConversation(id: string): Promise<Conversation> {
-    return request(`${path}/conversations/${encodeURIComponent(id)}`)
+    return request(`${path}/conversations/${encodeURIComponent(id)}`, undefined, validateConversationResponse)
   },
   deleteConversation(id: string): Promise<void> {
     return request(`${path}/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' })
@@ -807,7 +803,7 @@ export const api = {
       method: 'POST',
       headers: { 'Idempotency-Key': key },
       body: JSON.stringify({ message_id: messageId }),
-    })
+    }, validateConversationResponse)
   },
   createConversation(data: {
     memory_enabled?: boolean
@@ -821,13 +817,13 @@ export const api = {
     thinking?: string
     folder_id?: string
   }): Promise<Conversation> {
-    return request(`${path}/conversations`, { method: 'POST', body: JSON.stringify(data) })
+    return request(`${path}/conversations`, { method: 'POST', body: JSON.stringify(data) }, validateConversationResponse)
   },
   updateConversationPermission(id: string, permissionMode: PermissionMode): Promise<Conversation> {
     return request(`${path}/conversations/${id}`, {
       method: 'PATCH',
       body: JSON.stringify({ permission_mode: permissionMode }),
-    })
+    }, validateConversationResponse)
   },
   updateConversationSettings(
     id: string,
@@ -848,34 +844,35 @@ export const api = {
     return request(`${path}/conversations/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(settings),
-    })
+    }, validateConversationResponse)
   },
   async listMessages(id: string): Promise<ChatMessage[]> {
-    const body = await request<{ messages: ChatMessage[] }>(`${path}/conversations/${id}/messages`)
+    const body = await request(`${path}/conversations/${id}/messages`, undefined, validateMessagesResponse)
     return body.messages || []
   },
   async getConversationSnapshot(id: string): Promise<ConversationSnapshot> {
-    // Decode snapshot's stable JSON-string fields at the API boundary, outside stores.
-    const body = await request<
-      Omit<ConversationSnapshot, 'approvals' | 'questions'> & {
-        approvals: (Approval & { arguments_json?: string; reuse_scope_json?: string })[]
-        questions: (AgentQuestion & { options_json?: string })[]
-      }
-    >(`${path}/conversations/${encodeURIComponent(id)}/snapshot`)
-    return {
-      messages: body.messages || [],
-      tasks: body.tasks || [],
-      questions: (body.questions || []).map(({ options_json, ...question }) => ({
-        ...question,
-        options: options_json ? JSON.parse(options_json) : question.options || [],
-      })),
-      approvals: (body.approvals || []).map(({ arguments_json, reuse_scope_json, ...approval }) => ({
-        ...approval,
-        arguments: arguments_json ? JSON.parse(arguments_json) : approval.arguments || {},
-        reuse_scope: reuse_scope_json ? JSON.parse(reuse_scope_json) : approval.reuse_scope || {},
-      })),
-      last_sequence: Number(body.last_sequence || 0),
-      truncated: Boolean(body.truncated),
+    const body = await request(
+      `${path}/conversations/${encodeURIComponent(id)}/snapshot`, undefined, validateSnapshotResponse,
+    )
+    // The snapshot protocol stores these fields as JSON strings. Validate the
+    // decoded values too; validating the outer string cannot check its shape.
+    try {
+      const questions = body.questions.map(({ options_json, ...question }) => {
+        const options: unknown = JSON.parse(options_json)
+        const decoded = { ...question, options }
+        if (!validateQuestionResponse(decoded)) throw new Error('Invalid question')
+        return decoded
+      })
+      const approvals = body.approvals.map(({ arguments_json, reuse_scope_json, ...approval }) => {
+        const args: unknown = JSON.parse(arguments_json)
+        const reuse_scope: unknown = JSON.parse(reuse_scope_json)
+        const decoded = { ...approval, arguments: args, reuse_scope }
+        if (!validateApprovalResponse(decoded)) throw new Error('Invalid approval')
+        return decoded
+      })
+      return { ...body, questions, approvals }
+    } catch {
+      throw new GatewayError('对话快照格式异常，请更新应用或重试。', 502, 'CONTRACT_INVALID')
     }
   },
   sendMessage(id: string, content: string, idempotencyKey: string): Promise<MessageReceipt> {
@@ -887,12 +884,12 @@ export const api = {
   },
   async listApprovals(conversationId?: string): Promise<Approval[]> {
     const query = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : ''
-    const body = await request<{ approvals: Approval[] }>(`${path}/approvals${query}`)
+    const body = await request(`${path}/approvals${query}`, undefined, validateApprovalsResponse)
     return body.approvals || []
   },
   async listQuestions(conversationId?: string): Promise<AgentQuestion[]> {
     const query = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : ''
-    const body = await request<{ questions: AgentQuestion[] }>(`${path}/questions${query}`)
+    const body = await request(`${path}/questions${query}`, undefined, validateQuestionsResponse)
     return body.questions || []
   },
   answerQuestion(id: string, answer: string, version: number): Promise<{ task_id: string }> {
@@ -914,8 +911,8 @@ export const api = {
     })
   },
   async listApprovalAuthorizations(id: string, signal?: AbortSignal): Promise<ApprovalAuthorization[]> {
-    const body = await request<{ authorizations: ApprovalAuthorization[] }>(
-      `${path}/approval-authorizations?conversation_id=${encodeURIComponent(id)}`, { signal },
+    const body = await request(
+      `${path}/approval-authorizations?conversation_id=${encodeURIComponent(id)}`, { signal }, validateAuthorizationsResponse,
     )
     return body.authorizations || []
   },
@@ -1004,8 +1001,11 @@ export const api = {
       }
       // Projection failures belong to EventSocket's recovery boundary, not the
       // JSON parser. Swallowing them here can silently lose a terminal receipt.
-      if (event && typeof event === 'object' && 'type' in event && 'payload' in event)
-        onEvent(event as AgentEvent)
+      if (event && typeof event === 'object' && 'type' in event && event.type === 'stream.ready') {
+        // Control frames are not durable task events and have no replay cursor.
+        onEvent({ type: 'stream.ready', schema_version: 1, event_id: '', sequence: 0,
+          conversation_id: conversationId, task_id: '', payload: {} })
+      } else if (validateKnownEvent(event) || validateEventEnvelope(event)) onEvent(event)
       else socket.close()
     }
     return socket

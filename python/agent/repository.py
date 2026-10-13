@@ -8,11 +8,20 @@ import hmac
 import json
 import sqlite3
 import uuid
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from agent.data_contracts import (
+    APPROVAL_RECORD, AUTHORIZATION_RECORD, CONVERSATION_RECORD, JSON_OBJECT,
+    MESSAGE_RECORD, PERMISSION_MODE, QUESTION_RECORD, SNAPSHOT_RECORD,
+    TASK_EVENT_RECORD, TASK_RECORD, TOOL_CALL_RECORD, ApprovalRecord, AuthorizationRecord,
+    ConversationRecord, ConversationSnapshotRecord, JSONObject, MessageRecord,
+    PermissionMode, QuestionRecord, TaskEventRecord, TaskRecord, TaskResultRecord, TaskStatus, ToolCallRecord,
+)
 from agent.errors import UserFacingError
+from agent.event_contracts import event_payload
 from agent.models.usage import aggregate_usage_events
 from agent.structured_output import validate_output_schema, validated_result_json
 
@@ -53,7 +62,7 @@ class MessageConflictError(UserFacingError):
 class MessageReplay(Exception):
     """Return an existing product task; never execute a submitted message twice."""
 
-    def __init__(self, task: dict[str, Any]) -> None:
+    def __init__(self, task: TaskRecord) -> None:
         self.task = task
         super().__init__(str(task["id"]))
 
@@ -333,7 +342,7 @@ class SQLiteRepository:
         subagent_model_ids: list[str] | None = None,
         thinking: str = "",
         memory_enabled: bool = False,
-    ) -> dict[str, Any]:
+    ) -> ConversationRecord:
         validate_subagent_limits(max_subagent_calls, max_concurrent_subagents)
         model_ids = validate_subagent_model_ids([] if subagent_model_ids is None else subagent_model_ids)
         conversation_id = f"conv_{uuid.uuid4().hex}"
@@ -366,7 +375,7 @@ class SQLiteRepository:
 
     async def fork_conversation(
         self, workspace_id: str, conversation_id: str, message_id: str, request_key: str,
-    ) -> dict[str, Any]:
+    ) -> ConversationRecord:
         """Copy a bounded, immutable transcript, never an execution continuation.
 
         Creation and messages commit together. The same submission key returns
@@ -438,7 +447,7 @@ class SQLiteRepository:
                     )
         return await self.get_conversation(workspace_id, branch_id)
 
-    async def list_conversations(self, workspace_id: str) -> list[dict[str, Any]]:
+    async def list_conversations(self, workspace_id: str) -> list[ConversationRecord]:
         async with self._lock:
             rows = (
                 self._db()
@@ -450,9 +459,9 @@ class SQLiteRepository:
                 )
                 .fetchall()
             )
-        return [dict(row) for row in rows]
+        return [CONVERSATION_RECORD.validate_python(dict(row)) for row in rows]
 
-    async def get_conversation(self, workspace_id: str, conversation_id: str) -> dict[str, Any]:
+    async def get_conversation(self, workspace_id: str, conversation_id: str) -> ConversationRecord:
         async with self._lock:
             row = (
                 self._db()
@@ -466,7 +475,7 @@ class SQLiteRepository:
             )
         if row is None:
             raise KeyError(conversation_id)
-        return dict(row)
+        return CONVERSATION_RECORD.validate_python(dict(row))
 
     def _require_folder(self, workspace_id: str, folder_id: str) -> None:
         if folder_id and self._db().execute(
@@ -586,7 +595,7 @@ class SQLiteRepository:
 
     async def update_conversation_permission(
         self, workspace_id: str, conversation_id: str, permission_mode: str
-    ) -> dict[str, Any]:
+    ) -> ConversationRecord:
         async with self._lock:
             self._revoke_authorizations(workspace_id, conversation_id)
             cursor = self._db().execute(
@@ -614,7 +623,7 @@ class SQLiteRepository:
         max_concurrent_subagents: int | None = None,
         subagent_model_ids: list[str] | None = None,
         memory_enabled: bool | None = None,
-    ) -> dict[str, Any]:
+    ) -> ConversationRecord:
         assignments: list[str] = []
         values: list[Any] = []
         for column, value in (
@@ -674,7 +683,7 @@ class SQLiteRepository:
             )
             self._db().commit()
 
-    async def append_message(self, conversation_id: str, role: str, content: str) -> dict[str, Any]:
+    async def append_message(self, conversation_id: str, role: str, content: str) -> MessageRecord:
         if role not in {"system", "user", "assistant", "tool"}:
             raise ValueError("invalid message role")
         message = {
@@ -697,9 +706,9 @@ class SQLiteRepository:
             )
             self._db().execute("UPDATE conversations SET updated_at=? WHERE id=?", (_now(), conversation_id))
             self._db().commit()
-        return message
+        return MESSAGE_RECORD.validate_python(message)
 
-    async def list_messages(self, conversation_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    async def list_messages(self, conversation_id: str, limit: int = 100) -> list[MessageRecord]:
         limit = min(max(limit, 1), 500)
         async with self._lock:
             rows = (
@@ -710,7 +719,7 @@ class SQLiteRepository:
                 )
                 .fetchall()
             )
-        return [dict(row) for row in reversed(rows)]
+        return [MESSAGE_RECORD.validate_python(dict(row)) for row in reversed(rows)]
 
     async def save_preference(self, workspace_id: str, user_id: str, key: str, value: Any) -> None:
         async with self._lock:
@@ -803,7 +812,7 @@ class SQLiteRepository:
         workspace_id: str,
         conversation_id: str,
         title: str,
-        status: str,
+        status: TaskStatus,
         input_text: str = "",
     ) -> None:
         self._require_status(status, self.TASK_STATUSES, "task")
@@ -835,11 +844,11 @@ class SQLiteRepository:
         if row is not None:
             if not hmac.compare_digest(str(row["request_hash"]), request_hash):
                 raise MessageConflictError("Idempotency-Key was already used for a different message")
-            raise MessageReplay(dict(row))
+            raise MessageReplay(TASK_RECORD.validate_python(dict(row)))
 
     async def start_chat_turn(
         self, task_id: str, workspace_id: str, conversation_id: str, prompt: str, request_hash: str = "",
-        *, model_call_limit: int = 8, output_schema: dict[str, Any] | None = None,
+        *, model_call_limit: int = 8, output_schema: JSONObject | None = None,
     ) -> None:
         """Atomically admit one turn and append its user message (not an execution checkpoint).
 
@@ -858,7 +867,7 @@ class SQLiteRepository:
                     if (existing["workspace_id"] != workspace_id or existing["conversation_id"] != conversation_id
                             or not request_hash or not hmac.compare_digest(existing["request_hash"], request_hash)):
                         raise MessageConflictError("submission conflicts with an existing task")
-                    raise MessageReplay(dict(existing))
+                    raise MessageReplay(TASK_RECORD.validate_python(dict(existing)))
                 conversation = db.execute(
                     "SELECT * FROM conversations WHERE workspace_id=? AND id=?", (workspace_id, conversation_id),
                 ).fetchone()
@@ -932,7 +941,7 @@ class SQLiteRepository:
                     raise UserFacingError("本轮共享模型调用预算已用完。子 Agent 不会获得额外预算。")
                 db.execute("UPDATE tasks SET model_calls_used=model_calls_used+1 WHERE id=?", (task_id,))
 
-    async def update_task_status(self, task_id: str, status: str, last_error: str = "") -> None:
+    async def update_task_status(self, task_id: str, status: TaskStatus, last_error: str = "") -> None:
         self._require_status(status, self.TASK_STATUSES, "task")
         async with self._lock:
             cursor = self._db().execute(
@@ -944,7 +953,7 @@ class SQLiteRepository:
         if cursor.rowcount == 0:
             raise KeyError(task_id)
 
-    async def get_task(self, workspace_id: str, task_id: str) -> dict[str, Any]:
+    async def get_task(self, workspace_id: str, task_id: str) -> TaskRecord:
         async with self._lock:
             row = (
                 self._db()
@@ -953,22 +962,22 @@ class SQLiteRepository:
             )
         if row is None:
             raise KeyError(task_id)
-        return dict(row)
+        return TASK_RECORD.validate_python(dict(row))
 
-    async def get_task_result(self, workspace_id: str, task_id: str) -> dict[str, Any]:
+    async def get_task_result(self, workspace_id: str, task_id: str) -> TaskResultRecord:
         task = await self.get_task(workspace_id, task_id)
         ready = task["status"] == "succeeded" and task.get("output_result_json") is not None
         return {
             "task_id": task_id, "status": task["status"], "ready": ready,
             "output_mode": "json_schema" if task.get("output_schema_json") else "text",
-            "schema": json.loads(task["output_schema_json"]) if task.get("output_schema_json") else None,
-            "value": json.loads(task["output_result_json"]) if ready else None,
+            "schema": JSON_OBJECT.validate_json(task["output_schema_json"], strict=True) if task.get("output_schema_json") else None,
+            "value": JSON_OBJECT.validate_json(task["output_result_json"], strict=True) if ready and task["output_result_json"] is not None else None,
             "error": task["last_error"],
         }
 
     async def complete_structured_task(
-        self, workspace_id: str, task_id: str, value: Any,
-    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        self, workspace_id: str, task_id: str, value: object,
+    ) -> tuple[TaskRecord, MessageRecord | None]:
         """Commit a validated result, its visible message and success in one transaction.
 
         Checkpoint remains execution state. This row is the consumable product
@@ -981,12 +990,12 @@ class SQLiteRepository:
                 if row is None:
                     raise KeyError(task_id)
                 if row["status"] in {"cancelled", "failed", "succeeded", "timed_out", "expired", "rejected"}:
-                    return dict(row), None
+                    return TASK_RECORD.validate_python(dict(row)), None
                 if row["status"] != "running" or not row["output_schema_json"]:
                     raise ConversationBusyError("当前任务不处于结构化结果提交阶段。")
                 encoded = validated_result_json(json.loads(row["output_schema_json"]), value)
                 now = _now()
-                message = {
+                message: MessageRecord = {
                     "id": f"msg_{uuid.uuid4().hex}", "conversation_id": row["conversation_id"],
                     "role": "assistant", "content": encoded, "created_at": now,
                 }
@@ -1000,7 +1009,7 @@ class SQLiteRepository:
                        version=version+1,updated_at=? WHERE workspace_id=? AND id=?""",
                     (encoded, now, workspace_id, task_id),
                 )
-                task = dict(db.execute("SELECT * FROM tasks WHERE workspace_id=? AND id=?", (workspace_id, task_id)).fetchone())
+                task = TASK_RECORD.validate_python(dict(db.execute("SELECT * FROM tasks WHERE workspace_id=? AND id=?", (workspace_id, task_id)).fetchone()))
             return task, message
 
     async def resume_interrupted_task(self, workspace_id: str, task_id: str, version: int) -> None:
@@ -1028,7 +1037,7 @@ class SQLiteRepository:
             )
             db.commit()
 
-    async def list_tasks(self, workspace_id: str, conversation_id: str = "", limit: int = 100) -> list[dict[str, Any]]:
+    async def list_tasks(self, workspace_id: str, conversation_id: str = "", limit: int = 100) -> list[TaskRecord]:
         limit = min(max(limit, 1), 500)
         sql = "SELECT * FROM tasks WHERE workspace_id=?"
         params: list[Any] = [workspace_id]
@@ -1039,7 +1048,7 @@ class SQLiteRepository:
         params.append(limit)
         async with self._lock:
             rows = self._db().execute(sql, params).fetchall()
-        return [dict(row) for row in rows]
+        return [TASK_RECORD.validate_python(dict(row)) for row in rows]
 
     async def has_unfinished_tasks(self, *, include_waiting: bool = True) -> bool:
         """Global Core resources cannot be replaced underneath any active turn."""
@@ -1051,16 +1060,17 @@ class SQLiteRepository:
                            UNION ALL SELECT 1 FROM questions WHERE status='pending'"""
             return self._db().execute(sql + " LIMIT 1").fetchone() is not None
 
-    async def latest_conversation_task(self, workspace_id: str, conversation_id: str) -> dict[str, Any] | None:
+    async def latest_conversation_task(self, workspace_id: str, conversation_id: str) -> TaskRecord | None:
         """Creation order, not updated_at: a resumed old task is not a new turn."""
         async with self._lock:
             row = self._db().execute(
                 "SELECT * FROM tasks WHERE workspace_id=? AND conversation_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1",
                 (workspace_id, conversation_id),
             ).fetchone()
-        return dict(row) if row is not None else None
+        return TASK_RECORD.validate_python(dict(row)) if row is not None else None
 
-    async def append_task_event(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def append_task_event(self, event_type: str, payload: Mapping[str, object]) -> JSONObject:
+        payload = event_payload(event_type, payload)
         task_id = str(payload.get("task_id") or "")
         conversation_id = str(payload.get("conversation_id") or "")
         if not task_id or not conversation_id:
@@ -1087,8 +1097,8 @@ class SQLiteRepository:
                 .fetchone()
             )
             sequence = int(sequence_row[0])
-            event_payload = dict(payload)
-            enriched = {
+            stored_payload = dict(payload)
+            enriched: JSONObject = {
                 **payload,
                 "event_id": event_id,
                 "sequence": sequence,
@@ -1105,7 +1115,7 @@ class SQLiteRepository:
                     task_id,
                     sequence,
                     event_type,
-                    json.dumps(event_payload, ensure_ascii=False, default=str),
+                    json.dumps(stored_payload, ensure_ascii=False, allow_nan=False),
                     occurred_at,
                 ),
             )
@@ -1118,7 +1128,7 @@ class SQLiteRepository:
         conversation_id: str,
         after_sequence: int = 0,
         limit: int = 500,
-    ) -> list[dict[str, Any]]:
+    ) -> list[TaskEventRecord]:
         limit = min(max(limit, 1), 1000)
         async with self._lock:
             rows = (
@@ -1131,14 +1141,11 @@ class SQLiteRepository:
                 )
                 .fetchall()
             )
-        result: list[dict[str, Any]] = []
+        result: list[TaskEventRecord] = []
         for row in rows:
             item = dict(row)
-            try:
-                item["payload"] = json.loads(str(item.pop("payload_json")))
-            except (TypeError, json.JSONDecodeError):
-                item["payload"] = {}
-            result.append(item)
+            item["payload"] = JSON_OBJECT.validate_json(item.pop("payload_json"), strict=True)
+            result.append(TASK_EVENT_RECORD.validate_python(item))
         return result
 
     async def usage_statistics(self, workspace_id: str, since: str, until: str) -> dict[str, Any]:
@@ -1164,10 +1171,11 @@ class SQLiteRepository:
         async with self._lock:
             return await asyncio.to_thread(lambda: project_statistics(self._db().execute(sql, values)))
 
-    async def recover_interrupted_tasks(self) -> list[dict[str, Any]]:
+    async def recover_interrupted_tasks(self) -> list[TaskRecord]:
         """Mark work without a safe continuation checkpoint as explicitly interrupted."""
-        interrupted: list[dict[str, Any]] = []
+        interrupted: list[TaskRecord] = []
         now = _now()
+        reason = "Agent Core restarted before a safe continuation checkpoint"
         async with self._lock:
             rows = (
                 self._db()
@@ -1182,21 +1190,21 @@ class SQLiteRepository:
                 self._db().execute(
                     """UPDATE tasks SET status='interrupted',last_error=?,version=version+1,
                        updated_at=? WHERE id=?""",
-                    ("Agent Core restarted before a safe continuation checkpoint", now, item["id"]),
+                    (reason, now, item["id"]),
                 )
-                item.update({"status": "interrupted", "updated_at": now})
-                interrupted.append(item)
+                item.update({"status": "interrupted", "last_error": reason, "updated_at": now, "version": item["version"] + 1})
+                interrupted.append(TASK_RECORD.validate_python(item))
             self._db().commit()
         return interrupted
 
-    async def interrupt_ephemeral_approvals(self, tool_names: set[str]) -> list[dict[str, Any]]:
+    async def interrupt_ephemeral_approvals(self, tool_names: set[str]) -> list[TaskRecord]:
         """Close approvals whose continuation depends on process-local resources."""
         if not tool_names:
             return []
         placeholders = ",".join("?" for _ in tool_names)
         now = _now()
         reason = "Process-local tool session was lost during Agent Core shutdown"
-        interrupted: list[dict[str, Any]] = []
+        interrupted: list[TaskRecord] = []
         async with self._lock:
             rows = (
                 self._db()
@@ -1227,12 +1235,12 @@ class SQLiteRepository:
                        WHERE task_id=? AND status='waiting_approval'""",
                     (now, item["id"]),
                 )
-                item.update({"status": "interrupted", "last_error": reason, "updated_at": now})
-                interrupted.append(item)
+                item.update({"status": "interrupted", "last_error": reason, "updated_at": now, "version": item["version"] + 1})
+                interrupted.append(TASK_RECORD.validate_python(item))
             self._db().commit()
         return interrupted
 
-    async def cancel_task(self, workspace_id: str, task_id: str) -> dict[str, Any]:
+    async def cancel_task(self, workspace_id: str, task_id: str) -> TaskRecord:
         now = _now()
         async with self._lock:
             row = (
@@ -1243,7 +1251,7 @@ class SQLiteRepository:
             if row is None:
                 raise KeyError(task_id)
             if str(row["status"]) in {"succeeded", "failed", "cancelled", "timed_out", "expired"}:
-                return dict(row)
+                return TASK_RECORD.validate_python(dict(row))
             self._db().execute(
                 """UPDATE tasks SET status='cancelled',last_error='Cancelled by user',
                    version=version+1,updated_at=? WHERE id=?""",
@@ -1275,7 +1283,7 @@ class SQLiteRepository:
         tool_name: str,
         arguments: dict[str, Any],
         assistant_content: str = "",
-    ) -> dict[str, Any]:
+    ) -> ToolCallRecord:
         # continuation_json remains only for non-destructive compatibility with
         # existing databases. Execution never reads or writes that legacy payload.
         now = _now()
@@ -1301,17 +1309,17 @@ class SQLiteRepository:
             self._db().commit()
         return await self.get_tool_call(tool_call_id)
 
-    async def get_tool_call(self, tool_call_id: str) -> dict[str, Any]:
+    async def get_tool_call(self, tool_call_id: str) -> ToolCallRecord:
         async with self._lock:
             row = self._db().execute("SELECT * FROM tool_calls WHERE id=?", (tool_call_id,)).fetchone()
         if row is None:
             raise KeyError(tool_call_id)
-        return dict(row)
+        return TOOL_CALL_RECORD.validate_python(dict(row))
 
     async def request_question(
         self, workspace_id: str, conversation_id: str, task_id: str, tool_call_id: str,
         principal_id: str, title: str, options: list[dict[str, Any]],
-    ) -> dict[str, Any]:
+    ) -> QuestionRecord:
         async with self._lock:
             db = self._db()
             with db:
@@ -1328,17 +1336,17 @@ class SQLiteRepository:
                 db.execute("UPDATE tool_calls SET status='waiting_approval',updated_at=? WHERE id=?",
                            (_now(), tool_call_id))
                 row = db.execute("SELECT * FROM questions WHERE tool_call_id=?", (tool_call_id,)).fetchone()
-        return dict(row)
+        return QUESTION_RECORD.validate_python(dict(row))
 
-    async def get_question(self, workspace_id: str, question_id: str) -> dict[str, Any]:
+    async def get_question(self, workspace_id: str, question_id: str) -> QuestionRecord:
         async with self._lock:
             row = self._db().execute("SELECT * FROM questions WHERE workspace_id=? AND id=?",
                                      (workspace_id, question_id)).fetchone()
         if row is None:
             raise KeyError(question_id)
-        return dict(row)
+        return QUESTION_RECORD.validate_python(dict(row))
 
-    async def list_questions(self, workspace_id: str, conversation_id: str = "") -> list[dict[str, Any]]:
+    async def list_questions(self, workspace_id: str, conversation_id: str = "") -> list[QuestionRecord]:
         async with self._lock:
             rows = self._db().execute(
                 """SELECT q.* FROM questions q JOIN tasks t ON t.id=q.task_id
@@ -1346,13 +1354,13 @@ class SQLiteRepository:
                      AND (?='' OR q.conversation_id=?) ORDER BY q.created_at LIMIT 500""",
                 (workspace_id, conversation_id, conversation_id),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [QUESTION_RECORD.validate_python(dict(row)) for row in rows]
 
-    async def task_questions(self, workspace_id: str, task_id: str) -> list[dict[str, Any]]:
+    async def task_questions(self, workspace_id: str, task_id: str) -> list[QuestionRecord]:
         async with self._lock:
             rows = self._db().execute("SELECT * FROM questions WHERE workspace_id=? AND task_id=?",
                                       (workspace_id, task_id)).fetchall()
-        return [dict(row) for row in rows]
+        return [QUESTION_RECORD.validate_python(dict(row)) for row in rows]
 
     async def submit_task_input(self, workspace_id: str, task_id: str, content: str,
                                 idempotency_key: str) -> dict[str, Any]:
@@ -1422,7 +1430,7 @@ class SQLiteRepository:
         return consumed
 
     async def answer_question(self, workspace_id: str, question_id: str, principal_id: str,
-                              answer: str, version: int) -> dict[str, Any]:
+                              answer: str, version: int) -> QuestionRecord:
         if not answer.strip() or len(answer) > 10000:
             raise ValueError("answer must contain 1 to 10000 characters")
         async with self._lock:
@@ -1514,9 +1522,9 @@ class SQLiteRepository:
         # Bound the wire snapshot independently of the number of rows. Large
         # evidence remains in event history; truncation is explicit to callers.
         remaining = 900_000
-        def bounded(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        def bounded[T: Mapping[str, object]](items: list[T]) -> list[T]:
             nonlocal remaining
-            accepted = []
+            accepted: list[T] = []
             for item in items:
                 size = len(json.dumps(item, ensure_ascii=False).encode("utf-8"))
                 if size > remaining:
@@ -1532,7 +1540,7 @@ class SQLiteRepository:
         return {"task": dict(task), "tool_calls": tool_calls, "approvals": approval_values,
                 "projection": projection, "last_sequence": int(last_sequence)}
 
-    async def conversation_snapshot(self, workspace_id: str, conversation_id: str) -> dict[str, Any]:
+    async def conversation_snapshot(self, workspace_id: str, conversation_id: str) -> ConversationSnapshotRecord:
         """One bounded product snapshot and cursor, not runtime/event sourcing state.
 
         Clients must subscribe/buffer live events before reading this snapshot.
@@ -1563,7 +1571,6 @@ class SQLiteRepository:
             result["truncated"] |= len(values) > 200
             for row in values[:200]:
                 value = self._approval_value(row) if name == "approvals" else dict(row)
-                value.pop("request_hash", None)
                 size = len(json.dumps(value, ensure_ascii=False).encode())
                 if size > remaining:
                     result["truncated"] = True
@@ -1571,7 +1578,7 @@ class SQLiteRepository:
                 remaining -= size
                 result[name].append(value)
             result[name].reverse()
-        return result
+        return SNAPSHOT_RECORD.validate_python(result, strict=True)
 
     async def list_command_calls(self, workspace_id: str, conversation_id: str = "") -> list[dict[str, Any]]:
         async with self._lock:
@@ -1627,7 +1634,7 @@ class SQLiteRepository:
         risk_level: str,
         ttl_minutes: int = 15,
         reuse_scope: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> ApprovalRecord:
         approval_id = f"approval_{uuid.uuid4().hex}"
         now = datetime.now(timezone.utc)
         normalized = json.dumps(arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -1672,11 +1679,11 @@ class SQLiteRepository:
         return await self.get_approval(workspace_id, approval_id)
 
     @staticmethod
-    def _approval_value(row: sqlite3.Row) -> dict[str, Any]:
+    def _approval_value(row: sqlite3.Row) -> ApprovalRecord:
         item = dict(row)
         item["arguments"] = json.loads(item.pop("arguments_json"))
         item["reuse_scope"] = json.loads(item.pop("reuse_scope_json", "{}"))
-        return item
+        return APPROVAL_RECORD.validate_python(item)
 
     def _revoke_authorizations(self, workspace_id: str, conversation_id: str = "") -> None:
         """Called under the Repository lock, committed with the policy change."""
@@ -1689,14 +1696,14 @@ class SQLiteRepository:
 
     async def list_authorizations(
         self, workspace_id: str, conversation_id: str, principal_id: str, task_id: str = "",
-    ) -> list[dict[str, Any]]:
+    ) -> list[AuthorizationRecord]:
         """List unexpired scoped approvals for the user-facing authorization list."""
         async with self._lock:
             return self._list_authorizations(workspace_id, conversation_id, principal_id, task_id)
 
     async def execution_authority(
         self, workspace_id: str, conversation_id: str, principal_id: str, task_id: str,
-    ) -> tuple[str, list[dict[str, Any]]]:
+    ) -> tuple[PermissionMode, list[AuthorizationRecord]]:
         """Read the mode and its valid grants at one tool-admission boundary.
 
         Mode changes revoke reusable grants under this same lock. Reading them
@@ -1712,13 +1719,13 @@ class SQLiteRepository:
                 raise KeyError(conversation_id)
             if row["archived"]:
                 raise PermissionError("archived conversations cannot execute tools")
-            return str(row["permission_mode"]), self._list_authorizations(
+            return PERMISSION_MODE.validate_python(row["permission_mode"]), self._list_authorizations(
                 workspace_id, conversation_id, principal_id, task_id,
             )
 
     def _list_authorizations(
         self, workspace_id: str, conversation_id: str, principal_id: str, task_id: str,
-    ) -> list[dict[str, Any]]:
+    ) -> list[AuthorizationRecord]:
         """Query grants while the caller holds the Repository lock."""
         rows = self._db().execute(
             """SELECT a.* FROM approvals a JOIN tasks t ON t.id=a.task_id
@@ -1732,10 +1739,10 @@ class SQLiteRepository:
                    ORDER BY a.created_at DESC LIMIT 200""",
             (workspace_id, conversation_id, principal_id, _now(), task_id, task_id),
         ).fetchall()
-        return [{"approval_id": row["id"], "conversation_id": row["conversation_id"],
+        return [AUTHORIZATION_RECORD.validate_python({"approval_id": row["id"], "conversation_id": row["conversation_id"],
                  "task_id": row["task_id"], "scope": row["authorization_scope"],
                  "expires_at": row["authorization_expires_at"],
-                 "resource": json.loads(row["reuse_scope_json"])} for row in rows]
+                 "resource": json.loads(row["reuse_scope_json"])}) for row in rows]
 
     async def revoke_authorization(self, workspace_id: str, approval_id: str, principal_id: str) -> None:
         async with self._lock:
@@ -1758,14 +1765,14 @@ class SQLiteRepository:
                             "authorization.revoked", approval_id, "success", "{}", now))
 
     @staticmethod
-    def approval_matches_arguments(approval: dict[str, Any], arguments: dict[str, Any]) -> bool:
+    def approval_matches_arguments(approval: ApprovalRecord, arguments: JSONObject) -> bool:
         """Bind execution to the audit hash, not the mutable tool-call projection."""
         normalized = json.dumps(arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hmac.compare_digest(
             str(approval["arguments_hash"]), hashlib.sha256(normalized.encode("utf-8")).hexdigest(),
         )
 
-    async def get_approval(self, workspace_id: str, approval_id: str) -> dict[str, Any]:
+    async def get_approval(self, workspace_id: str, approval_id: str) -> ApprovalRecord:
         async with self._lock:
             row = (
                 self._db()
@@ -1783,7 +1790,7 @@ class SQLiteRepository:
 
     async def list_approvals(
         self, workspace_id: str, conversation_id: str | None = None, status: str = "pending"
-    ) -> list[dict[str, Any]]:
+    ) -> list[ApprovalRecord]:
         query = """SELECT a.*,t.tool_name,t.arguments_json,t.assistant_content
                    FROM approvals a JOIN tool_calls t ON t.id=a.tool_call_id
                    WHERE a.workspace_id=? AND a.status=?"""
@@ -1839,7 +1846,7 @@ class SQLiteRepository:
         self, workspace_id: str, approval_id: str, principal_id: str, decision: str, version: int,
         note: str = "",
         scope: str = "once",
-    ) -> dict[str, Any]:
+    ) -> ApprovalRecord:
         if decision not in {"allow", "deny"}:
             raise ValueError("decision must be allow or deny")
         if scope not in {"once", "task", "session"} or (decision == "deny" and scope != "once"):

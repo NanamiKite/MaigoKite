@@ -17,6 +17,10 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from agent.browser_runtime import BrowserRuntime
 from agent.config_manager import ConfigManager
+from agent.data_contracts import (
+    JSON_OBJECT, RUN_METADATA, ApprovalNotice, ApprovalRecord, ConversationRecord,
+    MessageRecord, RunMetadata, RunResult, TaskEventRecord, TaskRecord, approval_notice,
+)
 from agent.event_bus import EventBus
 from agent.extensions import ExtensionConfig, startup_config
 from agent.mcp import MCPClient
@@ -36,6 +40,7 @@ from agent.security.injection_filter import InjectionFilter
 from agent.security.whitelist import Whitelist
 from agent.skill_registry import SkillRegistry
 from agent.structured_output import validate_output_schema
+from agent.tools.execution_context import ExecutionMetadata
 from agent.tools.native import (
     BashTool,
     BrowserTool,
@@ -203,7 +208,7 @@ class AgentCore:
                 raise BaseExceptionGroup("Core startup and cleanup failed", [exc, cleanup]) from None
             raise
 
-    async def reconcile_interrupted_tasks(self) -> list[dict[str, Any]]:
+    async def reconcile_interrupted_tasks(self) -> list[TaskRecord]:
         """Mark orphaned product runs interrupted; only checkpoints can resume them."""
         interrupted = await self.repository.recover_interrupted_tasks()
         interrupted.extend(await self.repository.interrupt_ephemeral_approvals({"browser"}))
@@ -472,7 +477,7 @@ class AgentCore:
             raise
         return runtime
 
-    async def _langgraph_execution_metadata(self, request: RuntimeRunRequest) -> dict[str, Any]:
+    async def _langgraph_execution_metadata(self, request: RuntimeRunRequest) -> ExecutionMetadata:
         return await self._execution_metadata(
             request.workspace_id, request.conversation_id, request.principal_id,
         )
@@ -604,7 +609,7 @@ class AgentCore:
         subagent_model_ids: list[str] | None = None,
         thinking: str = "",
         memory_enabled: bool = False,
-    ) -> dict[str, Any]:
+    ) -> ConversationRecord:
         mode = permission_mode or (await self.get_permission_settings(workspace_id))["default_mode"]
         try:
             mode = self._policy.normalize_mode(mode)
@@ -627,7 +632,7 @@ class AgentCore:
 
     async def update_conversation_permission(
         self, workspace_id: str, conversation_id: str, permission_mode: str
-    ) -> dict[str, Any]:
+    ) -> ConversationRecord:
         try:
             permission_mode = self._policy.normalize_mode(permission_mode)
         except ValueError:
@@ -650,7 +655,7 @@ class AgentCore:
         max_concurrent_subagents: int | None = None,
         subagent_model_ids: list[str] | None = None,
         memory_enabled: bool | None = None,
-    ) -> dict[str, Any]:
+    ) -> ConversationRecord:
         if folder_id is not None or archived is not None:
             self._require_inactive_conversation(conversation_id)
         if folder_id is not None:
@@ -696,10 +701,10 @@ class AgentCore:
             memory_enabled=memory_enabled,
         )
 
-    async def list_conversations(self, workspace_id: str = "personal") -> list[dict[str, Any]]:
+    async def list_conversations(self, workspace_id: str = "personal") -> list[ConversationRecord]:
         return await self.repository.list_conversations(workspace_id)
 
-    async def get_conversation(self, workspace_id: str, conversation_id: str) -> dict[str, Any]:
+    async def get_conversation(self, workspace_id: str, conversation_id: str) -> ConversationRecord:
         return await self.repository.get_conversation(workspace_id, conversation_id)
 
     def _require_inactive_conversation(self, conversation_id: str) -> None:
@@ -714,7 +719,7 @@ class AgentCore:
 
     async def fork_conversation(
         self, workspace_id: str, conversation_id: str, message_id: str, request_key: str,
-    ) -> dict[str, Any]:
+    ) -> ConversationRecord:
         self._require_inactive_conversation(conversation_id)
         if len(message_id) > 200:
             raise ValueError("Invalid source message ID")
@@ -770,14 +775,14 @@ class AgentCore:
                     raise ConversationBusyError("工作区中有未结束的任务，请完成或停止后再删除。") from None
         await self.repository.delete_workspace_folder(workspace_id, folder_id, principal_id)
 
-    async def list_messages(self, conversation_id: str, workspace_id: str = "personal") -> list[dict[str, Any]]:
+    async def list_messages(self, conversation_id: str, workspace_id: str = "personal") -> list[MessageRecord]:
         await self.repository.get_conversation(workspace_id, conversation_id)
         return await self.repository.list_messages(conversation_id)
 
-    async def run(self, prompt: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def run(self, prompt: str, metadata: RunMetadata | None = None) -> RunResult:
         if not self._initialized:
             raise RuntimeError("Agent Core is not initialized")
-        metadata = dict(metadata or {})
+        metadata = RUN_METADATA.validate_python(metadata or {}, strict=True)
         metadata["output_schema"] = validate_output_schema(metadata.get("output_schema"))
         key = str(metadata.get("idempotency_key") or "")
         if key:
@@ -806,7 +811,7 @@ class AgentCore:
             return {"task_id": replay.task["id"], "conversation_id": replay.task["conversation_id"],
                     "status": replay.task["status"], "replayed": True}
 
-    async def _run_chat(self, prompt: str, metadata: dict[str, Any]) -> dict[str, Any]:
+    async def _run_chat(self, prompt: str, metadata: RunMetadata) -> RunResult:
         if not self._initialized:
             raise RuntimeError("Agent Core is shutting down")
         prompt = self._input_filter.sanitize_input(prompt)
@@ -815,8 +820,8 @@ class AgentCore:
         )
 
     async def _run_langgraph_chat(
-        self, prompt: str, metadata: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, prompt: str, metadata: RunMetadata
+    ) -> RunResult:
         runtime = self._langgraph_runtime
         if runtime is None:
             raise RuntimeError("LangGraph runtime is not initialized")
@@ -846,7 +851,7 @@ class AgentCore:
             workspace_id=workspace_id,
             conversation_id=conversation_id,
             principal_id=principal_id,
-            permission_mode=str(conversation["permission_mode"]),
+            permission_mode=conversation["permission_mode"],
             trace_id=str(metadata.get("trace_id") or f"trace_{uuid.uuid4().hex}"),
             task_id=str(metadata.get("task_id") or ""),
             request_hash=str(metadata.get("request_hash") or ""),
@@ -883,9 +888,9 @@ class AgentCore:
 
     async def _langgraph_result(
         self, workspace_id: str, task_id: str, conversation_id: str
-    ) -> dict[str, Any]:
+    ) -> RunResult:
         task = await self.repository.get_task(workspace_id, task_id)
-        status = str(task["status"])
+        status = task["status"]
         if status == "waiting_approval":
             questions = [item for item in await self.repository.list_questions(workspace_id, conversation_id)
                          if str(item["task_id"]) == task_id]
@@ -941,7 +946,7 @@ class AgentCore:
         workspace_id: str,
         conversation_id: str,
         principal_id: str,
-    ) -> dict[str, Any]:
+    ) -> ExecutionMetadata:
         conversation = await self.repository.get_conversation(workspace_id, conversation_id)
         folder = await self.get_workspace_folder(workspace_id, str(conversation.get("folder_id") or ""))
         api_keys = {
@@ -953,10 +958,10 @@ class AgentCore:
             "workspace_id": workspace_id,
             "conversation_id": conversation_id,
             "principal_id": principal_id,
-            "permission_mode": conversation["permission_mode"],
+            "permission_mode": self._policy.normalize_mode(conversation["permission_mode"]),
             "process_registry": self.processes,
-            "command_limits": dict(self.config.get("tools.command_limits", {}) or {}),
-            "windows_sandbox": dict(self.config.get("tools.windows_sandbox", {}) or {}),
+            "command_limits": JSON_OBJECT.validate_python(self.config.get("tools.command_limits", {}) or {}, strict=True),
+            "windows_sandbox": JSON_OBJECT.validate_python(self.config.get("tools.windows_sandbox", {}) or {}, strict=True),
             "approved": False,
             "workspace_root": folder["root_path"],
             "api_keys": api_keys,
@@ -965,37 +970,10 @@ class AgentCore:
         }
 
     @staticmethod
-    def _approval_payload(approval: dict[str, Any]) -> dict[str, Any]:
-        arguments = dict(approval.get("arguments") or {})
-        scope = (
-            arguments.get("path")
-            or arguments.get("root_dir")
-            or arguments.get("workdir")
-            or arguments.get("url")
-            or "current workspace"
-        )
-        return {
-            "approval_id": approval["id"],
-            "task_id": approval["task_id"],
-            "conversation_id": approval["conversation_id"],
-            "tool_call_id": approval["tool_call_id"],
-            "tool_name": approval["tool_name"],
-            "arguments": arguments,
-            "resource_scope": str(scope),
-            "risk_level": approval["risk_level"],
-            "status": approval["status"],
-            "version": int(approval["version"]),
-            "expires_at": approval["expires_at"],
-            "note": approval.get("note", ""),
-            "decided_at": approval.get("decided_at") or "",
-            "reuse_scope": approval.get("reuse_scope") or {},
-            "allowed_scopes": ["once", "task", "session"] if approval.get("reuse_scope") else ["once"],
-            "authorization_scope": approval.get("authorization_scope", "once"),
-            "authorization_expires_at": approval.get("authorization_expires_at", ""),
-            "authorization_revoked_at": approval.get("authorization_revoked_at", ""),
-        }
+    def _approval_payload(approval: ApprovalRecord) -> ApprovalNotice:
+        return approval_notice(approval)
 
-    async def list_approvals(self, workspace_id: str, conversation_id: str | None = None) -> list[dict[str, Any]]:
+    async def list_approvals(self, workspace_id: str, conversation_id: str | None = None) -> list[ApprovalNotice]:
         return [
             self._approval_payload(item) for item in await self.repository.list_approvals(workspace_id, conversation_id)
         ]
@@ -1009,7 +987,7 @@ class AgentCore:
         version: int,
         note: str = "",
         scope: str = "once",
-    ) -> dict[str, Any]:
+    ) -> RunResult:
         if not self._initialized:
             raise RuntimeError("Agent Core is not accepting new runtime requests")
         pending = await self.repository.get_approval(workspace_id, approval_id)
@@ -1033,7 +1011,7 @@ class AgentCore:
         conversation_id: str,
         note: str = "",
         scope: str = "once",
-    ) -> dict[str, Any]:
+    ) -> RunResult:
         runtime = self._langgraph_runtime
         if runtime is None:
             raise RuntimeError("LangGraph runtime is not initialized")
@@ -1066,19 +1044,19 @@ class AgentCore:
             raise RuntimeError("LangGraph runtime is not initialized")
         await self._track_langgraph_entry(self._langgraph_runtime.cancel_active_runs())
 
-    async def get_task(self, workspace_id: str, task_id: str) -> dict[str, Any]:
+    async def get_task(self, workspace_id: str, task_id: str) -> TaskRecord:
         return await self.repository.get_task(workspace_id, task_id)
 
     async def resume_task(
         self, workspace_id: str, task_id: str, principal_id: str, version: int, trace_id: str = "",
-    ) -> dict[str, Any]:
+    ) -> RunResult:
         return await self._track_langgraph_entry(
             self._resume_task(workspace_id, task_id, principal_id, version, trace_id),
         )
 
     async def _resume_task(
         self, workspace_id: str, task_id: str, principal_id: str, version: int, trace_id: str,
-    ) -> dict[str, Any]:
+    ) -> RunResult:
         runtime = self._langgraph_runtime
         if runtime is None:
             raise RuntimeError("LangGraph runtime is not initialized")
@@ -1097,13 +1075,13 @@ class AgentCore:
         return await self._langgraph_result(workspace_id, task_id, handle.request.conversation_id)
 
     async def answer_question(self, workspace_id: str, question_id: str, principal_id: str,
-                              answer: str, version: int) -> dict[str, Any]:
+                              answer: str, version: int) -> RunResult:
         return await self._track_langgraph_entry(
             self._answer_question(workspace_id, question_id, principal_id, answer, version),
         )
 
     async def _answer_question(self, workspace_id: str, question_id: str, principal_id: str,
-                               answer: str, version: int) -> dict[str, Any]:
+                               answer: str, version: int) -> RunResult:
         runtime = self._langgraph_runtime
         if runtime is None:
             raise RuntimeError("LangGraph runtime is not initialized")
@@ -1159,7 +1137,7 @@ class AgentCore:
         await self.repository.record_audit(workspace_id, principal_id, "process.input", job_id, "success",
                                            {"bytes": len(text.encode("utf-8")), "eof": eof})
 
-    async def list_tasks(self, workspace_id: str, conversation_id: str = "", limit: int = 100) -> list[dict[str, Any]]:
+    async def list_tasks(self, workspace_id: str, conversation_id: str = "", limit: int = 100) -> list[TaskRecord]:
         return await self.repository.list_tasks(workspace_id, conversation_id, limit)
 
     async def submit_task_input(self, workspace_id: str, task_id: str, content: str, idempotency_key: str) -> dict[str, Any]:
@@ -1173,11 +1151,11 @@ class AgentCore:
         conversation_id: str,
         after_sequence: int = 0,
         limit: int = 500,
-    ) -> list[dict[str, Any]]:
+    ) -> list[TaskEventRecord]:
         await self.repository.get_conversation(workspace_id, conversation_id)
         return await self.repository.list_task_events(workspace_id, conversation_id, after_sequence, limit)
 
-    async def cancel_task(self, workspace_id: str, task_id: str) -> dict[str, Any]:
+    async def cancel_task(self, workspace_id: str, task_id: str) -> TaskRecord:
         if not self._initialized:
             raise RuntimeError("Agent Core is not accepting new runtime requests")
         if self._langgraph_runtime is None:

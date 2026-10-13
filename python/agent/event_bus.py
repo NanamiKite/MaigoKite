@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
-from typing import Any, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Mapping
 
-EventCallback = Callable[[str, dict[str, Any]], Coroutine[Any, Any, None]]
-EventSink = Callable[[str, dict[str, Any]], Coroutine[Any, Any, dict[str, Any]]]
+from agent.data_contracts import JSONObject
+from agent.event_contracts import event_payload
+
+EventCallback = Callable[[str, JSONObject], Awaitable[None]]
+EventSink = Callable[[str, Mapping[str, object]], Awaitable[JSONObject]]
 
 
 class EventBus:
@@ -30,8 +33,8 @@ class EventBus:
             if not callbacks:
                 self._subscribers.pop(event_type, None)
 
-    async def publish(self, event_type: str, payload: dict[str, Any]) -> None:
-        delivered = await self._sink(event_type, payload) if self._sink else payload
+    async def publish(self, event_type: str, payload: Mapping[str, object]) -> None:
+        delivered = await self._sink(event_type, payload) if self._sink else event_payload(event_type, payload)
         async with self._lock:
             callbacks = tuple(self._subscribers.get(event_type, ())) + tuple(self._subscribers.get("*", ()))
         if callbacks:

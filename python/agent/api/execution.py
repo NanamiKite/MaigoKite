@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import WebSocket, WebSocketDisconnect
 
 from agent.api.contracts import APIError, event
+from agent.data_contracts import JSONObject, RunResult
 
 if TYPE_CHECKING:
     from agent.core import AgentCore
@@ -40,13 +41,13 @@ class Execution:
         task.add_done_callback(release)
         return task
 
-    async def admit(self, operation: Coroutine[Any, Any, dict[str, Any]],
-                    matches: Callable[[str, dict[str, Any]], bool]) -> dict[str, Any]:
+    async def admit(self, operation: Coroutine[Any, Any, RunResult],
+                    matches: Callable[[str, JSONObject], bool]) -> dict[str, object]:
         """Return a durable acceptance or replay receipt, leaving execution owned by this service."""
-        receipt: asyncio.Future[dict[str, object]] = asyncio.get_running_loop().create_future()
+        receipt: asyncio.Future[JSONObject] = asyncio.get_running_loop().create_future()
         identity = object()
 
-        async def receive(kind: str, payload: dict[str, Any]) -> None:
+        async def receive(kind: str, payload: JSONObject) -> None:
             if _admission.get() is identity and not receipt.done() and payload.get("event_id") and matches(kind, payload):
                 receipt.set_result(payload)
 
@@ -63,10 +64,10 @@ class Execution:
             if running.done() and not running.cancelled() and running.exception() is not None:
                 running.result()
             if receipt.done():
-                return receipt.result()
+                return dict(receipt.result())
             result = running.result()
             if result.get("replayed"):
-                return result
+                return dict(result)
             raise APIError(502, str(result.get("error_code") or "ADMISSION_FAILED"),
                            str(result.get("error") or "任务没有返回接纳回执，请刷新任务状态。"))
         finally:
@@ -84,10 +85,10 @@ class Execution:
     async def websocket(self, socket: WebSocket, workspace: str, conversation: str) -> None:
         await self.core.get_conversation(workspace, conversation)
         await socket.accept()
-        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=64)
+        queue: asyncio.Queue[JSONObject] = asyncio.Queue(maxsize=64)
         overflow = asyncio.Event()
 
-        async def receive(kind: str, payload: dict[str, Any]) -> None:
+        async def receive(kind: str, payload: JSONObject) -> None:
             # Conversation IDs are globally unique and were scoped to the workspace before accepting the socket.
             if payload.get("conversation_id") != conversation:
                 return
@@ -97,7 +98,7 @@ class Execution:
                 overflow.set()
                 return
             try:
-                queue.put_nowait(event(kind, payload))
+                queue.put_nowait(event(kind, payload).model_dump(mode="json", exclude_unset=True))
             except asyncio.QueueFull:
                 # Reconnection replays the Repository journal. Never hold an Agent run behind socket I/O.
                 overflow.set()

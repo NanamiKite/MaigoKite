@@ -44,6 +44,8 @@ const labels: Record<AgentTask['status'], string> = {
   succeeded: '已完成',
   failed: '失败',
   cancelled: '已停止',
+  rejected: '已拒绝',
+  expired: '已过期',
   timed_out: '超时',
   interrupted: '已中断',
 }

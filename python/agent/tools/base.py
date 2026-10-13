@@ -14,6 +14,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import StructuredTool
 
 from agent.errors import public_error
+from agent.tools.execution_context import ExecutionMetadata
 from agent.tools.validator import ToolValidator
 
 if TYPE_CHECKING:
@@ -189,7 +190,7 @@ class ExecutionContext:
     trace_id: str
     task_id: str
     step_id: str
-    metadata: dict[str, Any]
+    metadata: ExecutionMetadata
 
     def __init__(
         self,
@@ -198,7 +199,7 @@ class ExecutionContext:
         step_id: str,
         deadline: datetime | None = None,
         cancellation_token: bool = False,
-        metadata: dict[str, Any] | None = None,
+        metadata: ExecutionMetadata | None = None,
     ) -> None:
         self.deadline = deadline or datetime.max
         self.cancellation_token = cancellation_token

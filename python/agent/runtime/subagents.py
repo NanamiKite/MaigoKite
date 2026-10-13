@@ -26,6 +26,7 @@ from agent.models.context_capacity import ContextCapacity
 from agent.models.reasoning import split_thinking
 from agent.runtime.context import ContextBudgetMiddleware, summary_target_tokens
 from agent.tools.base import BaseTool, ExecutionContext, ToolResult
+from agent.tools.execution_context import ExecutionMetadata
 
 if TYPE_CHECKING:
     from agent.runtime.langgraph_runtime import LangGraphRuntime, RuntimeRunRequest, _RunContext
@@ -49,7 +50,7 @@ class ChildContext:
     parent: _RunContext
     subagent_id: str
     request: RuntimeRunRequest
-    execution_metadata: dict[str, Any]
+    execution_metadata: ExecutionMetadata
     model_info: dict[str, Any]
     scope: asyncio.TaskGroup | None = None
     context_capacity: ContextCapacity | None = None

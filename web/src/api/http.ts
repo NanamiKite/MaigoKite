@@ -16,14 +16,29 @@ let bearer = ''
 export function setAuthToken(token: string) {
   bearer = token
 }
-export async function request<T>(url: string, init?: RequestInit): Promise<T> {
+export async function request<T>(
+  url: string,
+  init?: RequestInit,
+  validate?: (value: unknown) => value is T,
+): Promise<T> {
   const controller = new AbortController()
   const abort = () => controller.abort()
   init?.signal?.addEventListener('abort', abort, { once: true })
   if (init?.signal?.aborted) abort()
   const timeout = setTimeout(abort, 30_000)
+  const decode = (value: unknown): T => {
+    if (validate) {
+      if (!validate(value))
+        throw new GatewayError(t('服务端数据格式异常，请更新应用或重试。'), 502, 'CONTRACT_INVALID')
+      return value
+    }
+    // Endpoints not yet described by OpenAPI retain their existing boundary.
+    // New/converted endpoints must supply the generated validator.
+    return value as T
+  }
   try {
-    if (import.meta.env.VITE_MOCK === '1') return (await import('./mock')).mockRequest<T>(url, init)
+    if (import.meta.env.VITE_MOCK === '1')
+      return decode(await (await import('./mock')).mockRequest<unknown>(url, init))
     const headers = new Headers(init?.headers)
     headers.set('Content-Type', 'application/json')
     if (bearer) headers.set('Authorization', `Bearer ${bearer}`)
@@ -42,7 +57,8 @@ export async function request<T>(url: string, init?: RequestInit): Promise<T> {
               : t("请求失败（{0}）", [response.status])
       throw new GatewayError(message, response.status, String(detail.code || 'HTTP'))
     }
-    return response.status === 204 ? (undefined as T) : ((await response.json()) as T)
+    const body: unknown = response.status === 204 ? undefined : await response.json()
+    return decode(body)
   } catch (reason) {
     if (reason instanceof GatewayError) throw reason
     throw new GatewayError(

@@ -8,6 +8,7 @@ from collections.abc import Awaitable
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Query, Request, Response, WebSocket
+from pydantic import ValidationError
 from starlette.requests import HTTPConnection
 
 from agent.api import contracts as dto
@@ -42,7 +43,7 @@ def request_key(request: Request, *, required: bool = False) -> str:
 async def interaction[T](operation: Awaitable[T]) -> T:
     try:
         return await operation
-    except dto.APIError:
+    except (dto.APIError, ValidationError):
         raise
     except ValueError as exc:
         raise dto.APIError(409, "CONFLICT", public_error(exc)) from exc
@@ -52,24 +53,24 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
     router = APIRouter()
     repository = core.repository
 
-    @router.get("/conversations", response_model=None)
+    @router.get("/conversations", response_model=dto.ConversationsResponse)
     async def conversations(workspace_id: str) -> dict[str, object]:
         return {"conversations": [dto.conversation(row) for row in await core.list_conversations(workspace_id)]}
 
-    @router.post("/conversations", status_code=201, response_model=None)
-    async def create_conversation(workspace_id: str, body: dto.ConversationCreate) -> dict[str, object]:
+    @router.post("/conversations", status_code=201, response_model=dto.ConversationResponse)
+    async def create_conversation(workspace_id: str, body: dto.ConversationCreate) -> dto.ConversationResponse:
         if body.thinking:
             await credentials.restore_model(workspace_id, body.model_id)
         return dto.conversation(await core.create_conversation(workspace_id, **body.model_dump()))
 
-    @router.get("/conversations/{conversation_id}", response_model=None)
-    async def get_conversation(workspace_id: str, conversation_id: str) -> dict[str, object]:
+    @router.get("/conversations/{conversation_id}", response_model=dto.ConversationResponse)
+    async def get_conversation(workspace_id: str, conversation_id: str) -> dto.ConversationResponse:
         return dto.conversation(await core.get_conversation(workspace_id, conversation_id))
 
-    @router.patch("/conversations/{conversation_id}", response_model=None)
+    @router.patch("/conversations/{conversation_id}", response_model=dto.ConversationResponse)
     async def update_conversation(
         workspace_id: str, conversation_id: str, body: dto.ConversationUpdate,
-    ) -> dict[str, object]:
+    ) -> dto.ConversationResponse:
         changes = body.model_dump(exclude_unset=True, exclude_none=True)
         if not changes:
             raise dto.APIError(400, "VALIDATION", "请至少提供一项对话设置。")
@@ -83,26 +84,26 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
         await core.delete_conversation(workspace_id, conversation_id)
         return Response(status_code=204)
 
-    @router.post("/conversations/{conversation_id}/fork", status_code=201, response_model=None)
-    async def fork(workspace_id: str, conversation_id: str, body: dto.Fork, request: Request) -> dict[str, object]:
+    @router.post("/conversations/{conversation_id}/fork", status_code=201, response_model=dto.ConversationResponse)
+    async def fork(workspace_id: str, conversation_id: str, body: dto.Fork, request: Request) -> dto.ConversationResponse:
         return dto.conversation(await core.fork_conversation(workspace_id, conversation_id, body.message_id, request_key(request, required=True)))
 
-    @router.get("/conversations/{conversation_id}/messages", response_model=None)
+    @router.get("/conversations/{conversation_id}/messages", response_model=dto.MessagesResponse)
     async def messages(workspace_id: str, conversation_id: str) -> dict[str, object]:
         return {"messages": await core.list_messages(conversation_id, workspace_id)}
 
-    @router.get("/conversations/{conversation_id}/snapshot", response_model=None)
+    @router.get("/conversations/{conversation_id}/snapshot", response_model=dto.SnapshotResponse)
     async def snapshot(workspace_id: str, conversation_id: str) -> dict[str, object]:
         value = await repository.conversation_snapshot(workspace_id, conversation_id)
         approvals, questions = [], []
         # Preserve snapshot's published JSON-string fields while dropping the protobuf dependency.
         for row in value["approvals"]:
-            item = dto.approval(row)
+            item = dto.approval(row).model_dump()
             item["arguments_json"] = json.dumps(item.pop("arguments"), ensure_ascii=False)
             item["reuse_scope_json"] = json.dumps(item.pop("reuse_scope"), ensure_ascii=False)
             approvals.append(item)
-        for row in value["questions"]:
-            item = dto.question(row)
+        for question_row in value["questions"]:
+            item = dto.question(question_row).model_dump()
             item["options_json"] = json.dumps(item.pop("options"), ensure_ascii=False)
             questions.append(item)
         return {**value, "tasks": [dto.task(row) for row in value["tasks"]],
@@ -140,24 +141,24 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
     async def stream(socket: WebSocket, workspace_id: str, conversation_id: str = Query(min_length=1)) -> None:
         await execution.websocket(socket, workspace_id, conversation_id)
 
-    @router.get("/conversations/{conversation_id}/events/history", response_model=None)
+    @router.get("/conversations/{conversation_id}/events/history", response_model=dto.EventsResponse, response_model_exclude_unset=True)
     async def events(workspace_id: str, conversation_id: str, after: int = Query(default=0, ge=0)) -> dict[str, object]:
         return {"events": [dto.history_event(row) for row in await core.list_task_events(workspace_id, conversation_id, after, 1000)]}
 
-    @router.get("/tasks", response_model=None)
+    @router.get("/tasks", response_model=dto.TasksResponse)
     async def tasks(workspace_id: str, conversation_id: str = "") -> dict[str, object]:
         return {"tasks": [dto.task(row) for row in await core.list_tasks(workspace_id, conversation_id, 200)]}
 
-    @router.get("/tasks/{task_id}", response_model=None)
-    async def get_task(workspace_id: str, task_id: str) -> dict[str, object]:
+    @router.get("/tasks/{task_id}", response_model=dto.TaskResponse)
+    async def get_task(workspace_id: str, task_id: str) -> dto.TaskResponse:
         return dto.task(await core.get_task(workspace_id, task_id))
 
-    @router.get("/tasks/{task_id}/result", response_model=None)
-    async def task_result(workspace_id: str, task_id: str) -> dict[str, object]:
-        return await repository.get_task_result(workspace_id, task_id)
+    @router.get("/tasks/{task_id}/result", response_model=dto.TaskResultResponse)
+    async def task_result(workspace_id: str, task_id: str) -> dto.TaskResultResponse:
+        return dto.TaskResultResponse.model_validate(await repository.get_task_result(workspace_id, task_id))
 
-    @router.post("/tasks/{task_id}/cancel", response_model=None)
-    async def cancel(workspace_id: str, task_id: str) -> dict[str, object]:
+    @router.post("/tasks/{task_id}/cancel", response_model=dto.TaskResponse)
+    async def cancel(workspace_id: str, task_id: str) -> dto.TaskResponse:
         return dto.task(await core.cancel_task(workspace_id, task_id))
 
     @router.post("/tasks/{task_id}/resume", status_code=202, dependencies=[Depends(owner)], response_model=None)
@@ -208,12 +209,12 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
         await interaction(core.write_job_input(workspace_id, job_id, dto.Principal, body.text, body.eof))
         return Response(status_code=204)
 
-    @router.get("/approvals", response_model=None)
+    @router.get("/approvals", response_model=dto.ApprovalsResponse)
     async def approvals(workspace_id: str, conversation_id: str = "") -> dict[str, object]:
         return {"approvals": [dto.approval(row) for row in await repository.list_approvals(workspace_id, conversation_id or None)]}
 
-    @router.get("/approvals/{approval_id}", response_model=None)
-    async def approval(workspace_id: str, approval_id: str) -> dict[str, object]:
+    @router.get("/approvals/{approval_id}", response_model=dto.ApprovalResponse)
+    async def approval(workspace_id: str, approval_id: str) -> dto.ApprovalResponse:
         return dto.approval(await repository.get_approval(workspace_id, approval_id))
 
     @router.post("/approvals/{approval_id}/decision", status_code=202, response_model=None)
@@ -236,7 +237,7 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
             and payload.get("version") == body.version + 1))
         return {"approval_id": approval_id, "task_id": pending["task_id"], "status": "processing"}
 
-    @router.get("/approval-authorizations", dependencies=[Depends(owner)], response_model=None)
+    @router.get("/approval-authorizations", dependencies=[Depends(owner)], response_model=dto.AuthorizationsResponse)
     async def authorizations(workspace_id: str, conversation_id: str = Query(min_length=1)) -> dict[str, object]:
         return {"authorizations": await repository.list_authorizations(workspace_id, conversation_id, dto.Principal)}
 
@@ -247,7 +248,7 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
         await repository.revoke_authorization(workspace_id, approval_id, dto.Principal)
         return Response(status_code=204)
 
-    @router.get("/questions", response_model=None)
+    @router.get("/questions", response_model=dto.QuestionsResponse)
     async def questions(workspace_id: str, conversation_id: str = "") -> dict[str, object]:
         return {"questions": [dto.question(row) for row in await repository.list_questions(workspace_id, conversation_id)]}
 

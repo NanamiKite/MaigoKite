@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from agent.data_contracts import PERMISSION_MODE, PermissionMode
 from agent.security.sensitive_paths import is_sensitive_path, validate_windows_path
 from agent.security.whitelist import Whitelist
 from agent.utils.command_shell import resolve_command_shell
@@ -38,7 +39,7 @@ class PolicyDecision:
     reuse_scope: dict[str, Any] | None = None
     authorization_id: str = ""
     # Trusted execution metadata, never a tool-supplied permission grant.
-    sandbox_mode: str = "workspace"
+    sandbox_mode: PermissionMode = "workspace"
     allow_network: bool = False
 
 
@@ -77,11 +78,11 @@ class PermissionManager:
     _SENSITIVE_COMMANDS = {"rm", "rmdir", "unlink", "shred", "dd", "chmod", "chown", "sudo", "su", "mount", "umount"}
 
     @classmethod
-    def normalize_mode(cls, mode: str) -> str:
+    def normalize_mode(cls, mode: str) -> PermissionMode:
         normalized = cls.LEGACY_MODES.get(mode, mode)
         if normalized not in cls.MODES:
             raise ValueError(f"invalid permission mode: {mode}")
-        return normalized
+        return PERMISSION_MODE.validate_python(normalized)
 
     def __init__(
         self,
@@ -356,7 +357,7 @@ class PermissionManager:
             auto = False
         if unrestricted:
             auto = True
-        sandbox_mode = "danger_full_access" if unrestricted or outside_workspace or escalate else "workspace"
+        sandbox_mode: PermissionMode = "danger_full_access" if unrestricted or outside_workspace or escalate else "workspace"
         reuse = self._reuse_scope(tool_name, normalized, risk, effective_mode)
         if approved or auto:
             return PolicyDecision("allow", risk, "allowed by policy", normalized, resource_scope, reuse,

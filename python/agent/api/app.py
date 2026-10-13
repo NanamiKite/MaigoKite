@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING, Any, overload
 from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Request, WebSocket
-from fastapi.exceptions import RequestValidationError, WebSocketRequestValidationError
+from fastapi.exceptions import RequestValidationError, ResponseValidationError, WebSocketRequestValidationError
+from pydantic import ValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException
@@ -203,6 +204,8 @@ def create_app(core: AgentCore, web_dir: Path | None = None) -> FastAPI:
             status, code, message = 403, "ACCESS_DENIED", public_error(error)
         elif isinstance(error, RequestValidationError):
             status, code, message = 400, "VALIDATION", "请求参数无效，请检查字段名称、类型与长度。"
+        elif isinstance(error, (ValidationError, ResponseValidationError)):
+            status, code, message = 500, "CONTRACT_INVALID", "服务端数据格式异常，请更新应用或查看运行日志。"
         elif isinstance(error, ValueError):
             status, code, message = 400, "VALIDATION", public_error(error)
         elif isinstance(error, HTTPException):
@@ -219,7 +222,8 @@ def create_app(core: AgentCore, web_dir: Path | None = None) -> FastAPI:
         return JSONResponse({"error": {"code": code, "message": message}}, status_code=status)
 
     for error in (APIError, ConversationBusyError, MessageConflictError, KeyError, OSError, ValueError,
-                  RuntimeError, RequestValidationError, WebSocketRequestValidationError, HTTPException):
+                  RuntimeError, RequestValidationError, WebSocketRequestValidationError, HTTPException,
+                  ValidationError, ResponseValidationError):
         app.add_exception_handler(error, failure)
 
     @app.get("/health")

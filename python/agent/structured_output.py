@@ -3,14 +3,19 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from referencing import Registry
 from referencing.jsonschema import DRAFT202012
 
+from agent.data_contracts import JSON_OBJECT, JSONObject
 from agent.errors import UserFacingError
+
+if TYPE_CHECKING:
+    from agent.runtime.langgraph_runtime import _RunContext
+    from agent.runtime.subagents import ChildContext
 
 OUTPUT_TOOL_NAME = "maigokite_structured_result"
 SCHEMA_MAX_BYTES = 16 * 1024
@@ -21,8 +26,8 @@ class StructuredResultError(UserFacingError):
     """A final result failed its task contract; no consumable result is published."""
 
 
-def _bounded_json(value: Any, limit: int, depth: int) -> str:
-    pending = [(value, 0)]
+def _bounded_json(value: object, limit: int, depth: int) -> str:
+    pending: list[tuple[object, int]] = [(value, 0)]
     while pending:
         item, level = pending.pop()
         if level > depth:
@@ -39,7 +44,7 @@ def _bounded_json(value: Any, limit: int, depth: int) -> str:
     return encoded
 
 
-def validate_output_schema(schema: Any) -> dict[str, Any] | None:
+def validate_output_schema(schema: object) -> JSONObject | None:
     """Validate before admission; references never retrieve network or filesystem data."""
     if schema is None:
         return None
@@ -72,10 +77,10 @@ def validate_output_schema(schema: Any) -> dict[str, Any] | None:
             "输出 Schema 无效：须为 JSON Schema 2020-12 的 object，最多 16 KiB、32 层；"
             "不支持外部引用、$id 或顶层 oneOf。"
         ) from exc
-    return cast(dict[str, Any], json.loads(encoded))
+    return JSON_OBJECT.validate_json(encoded, strict=True)
 
 
-def response_schema(schema: dict[str, Any]) -> dict[str, Any]:
+def response_schema(schema: JSONObject) -> JSONObject:
     """Give LangChain's result tool a reserved identity, independent of user titles."""
     result = deepcopy(schema)
     result["title"] = OUTPUT_TOOL_NAME
@@ -86,15 +91,15 @@ def response_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def output_budget_tools(tools: list[Any], context: Any) -> list[Any]:
+def output_budget_tools(tools: list[Any], context: _RunContext | ChildContext | None) -> list[Any]:
     """Count the schema that LangChain adds after product model middleware."""
     from langchain_core.utils.function_calling import convert_to_openai_tool
 
-    schema = getattr(getattr(context, "request", None), "output_schema", None)
+    schema = context.request.output_schema if context is not None else None
     return [*tools, convert_to_openai_tool(response_schema(schema))] if schema is not None else tools
 
 
-def validated_result_json(schema: dict[str, Any], value: Any) -> str:
+def validated_result_json(schema: JSONObject, value: object) -> str:
     try:
         encoded = _bounded_json(value, RESULT_MAX_BYTES, 64)
         validator = Draft202012Validator(schema, registry=Registry())

@@ -4,8 +4,14 @@ import { t } from '@/i18n'
 
 const now = () => new Date().toISOString()
 const folders: WorkspaceFolder[] = [{ id: '', name: '默认工作区', root_path: '/demo/workspace' }]
+const conversationDefaults = {
+  thinking: '', folder_id: '', archived: false, memory_enabled: false,
+  max_subagent_calls: 0, max_concurrent_subagents: 1, subagent_model_ids: [],
+  forked_from_conversation_id: '', forked_from_message_id: '',
+}
 const conversations: Conversation[] = [
   {
+    ...conversationDefaults,
     id: 'inkline-demo',
     workspace_id: 'personal',
     title: '整理一个想法',
@@ -55,6 +61,7 @@ function stopTimers(taskId: string) {
 function start(sessionId: string, content: string) {
   const id = `demo-${Date.now()}`
   const task: AgentTask = {
+    subagent_model_ids: [], output_mode: 'text', result_ready: false,
     id,
     workspace_id: 'personal',
     conversation_id: sessionId,
@@ -70,7 +77,7 @@ function start(sessionId: string, content: string) {
   const list = messages.get(sessionId) || []
   list.push({ id: `user-${id}`, conversation_id: sessionId, role: 'user', content, created_at: now() })
   messages.set(sessionId, list)
-  emit(sessionId, id, 'task.started', { input_text: content })
+  emit(sessionId, id, 'task.started', { input_text: content, trace_id: id })
   const wait = (delay: number, action: () => void) => {
     const set = timers.get(id) || new Set<ReturnType<typeof setTimeout>>()
     const timer = setTimeout(() => {
@@ -97,6 +104,8 @@ function start(sessionId: string, content: string) {
         status: 'pending',
         version: 1,
         expires_at: '2099-01-01T00:00:00Z',
+        note: '', decided_at: '', allowed_scopes: ['once'], reuse_scope: {},
+        authorization_scope: 'once', authorization_expires_at: '', authorization_revoked_at: '',
       }
       task.status = 'waiting_approval'
       approvals.push(approval)
@@ -120,7 +129,7 @@ function start(sessionId: string, content: string) {
       emit(sessionId, id, 'memory.added', { memory_id: memory.id, content: memory.content })
     },
     finish: (answer) => {
-      const wroteFile = approvals.some((approval) => approval.task_id === id && approval.status === 'approved')
+      const wroteFile = approvals.some((approval) => approval.task_id === id && approval.status === 'consumed')
       list.push({
         id: `answer-${id}`,
         conversation_id: sessionId,
@@ -310,13 +319,13 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
     const approval = approvals.find((a) => a.id === parts[parts.length - 2])
     if (!approval || approval.status !== 'pending' || approval.version !== body.version)
       throw new Error('审批已处理或版本已变化。')
-    approval.status = body.decision === 'allow' ? 'approved' : 'denied'
+    approval.status = body.decision === 'allow' ? 'consumed' : 'rejected'
     approval.note = String(body.note || '')
     approval.decided_at = now()
     approval.version++
     const task = tasks.find((t) => t.id === approval.task_id)
     emit(approval.conversation_id, approval.task_id, 'approval.decided', {
-      approval_id: approval.id,
+      ...approval, approval_id: approval.id,
       decision: body.decision,
       note: approval.note,
     })
@@ -329,10 +338,12 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
     if (task) {
       task.status = 'cancelled'
       stopTimers(task.id)
-      emit(task.conversation_id, task.id, 'task.cancelled', {})
+      emit(task.conversation_id, task.id, 'task.cancelled', { message: '任务已停止。' })
       for (const a of approvals.filter((a) => a.task_id === task.id && a.status === 'pending')) {
-        a.status = 'denied'
-        emit(task.conversation_id, task.id, 'approval.decided', { approval_id: a.id, decision: 'deny' })
+        a.status = 'rejected'
+        a.version++
+        a.decided_at = now()
+        emit(task.conversation_id, task.id, 'approval.decided', { ...a, approval_id: a.id, decision: 'deny' })
       }
     }
     result = task
@@ -357,7 +368,10 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
     result = {
       messages: messages.get(sessionId) || [],
       tasks: tasks.filter((item) => item.conversation_id === sessionId),
-      approvals: approvals.filter((item) => item.conversation_id === sessionId && item.status === 'pending'),
+      approvals: approvals.filter((item) => item.conversation_id === sessionId && item.status === 'pending')
+        .map(({ arguments: args, reuse_scope, ...approval }) => ({
+          ...approval, arguments_json: JSON.stringify(args), reuse_scope_json: JSON.stringify(reuse_scope || {}),
+        })),
       questions: [], last_sequence: history[history.length - 1]?.sequence || 0, truncated: false,
     }
   } else if (parsed.pathname.endsWith('/fork') && method === 'POST') {
@@ -416,6 +430,7 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
   } else if (parsed.pathname.endsWith('/conversations')) {
     if (method === 'POST') {
       const conversation: Conversation = {
+        ...conversationDefaults,
         workspace_id: 'personal',
         model_id: 'demo',
         permission_mode: 'workspace',

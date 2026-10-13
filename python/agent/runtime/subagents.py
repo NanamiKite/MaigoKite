@@ -7,7 +7,7 @@ import json
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, get_type_hints
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
@@ -210,8 +210,6 @@ class DelegateTool(BaseTool):
         raise ValueError("delegate requires a running LangGraph task")
 
     def to_langchain_tool(self) -> StructuredTool:
-        # Keep real ToolRuntime annotations: current StructuredTool preserves
-        # injected arguments by inspecting the function signature, not strings.
         async def invoke(task: str, runtime: ToolRuntime[object], model_id: str = "", label: str = "") -> ToolMessage:
             parent = cast("_RunContext", runtime.context)
             if self.graph is None or parent.child_scope is None or parent.terminal_emitted:
@@ -220,6 +218,10 @@ class DelegateTool(BaseTool):
             # result projection) with the root TaskGroup. ToolNode owns dispatch.
             return await self._run(task, runtime, model_id, label)
 
+        # StructuredTool reads the signature to preserve injected arguments after
+        # Pydantic validation. Resolve postponed annotations so runtime survives
+        # that filtering without exposing it in the model-facing DelegateArgs.
+        invoke.__annotations__ = get_type_hints(invoke, include_extras=True)
         return StructuredTool.from_function(
             coroutine=invoke, name=self.name, description=self.description, args_schema=DelegateArgs,
         )
@@ -441,6 +443,9 @@ class ListSubagentModelsTool(BaseTool):
                 content=json.dumps(payload, ensure_ascii=False), tool_call_id=str(runtime.tool_call_id), name=self.name
             )
 
+        # The explicit schema only contains model inputs; the resolved signature
+        # lets StructuredTool retain the ToolNode-injected runtime after validation.
+        invoke.__annotations__ = get_type_hints(invoke, include_extras=True)
         return StructuredTool.from_function(
             coroutine=invoke, name=self.name, description=self.description, args_schema=ModelLookupArgs
         )

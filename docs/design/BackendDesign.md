@@ -67,3 +67,23 @@ API/ASGI 复用 FastAPI、Uvicorn 和 AnyIO，系统凭证复用 keyring；MCP�
 Web 与 Electron 继续共用相对路径构建产物。HTTP 返回的入口 HTML 补充 `<base href="/">`，让直接打开 `/chat/<id>` 时资源仍从站点根目录加载；磁盘文件不改写，Electron `file://` 保持相对路径。不存在的资源与 API（含 HEAD 请求）不回退为 SPA 页面。Windows 构建参数与共享脚本一致，不再接受 `go` 目标。
 
 2026-10-12 后端迁移已更新锁文件、启动脚本和文档，未运行软件测试、类型检查、lint、构建或平台实机验收，记录见 [交付路线与状态](../project/Roadmap.md)。独立桌面 Python runtime bundling、手机远程认证和发布 E2E 仍未完成。不能把旧 Go 链路验收记录当成新接口验收。
+
+## 6. 保留但未接入的基础设施
+
+未接入不等于应该删除。下面的模块保留用于后续开发，但不注册到 Core、ToolRegistry、API、能力声明或默认启动流程；不能通过默认配置或自动发现把未完成实现带入生产调用链。
+
+| 模块 | 当前源码边界 | 未完成部分 |
+| --- | --- | --- |
+| `models/embedding_provider.py` | 抽象契约和 BGE/OpenAI/GTE 预留类保留；具体空方法明确抛出 `NotImplementedError` | 专用 Provider 的实现与产品接线 |
+| `models/embedding_adapter.py` | 使用 SDK 的异步 Embeddings；OpenAI 适配和显式传入的 SDK backend；维度来自配置或实际向量，不猜默认值 | BGE/GTE 本地加载、模型管理与生命周期的产品接线；不会自行下载模型 |
+| `utils/storage.py` / `inspector/timeline.py` | Storage 抽象契约、具体后端和 TimelineBuilder 保留并明确报未实现；TimelineEntry 正常保存构造参数 | 通用键值存储、时间线构建；当前业务持久化与 UI 事件仍使用 Repository |
+| `models/image_provider.py` / `image_adapter.py` | ImageResult 保存实际字段；实验性 SDK 返回远端 URL/内嵌数据；由调用方在完成后关闭 adapter | 图片落盘在请求前拒绝，不返回虚假本地路径；没有生图工具/API 接线 |
+| `knowledge_base/store.py` | 内存文档存储使用 SDK Document，保留稳定 ID；批量重复 ID 在写入前拒绝 | 原始材料持久化、归属与版本生命周期 |
+| `knowledge_base/vector_store.py` | 预计算向量传给 FAISS/Chroma/Qdrant 的公开操作；批次与维度校验；返回原生分数 | FAISS 替换/恢复明确未实现；Qdrant 集合须预先配置，使用 UUID ID，调用方关闭 client；未接入记忆或索引任务 |
+| `knowledge_base/retriever.py` | 使用 SDK VectorStore/BaseRetriever 与异步检索；限制返回量，支持的过滤条件在检索前传入，不支持时拒绝 | 关键词语料/索引须由调用方显式提供，不用空白查询的样本冒充完整语料；不支持的按 ID 读取不伪装成“未找到” |
+
+向量适配使用预计算向量契约，文本 Retriever 使用已配置 embedding 的 SDK VectorStore；两者不能直接互换，本轮不增加桥接框架。FAISS/Chroma 的距离与 Qdrant 的相似度也不是统一分数；SDK Retriever 不提供分数时返回 `None`，不造一个 `0.0`。
+
+向量/检索依赖仅放在 `vectorstores` 可选组，未进入默认依赖。本轮同步了依赖锁文件，没有安装这些后端、启动服务或调用模型。预留类明确失败是防止误用，不是能力交付；接入之前仍须完成实际工作流、数据归属、权限、资源关闭与取消边界，以及用户批准的验收。
+
+适配依据是现有 SDK 的公开接口：[LangChain FAISS](https://github.com/langchain-ai/langchain-community/blob/main/libs/community/langchain_community/vectorstores/faiss.py)、[Chroma Collection](https://github.com/chroma-core/chroma/blob/main/chromadb/api/models/Collection.py)、[Qdrant async API](https://qdrant.tech/documentation/tutorials-develop/async-api/)。不实现自有向量检索或排序引擎。

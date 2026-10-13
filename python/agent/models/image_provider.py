@@ -20,7 +20,9 @@ class ImageResult:
         file_path: Path | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        ...
+        self.data_url = data_url
+        self.file_path = file_path
+        self.metadata = dict(metadata) if metadata is not None else {}
 
 
 class IImageProvider(ABC):

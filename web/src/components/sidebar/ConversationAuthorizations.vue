@@ -3,6 +3,8 @@ import { onScopeDispose, ref, watch } from 'vue'
 import { api, type ApprovalAuthorization } from '@/api/client'
 import { t } from '@/i18n'
 import { approvalScopeDescription } from '@/utils/tool-presentation'
+import IconSymbol from '@/components/common/IconSymbol.vue'
+import Tooltip from '@/components/common/Tooltip.vue'
 
 const props = defineProps<{ conversationId: string }>()
 const items = ref<ApprovalAuthorization[]>([])
@@ -48,21 +50,26 @@ onScopeDispose(() => { disposed = true; generation++; controller?.abort() })
 <template>
   <section
     class="conversation-authorizations"
-    :aria-label="$t('可复用授权')"
+    :aria-label="$t('已允许的操作')"
   >
     <header>
-      <strong>{{ $t('可复用授权') }}</strong>
-      <button
-        class="text-button"
-        :disabled="loading || !!revoking"
-        @click="refresh"
-      >
-        {{ $t('刷新') }}
-      </button>
+      <strong>{{ $t('已允许的操作') }}</strong>
+      <div class="authorization-actions">
+        <Tooltip :content="$t('撤销后不再使用这次批准；正在执行的操作不受影响。')">
+          <button type="button" class="icon-button" :aria-label="$t('撤销后不再使用这次批准；正在执行的操作不受影响。')">
+            <IconSymbol name="info" :size="14" />
+          </button>
+        </Tooltip>
+        <button
+          type="button"
+          class="text-button"
+          :disabled="loading || !!revoking"
+          @click="refresh"
+        >
+          {{ $t('刷新') }}
+        </button>
+      </div>
     </header>
-    <p class="empty-copy">
-      {{ $t('撤销只影响尚未开始的操作，不会停止已开始的操作。') }}
-    </p>
     <p
       v-if="loading"
       role="status"
@@ -73,14 +80,14 @@ onScopeDispose(() => { disposed = true; generation++; controller?.abort() })
       v-else-if="!items.length && !error"
       class="empty-copy"
     >
-      {{ $t('当前没有可复用授权。') }}
+      {{ $t('当前没有已保存的批准。') }}
     </p>
     <article
       v-for="item in items"
       :key="item.approval_id"
     >
       <details>
-        <summary>{{ t(item.scope === 'task' ? '本任务内同范围操作' : '本会话内同范围操作') }}</summary>
+        <summary>{{ t(item.scope === 'task' ? '本次任务的批准' : '此对话的批准') }}</summary>
         <p
           v-for="line in approvalScopeDescription(item.resource)"
           :key="line"
@@ -90,11 +97,12 @@ onScopeDispose(() => { disposed = true; generation++; controller?.abort() })
       </details>
       <p>{{ $t('有效至：{0}', [new Date(item.expires_at).toLocaleString($i18n.locale)]) }}</p>
       <button
+        type="button"
         class="secondary-button"
         :disabled="!!revoking || loading"
         @click="revoke(item)"
       >
-        {{ revoking === item.approval_id ? $t('正在撤销…') : $t('撤销授权') }}
+        {{ revoking === item.approval_id ? $t('正在撤销…') : $t('撤销批准') }}
       </button>
     </article>
     <p
@@ -108,7 +116,9 @@ onScopeDispose(() => { disposed = true; generation++; controller?.abort() })
 </template>
 <style scoped>
 .conversation-authorizations { margin-block: var(--space-4); }
-header { display: flex; justify-content: space-between; gap: var(--space-3); }
+header { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); }
+.authorization-actions { display: flex; align-items: center; gap: var(--space-2); }
+.authorization-actions :deep(.tooltip) { inset-inline-start: auto; inset-inline-end: 0; max-width: var(--measure-240px); }
 article { padding-block: var(--space-3); border-top: var(--hairline) solid var(--rule); }
 p { font-size: var(--text-xs); overflow-wrap: anywhere; }
 </style>

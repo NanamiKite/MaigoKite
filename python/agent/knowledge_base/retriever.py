@@ -1,12 +1,7 @@
-"""Document retrieval backed by LangChain retrievers.
+"""Optional retrieval adapters using public LangChain retriever contracts.
 
-Implements the ``IRetriever`` contract with three retriever strategies:
-
-* ``VectorStoreRetriever`` -- pure vector-store similarity search
-* ``ContextualCompressionRetriever`` -- vector search followed by LLM-based
-  contextual compression to prune irrelevant results
-* ``EnsembleRetriever`` -- combines a semantic (vector) retriever with a
-  keyword (BM25) retriever and merges their results via reciprocal-rank fusion.
+These adapters accept already configured SDK stores/retrievers. They do not
+provision an index or choose a user's document corpus.
 """
 
 from __future__ import annotations
@@ -14,234 +9,167 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from langchain_core.documents import Document as LCDocument
+from langchain_core.documents import Document
+from langchain_core.language_models import BaseLanguageModel
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.vectorstores import VectorStore
+from langchain_core.vectorstores import VectorStoreRetriever as LCVectorStoreRetriever
 
 
 class RetrievalResult:
-    """A single result from a retrieval query."""
+    """A retrieved document; absent SDK scores stay unknown instead of becoming zero."""
 
-    document: LCDocument
-    score: float
-
-    def __init__(self, document: LCDocument, score: float) -> None:
+    def __init__(self, document: Document, score: float | None = None) -> None:
         self.document = document
         self.score = score
 
 
 class IRetriever(ABC):
-    """Interface for querying and retrieving documents."""
+    """Query documents; None for top_k uses the retriever's configured default."""
 
     @abstractmethod
     async def retrieve(
-        self, query: str, top_k: int = 5, filters: dict[str, Any] | None = None
+        self, query: str, top_k: int | None = None, filters: dict[str, Any] | None = None
     ) -> list[RetrievalResult]:
         ...
 
     @abstractmethod
-    async def retrieve_by_id(self, doc_id: str) -> LCDocument | None:
+    async def retrieve_by_id(self, doc_id: str) -> Document | None:
         ...
 
 
-# ---------------------------------------------------------------------------
-# Concrete retrievers
-# ---------------------------------------------------------------------------
+def _limit(top_k: int | None, default: int) -> int:
+    value = default if top_k is None else top_k
+    if value <= 0:
+        raise ValueError("top_k must be positive")
+    return value
+
+
+async def _get_document(vector_store: VectorStore, doc_id: str) -> Document | None:
+    # Unsupported ID lookup must propagate NotImplementedError, not pretend the ID is absent.
+    documents = await vector_store.aget_by_ids([doc_id])
+    return next((doc for doc in documents if doc.id == doc_id), None)
 
 
 class VectorStoreRetriever(IRetriever):
-    """Thin wrapper around LangChain's ``VectorStoreRetriever``.
+    """Text retrieval over a LangChain VectorStore with its embedding backend configured."""
 
-    Args:
-        vector_store: A LangChain-compatible vector store instance that
-                      exposes a ``as_retriever()`` method or can be wrapped
-                      in ``VectorStoreRetriever``.
-        top_k: Default number of results to return.
-    """
-
-    def __init__(self, vector_store: Any, top_k: int = 5, **kwargs: Any) -> None:
-        from langchain_community.vectorstores import VectorStoreRetriever
-
+    def __init__(self, vector_store: VectorStore, top_k: int = 5, **kwargs: Any) -> None:
         self._vector_store = vector_store
-        self._top_k = top_k
-        if hasattr(vector_store, "as_retriever"):
-            self._lc_retriever = vector_store.as_retriever(
-                search_type="similarity",
-                search_kwargs={"k": top_k, **kwargs},
-            )
-        else:
-            # Fallback: the store itself may already be compatible.
-            self._lc_retriever = VectorStoreRetriever(
-                vectorstore=vector_store,
-                search_type="similarity",
-                search_kwargs={"k": top_k, **kwargs},
-            )
+        self._top_k = _limit(top_k, 5)
+        self._lc_retriever = vector_store.as_retriever(
+            search_type="similarity", search_kwargs={**kwargs, "k": self._top_k},
+        )
 
     async def retrieve(
-        self, query: str, top_k: int = 5, filters: dict[str, Any] | None = None
+        self, query: str, top_k: int | None = None, filters: dict[str, Any] | None = None
     ) -> list[RetrievalResult]:
-        """Retrieve documents for *query*.
-
-        Args:
-            query: Natural-language search string.
-            top_k: Number of results to return.
-            filters: Optional metadata filter dict passed through to the
-                     underlying vector store.
-
-        Returns:
-            A list of ``RetrievalResult`` objects ordered by relevance.
-        """
-        kwargs: dict[str, Any] = {"k": top_k}
-        if filters:
+        limit = _limit(top_k, self._top_k)
+        kwargs: dict[str, Any] = {"k": limit}
+        if filters is not None:
             kwargs["filter"] = filters
-        lc_docs = self._lc_retriever.invoke(query)
-        return [RetrievalResult(document=doc, score=0.0) for doc in lc_docs]
+        documents = await self._lc_retriever.ainvoke(query, **kwargs)
+        return [RetrievalResult(document) for document in documents[:limit]]
 
-    async def retrieve_by_id(self, doc_id: str) -> LCDocument | None:
-        """Fetch a single document by its ID.
-
-        Uses the underlying store's ``get`` / ``fetch`` capability when available.
-
-        Args:
-            doc_id: Unique document identifier.
-
-        Returns:
-            The ``LCDocument`` if found, otherwise ``None``.
-        """
-        vc = getattr(self._vector_store, "vectorstore", self._vector_store)
-        if hasattr(vc, "get"):
-            result = vc.get(ids=[doc_id])
-            if result and result.get("documents"):
-                docs = []
-                for i, doc_content in enumerate(result["documents"]):
-                    meta = result.get("metadatas", [{}])[i] if result.get("metadatas") else {}
-                    docs.append(LCDocument(page_content=doc_content, metadata=meta))
-                return docs[0] if docs else None
-        return None
+    async def retrieve_by_id(self, doc_id: str) -> Document | None:
+        return await _get_document(self._vector_store, doc_id)
 
 
 class ContextualCompressionRetriever(IRetriever):
-    """Combines a base vector store retriever with LLM-based contextual compression.
+    """Apply the SDK's LLM extractor to an explicitly supplied base retriever.
 
-    Uses LangChain's ``ContextualCompressionRetriever`` paired with
-    ``LLMChainFilter`` so that an LLM evaluates each retrieved document and
-    drops those whose content is not relevant to the original query.
-
-    Args:
-        base_retriever: A LangChain retriever instance providing initial candidates.
-        llm: A LangChain-compatible LLM used for contextual filtering.
-        top_k: Default number of results before compression.
+    Filters are supported only for a vector-store retriever whose search kwargs
+    can be scoped before any documents are sent to the compressor model.
     """
 
-    def __init__(self, base_retriever: Any, llm: Any, top_k: int = 20) -> None:
-        from langchain.retrievers import ContextualCompressionRetriever
-        from langchain.retrievers.document_compressors import LLMChainExtractor
+    def __init__(self, base_retriever: BaseRetriever, llm: BaseLanguageModel, top_k: int = 20) -> None:
+        try:
+            from langchain_classic.retrievers import ContextualCompressionRetriever as LCCompressionRetriever
+            from langchain_classic.retrievers.document_compressors import LLMChainExtractor
+        except ImportError as exc:
+            raise ImportError("Compression retrieval requires the optional vectorstores dependencies") from exc
 
-        compressor = LLMChainExtractor.from_llm(llm)
-        self._compression_retriever = ContextualCompressionRetriever(
-            base_compressor=compressor,
-            base_retriever=base_retriever,
+        self._top_k = _limit(top_k, 20)
+        if isinstance(base_retriever, LCVectorStoreRetriever):
+            base_retriever = base_retriever.model_copy(
+                update={"search_kwargs": {**base_retriever.search_kwargs, "k": self._top_k}},
+            )
+        self._base_retriever = base_retriever
+        self._compression_retriever = LCCompressionRetriever(
+            base_compressor=LLMChainExtractor.from_llm(llm), base_retriever=base_retriever,
         )
-        self._top_k = top_k
 
     async def retrieve(
-        self, query: str, top_k: int = 5, filters: dict[str, Any] | None = None
+        self, query: str, top_k: int | None = None, filters: dict[str, Any] | None = None
     ) -> list[RetrievalResult]:
-        """Retrieve and compress documents for *query*.
+        limit = _limit(top_k, self._top_k)
+        retriever = self._compression_retriever
+        base = self._base_retriever
+        if filters is not None and not isinstance(base, LCVectorStoreRetriever):
+            raise NotImplementedError("Metadata filtering is not implemented for this base retriever")
+        if isinstance(base, LCVectorStoreRetriever):
+            kwargs = {**base.search_kwargs, "k": max(limit, self._top_k)}
+            if filters is not None:
+                kwargs["filter"] = filters
+            # Per-call copies keep concurrent queries from changing each other's scope.
+            retriever = retriever.model_copy(
+                update={"base_retriever": base.model_copy(update={"search_kwargs": kwargs})},
+            )
+        documents = await retriever.ainvoke(query)
+        return [RetrievalResult(document) for document in documents[:limit]]
 
-        Args:
-            query: Natural-language search string.
-            top_k: Number of final (post-compression) results.
-            filters: Not supported with LLM compressor; ignored.
-
-        Returns:
-            A list of ``RetrievalResult`` objects.
-        """
-        lc_docs = self._compression_retriever.invoke(query)
-        return [RetrievalResult(document=doc, score=0.0) for doc in lc_docs]
-
-    async def retrieve_by_id(self, doc_id: str) -> LCDocument | None:
-        base = getattr(self._compression_retriever, "base_retriever", None)
-        if base is not None:
-            retriever_cls = type(base).__name__
-            if hasattr(base, "vectorstore"):
-                vc = base.vectorstore
-                if hasattr(vc, "get"):
-                    result = vc.get(ids=[doc_id])
-                    if result and result.get("documents"):
-                        docs = []
-                        for i, doc_content in enumerate(result["documents"]):
-                            meta = result.get("metadatas", [{}])[i] if result.get("metadatas") else {}
-                            docs.append(LCDocument(page_content=doc_content, metadata=meta))
-                        return docs[0] if docs else None
-        return None
+    async def retrieve_by_id(self, doc_id: str) -> Document | None:
+        if not isinstance(self._base_retriever, LCVectorStoreRetriever):
+            raise NotImplementedError("ID lookup is not implemented for this base retriever")
+        return await _get_document(self._base_retriever.vectorstore, doc_id)
 
 
 class EnsembleRetriever(IRetriever):
-    """Combines semantic and keyword search via reciprocal-rank fusion.
+    """Fuse semantic and caller-provided keyword results using the SDK's RRF.
 
-    Wraps LangChain's ``EnsembleRetriever`` which pairs a
-    ``VectorStoreRetriever`` (semantic) with a ``BM25Retriever``
-    (keyword) and merges scores using reciprocal rank fusion.
-
-    Args:
-        vector_store: A LangChain-compatible vector store.
-        llm: Used to initialise the semantic embedding function when the
-             vector store does not already have one.
-        top_k: Default number of combined results to return.
+    A keyword retriever must be built from the intended corpus by the caller;
+    a similarity search for a blank string cannot enumerate that corpus.
     """
 
     def __init__(
-        self,
-        vector_store: Any,
-        llm: Any | None = None,
-        top_k: int = 5,
+        self, vector_store: VectorStore, llm: BaseLanguageModel | None = None,
+        top_k: int = 5, *, keyword_retriever: BaseRetriever | None = None,
     ) -> None:
-        from langchain.retrievers import EnsembleRetriever as LC_EnsembleRetriever
-        from langchain_community.retrievers import BM25Retriever
-        from langchain_community.vectorstores import VectorStoreRetriever
+        if llm is not None:
+            raise ValueError("Configure embeddings on the vector store; this retriever does not use an llm")
+        if keyword_retriever is None:
+            raise NotImplementedError("Keyword index construction is not implemented; supply keyword_retriever")
+        try:
+            from langchain_classic.retrievers import EnsembleRetriever as LCEnsembleRetriever
+        except ImportError as exc:
+            raise ImportError("Ensemble retrieval requires the optional vectorstores dependencies") from exc
 
-        semantic_retriever = VectorStoreRetriever(
-            vectorstore=vector_store,
-            search_type="similarity",
-            search_kwargs={"k": top_k * 2},
-        )
-
-        # BM25 keyword retriever -- reuses stored documents.
-        bm25_retriever = BM25Retriever.from_documents(
-            vector_store.similarity_search(" ", k=50) if hasattr(vector_store, "similarity_search") else [],
-        )
-        bm25_retriever.k = top_k * 2
-
-        self._ensemble = LC_EnsembleRetriever(
-            retrievers=[semantic_retriever, bm25_retriever],
+        self._vector_store = vector_store
+        self._top_k = _limit(top_k, 5)
+        self._keyword_retriever = keyword_retriever
+        self._ensemble = LCEnsembleRetriever(
+            retrievers=[
+                vector_store.as_retriever(search_kwargs={"k": self._top_k * 2}),
+                keyword_retriever,
+            ],
             weights=[0.5, 0.5],
         )
-        self._vector_store = vector_store
-        self._top_k = top_k
 
     async def retrieve(
-        self, query: str, top_k: int = 5, filters: dict[str, Any] | None = None
+        self, query: str, top_k: int | None = None, filters: dict[str, Any] | None = None
     ) -> list[RetrievalResult]:
-        """Retrieve documents using both semantic and keyword signals.
+        limit = _limit(top_k, self._top_k)
+        if filters is not None:
+            # Filtering only the vector branch would leak unfiltered keyword results.
+            raise NotImplementedError("Metadata filtering across both ensemble branches is not implemented")
+        ensemble = self._ensemble.model_copy(update={
+            "retrievers": [
+                self._vector_store.as_retriever(search_kwargs={"k": limit * 2}),
+                self._keyword_retriever,
+            ],
+        })
+        documents = await ensemble.ainvoke(query)
+        return [RetrievalResult(document) for document in documents[:limit]]
 
-        Args:
-            query: Natural-language search string.
-            top_k: Number of merged results to return.
-            filters: Not supported by ensemble retriever; ignored.
-
-        Returns:
-            A list of ``RetrievalResult`` objects.
-        """
-        lc_docs = self._ensemble.invoke(query)[:top_k]
-        return [RetrievalResult(document=doc, score=0.0) for doc in lc_docs]
-
-    async def retrieve_by_id(self, doc_id: str) -> LCDocument | None:
-        vc = self._vector_store
-        if hasattr(vc, "get"):
-            result = vc.get(ids=[doc_id])
-            if result and result.get("documents"):
-                docs = []
-                for i, doc_content in enumerate(result["documents"]):
-                    meta = result.get("metadatas", [{}])[i] if result.get("metadatas") else {}
-                    docs.append(LCDocument(page_content=doc_content, metadata=meta))
-                return docs[0] if docs else None
-        return None
+    async def retrieve_by_id(self, doc_id: str) -> Document | None:
+        return await _get_document(self._vector_store, doc_id)

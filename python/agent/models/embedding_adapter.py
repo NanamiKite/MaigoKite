@@ -1,66 +1,24 @@
-"""EmbeddingAdapter – LangChain-backed implementation of IEmbeddingProvider.
+"""Optional embedding adapter using LangChain's public async Embeddings contract.
 
-Wraps LangChain embedding classes behind the stable ``IEmbeddingProvider``
-contract so the rest of the Agent Core remains provider-agnostic.
-
-Supported providers:
-    * ``openai`` – :class:`langchain_openai.OpenAIEmbeddings`
-    * ``bge`` – local sentence-transformers embeddings (BGE-M3)
-    * ``gte`` – GTE embedding models via sentence-transformers
+Local model loading remains planned. A caller can supply an already configured
+SDK backend without making the chat installation depend on a local ML stack.
 """
 
 from __future__ import annotations
 
-import os
+import math
 from typing import Any
 
-from langchain_openai import OpenAIEmbeddings
-from sentence_transformers import SentenceTransformerEmbeddings
+from langchain_core.embeddings import Embeddings
 
 from agent.models.embedding_provider import IEmbeddingProvider
 
-# ------------------------------------------------------------------
-# Private dimension lookup tables
-# ------------------------------------------------------------------
-
-_BGE_DIMENSIONS: dict[str, int] = {
-    "bge-large-en": 1024,
-    "bge-large-zh": 1024,
-    "bge-m3": 1024,
-}
-
-_GTE_DIMENSIONS: dict[str, int] = {
-    "gte-large": 1024,
-    "gte-base": 768,
-}
-
-_OPENAI_DIMENSIONS: dict[str, int] = {
-    "text-embedding-ada-002": 1536,
-    "text-embedding-3-small": 1536,
-    "text-embedding-3-large": 3072,
-}
-
-
-def _resolve_dimension(provider: str, model: str, dimensions: dict[str, int]) -> int:
-    """Return the embedding dimension for *provider* / *model*.
-
-    Falls back to 1024 when the model name is unknown.
-    """
-    return dimensions.get(model, 1024)
-
 
 class EmbeddingAdapter(IEmbeddingProvider):
-    """LangChain-backed embedding adapter.
+    """Adapt an SDK backend; dimensions come from configuration or actual vectors.
 
-    Args:
-        provider: Provider identifier (``"openai"``, ``"bge"``, ``"gte"``).
-        model: Model name passed to the underlying embedding class.
-        embed_batch_size: Maximum number of texts sent per embedding batch.
-
-    Example::
-
-        adapter = EmbeddingAdapter(provider="bge", model="bge-m3")
-        vectors = await adapter.embed(["hello world"])
+    An injected backend is owned by its caller. BGE/GTE need such a backend until
+    local loading and its dependency/lifecycle policy are implemented.
     """
 
     def __init__(
@@ -68,76 +26,72 @@ class EmbeddingAdapter(IEmbeddingProvider):
         provider: str = "bge",
         model: str = "bge-m3",
         embed_batch_size: int = 64,
+        *,
+        backend: Embeddings | None = None,
+        dimension: int | None = None,
         **extra: Any,
     ) -> None:
         self.provider = provider.lower()
+        if self.provider not in {"openai", "bge", "gte"}:
+            raise ValueError("Unsupported embedding provider; expected openai, bge or gte")
+        if embed_batch_size <= 0:
+            raise ValueError("embed_batch_size must be positive")
+        configured_dimension = dimension if dimension is not None else extra.get("dimensions")
+        if configured_dimension is not None and (
+            type(configured_dimension) is not int or configured_dimension <= 0
+        ):
+            raise ValueError("Embedding dimension must be a positive integer")
         self.model = model
         self.embed_batch_size = embed_batch_size
-        self._extra = extra
+        self._dimension: int | None = configured_dimension
 
-        if self.provider == "openai":
-            api_key = os.environ.get("OPENAI_API_KEY")
-            if not api_key:
-                raise RuntimeError(
-                    "Provider 'openai' requires the environment variable "
-                    "'OPENAI_API_KEY' to be set."
-                )
-            kwargs: dict[str, Any] = {
-                "model": model,
-                "chunk_size": embed_batch_size,
-            }
-            kwargs.update({k: v for k, v in extra.items()})
-            self._embeddings = OpenAIEmbeddings(**kwargs)
-        elif self.provider in ("bge", "gte"):
-            kwargs = {
-                "model_name": model,
-                "model_kwargs": extra.get("model_kwargs", {}),
-            }
-            kwargs.update({k: v for k, v in extra.items()})
-            self._embeddings = SentenceTransformerEmbeddings(**kwargs)
+        if backend is not None:
+            if extra:
+                raise ValueError("Configure an injected embedding backend directly; extra options would be ignored")
+            self._embeddings = backend
+        elif self.provider == "openai":
+            from langchain_openai import OpenAIEmbeddings
+
+            # The SDK accepts an explicit key or its documented environment setting.
+            self._embeddings = OpenAIEmbeddings(model=model, chunk_size=embed_batch_size, **extra)
         else:
-            raise ValueError(
-                f"Unsupported embedding provider '{self.provider}'. "
-                f"Supported: openai, bge, gte"
+            raise NotImplementedError(
+                "Local BGE/GTE model loading is not implemented; supply a configured LangChain Embeddings backend"
             )
 
-    # ------------------------------------------------------------------
-    # IEmbeddingProvider implementation
-    # ------------------------------------------------------------------
+    def _check_vectors(self, vectors: list[list[float]], expected_count: int) -> None:
+        if len(vectors) != expected_count:
+            raise ValueError("Embedding backend returned an unexpected number of vectors")
+        if not vectors:
+            return
+        dimension = len(vectors[0])
+        if not dimension or any(
+            len(vector) != dimension or any(not math.isfinite(value) for value in vector)
+            for vector in vectors
+        ):
+            raise ValueError("Embedding backend returned empty, inconsistent or non-finite vectors")
+        if self._dimension is not None and dimension != self._dimension:
+            raise ValueError("Embedding dimension does not match the configured or previously observed dimension")
+        self._dimension = dimension
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings for a batch of texts.
-
-        Args:
-            texts: List of text strings to embed.
-
-        Returns:
-            List of embedding vectors corresponding to *texts*.
-        """
-        return self._embeddings.embed_documents(texts)
+        if not texts:
+            return []
+        vectors = await self._embeddings.aembed_documents(texts)
+        self._check_vectors(vectors, len(texts))
+        return vectors
 
     async def embed_single(self, text: str) -> list[float]:
-        """Generate an embedding for a single text.
-
-        Args:
-            text: Text string to embed.
-
-        Returns:
-            Embedding vector.
-        """
-        return self._embeddings.embed_query(text)
+        vector = await self._embeddings.aembed_query(text)
+        self._check_vectors([vector], 1)
+        return vector
 
     @property
     def model_name(self) -> str:
-        """Return the currently-selected model name."""
         return self.model
 
     @property
     def dimension(self) -> int:
-        """Return the dimensionality of the embedding vectors."""
-        if self.provider == "openai":
-            return _resolve_dimension("openai", self.model, _OPENAI_DIMENSIONS)
-        if self.provider == "gte":
-            return _resolve_dimension("gte", self.model, _GTE_DIMENSIONS)
-        # Default to BGE dimensions.
-        return _resolve_dimension("bge", self.model, _BGE_DIMENSIONS)
+        if self._dimension is None:
+            raise RuntimeError("Embedding dimension is unknown; configure it or generate an embedding first")
+        return self._dimension

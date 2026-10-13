@@ -1,14 +1,7 @@
-"""ImageAdapter – LangChain-backed implementation of IImageProvider.
+"""Experimental OpenAI image adapter; returns remote URLs or inline image data.
 
-Wraps OpenAI image-generation APIs behind the stable
-``IImageProvider`` contract so the rest of the Agent Core never needs
-to import provider-specific SDKs directly.
-
-Supported providers:
-    * ``openai`` – :class:`langchain_openai.ChatOpenAI` with tool/
-      function calling for image generation, or the standalone
-      ``OpenAIImages`` helper when available.
-    * ``dall-e`` – maps to the OpenAI DALL-E model family.
+Local image persistence is not implemented and is rejected before a request.
+The adapter is not connected to the Core tool catalog.
 """
 
 from __future__ import annotations
@@ -17,7 +10,6 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
-from langchain_openai import ChatOpenAI
 from openai import AsyncOpenAI
 
 from agent.models.image_provider import IImageProvider, ImageResult
@@ -61,7 +53,7 @@ def _resolve_dalle_model(model: str) -> str:
 # ------------------------------------------------------------------
 
 class ImageAdapter(IImageProvider):
-    """LangChain-backed image-generation adapter.
+    """SDK-backed image-generation adapter.
 
     Currently delegates directly to the ``openai`` Python SDK which
     is the same library LangChain uses under the hood.  This avoids
@@ -72,7 +64,7 @@ class ImageAdapter(IImageProvider):
         model: Model name such as ``"dall-e-3"`` or ``"dall-e-2"``.
         size: Output image size string.
         quality: Image quality preset (``"standard"`` or ``"hd"``).
-        output_dir: Directory where generated images are saved locally.
+        output_dir: Reserved for local saving; non-None values are currently rejected.
 
     Example::
 
@@ -89,6 +81,11 @@ class ImageAdapter(IImageProvider):
         output_dir: Optional[Path] = None,
         **extra: Any,
     ) -> None:
+        if output_dir is not None:
+            # Reject before a billable call instead of returning a path that was never written.
+            raise NotImplementedError("Saving generated images is not implemented; omit output_dir")
+        if provider.lower() not in {"openai", "dall-e"}:
+            raise ValueError("Unsupported image provider; expected openai or dall-e")
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise RuntimeError(
@@ -168,17 +165,12 @@ class ImageAdapter(IImageProvider):
         if hasattr(result_data, "model"):
             metadata["model"] = result_data.model
 
-        # Optionally save to disk.
-        file_path: Path | None = None
-        if urls and self.output_dir:
-            self.output_dir.mkdir(parents=True, exist_ok=True)
-            file_path = self.output_dir / f"{metadata.get('created', 'image')}.png"
-            # Keep only the first URL for simplicity; the caller can
-            # retrieve the rest from the ``urls`` list if needed.
+        if not urls:
+            raise ValueError("Image provider returned no image data or URL")
 
         return ImageResult(
-            data_url=urls[0] if urls else "",
-            file_path=file_path,
+            data_url=urls[0],
+            file_path=None,
             metadata=metadata,
         )
 
@@ -186,3 +178,7 @@ class ImageAdapter(IImageProvider):
     def model_name(self) -> str:
         """Return the currently-selected image-generation model."""
         return self.model_name_str
+
+    async def aclose(self) -> None:
+        """Release the HTTP client owned by this adapter after generation finishes."""
+        await self._client.close()

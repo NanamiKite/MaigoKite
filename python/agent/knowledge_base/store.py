@@ -1,14 +1,11 @@
-"""Document storage backed by LangChain ``Document``.
-
-Replaces the custom ``Document`` data class with ``langchain_core.documents.Document``
-while keeping the ``IDocumentStore`` abstract contract intact.
-"""
+"""Document storage using LangChain records, independent of the chat Repository."""
 
 from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
 from typing import Any
+from uuid import uuid4
 
 from langchain_core.documents import Document as LCDocument
 
@@ -55,21 +52,8 @@ class InMemoryDocumentStore(IDocumentStore):
         self._docs: dict[str, LCDocument] = {}
 
     async def add(self, document: LCDocument) -> str:
-        """Add a single document.
-
-        Args:
-            document: A LangChain ``Document`` instance.
-
-        Returns:
-            The document's unique identifier (taken from ``metadata["id"]`` or generated).
-        """
-        async with self._lock:
-            doc_id = document.metadata.get("id", "")
-            if not doc_id:
-                doc_id = str(len(self._docs))
-                document.metadata = {**document.metadata, "id": doc_id}
-            self._docs[doc_id] = document
-            return doc_id
+        """Insert a document; duplicate explicit IDs must be changed via update()."""
+        return (await self.add_many([document]))[0]
 
     async def add_many(self, documents: list[LCDocument]) -> list[str]:
         """Add multiple documents at once.
@@ -81,16 +65,24 @@ class InMemoryDocumentStore(IDocumentStore):
             List of assigned document IDs.
         """
         async with self._lock:
-            ids: list[str] = []
+            pending: dict[str, LCDocument] = {}
             for doc in documents:
-                doc_id = doc.metadata.get("id", "")
-                if not doc_id:
-                    doc_id = str(len(self._docs))
-                    updated_meta = {**doc.metadata, "id": doc_id}
-                    doc = LCDocument(page_content=doc.page_content, metadata=updated_meta)
-                self._docs[doc_id] = doc
-                ids.append(doc_id)
-            return ids
+                metadata_id = doc.metadata.get("id")
+                if metadata_id is not None and (not isinstance(metadata_id, str) or not metadata_id):
+                    raise ValueError("Document metadata id must be a non-empty string")
+                if doc.id and metadata_id and doc.id != metadata_id:
+                    raise ValueError("Document id and metadata id must match")
+                # UUIDs do not reuse an existing key after an earlier document is deleted.
+                doc_id = doc.id or metadata_id or str(uuid4())
+                if doc_id in self._docs or doc_id in pending:
+                    raise ValueError("Document id already exists; use update to replace its content")
+                stored = doc.model_copy(deep=True)
+                stored.id = doc_id
+                stored.metadata["id"] = doc_id
+                pending[doc_id] = stored
+            # Validate the whole batch before changing the store.
+            self._docs.update(pending)
+            return list(pending)
 
     async def get(self, doc_id: str) -> LCDocument | None:
         """Retrieve a single document by ID.
@@ -102,7 +94,8 @@ class InMemoryDocumentStore(IDocumentStore):
             The ``LCDocument`` if found, otherwise ``None``.
         """
         async with self._lock:
-            return self._docs.get(doc_id)
+            document = self._docs.get(doc_id)
+            return document.model_copy(deep=True) if document is not None else None
 
     async def delete(self, doc_id: str) -> None:
         """Delete a document by ID.
@@ -126,12 +119,15 @@ class InMemoryDocumentStore(IDocumentStore):
         async with self._lock:
             doc = self._docs.get(doc_id)
             if doc is None:
-                return
+                raise KeyError(doc_id)
+            if metadata is not None and "id" in metadata and metadata["id"] != doc_id:
+                raise ValueError("Updating content must not change the document id")
             new_metadata = {**(doc.metadata or {}), **(metadata or {})}
             self._docs[doc_id] = LCDocument(
+                id=doc_id,
                 page_content=content,
                 metadata=new_metadata,
-            )
+            ).model_copy(deep=True)
 
     async def count(self) -> int:
         """Return the total number of stored documents.

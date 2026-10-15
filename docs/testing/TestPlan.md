@@ -27,6 +27,31 @@
 | `test_context_optimization.py` | 结构定义预算、配对、摘要保护/取消、用量和客户端轮换 |
 | `python/tests/spike` | 选型协议/真实服务验收验证，不代替真实生产入口 |
 | `scripts/acceptance` | 关闭清理、MCP 取消复用、事件分页及运行时收尾门禁；由 `scripts/run_tests.sh` 默认纳入 |
+| `scripts/acceptance/test_personal_agent.py` | 真实 Core 子进程与 TCP HTTP/WS：聊天工具循环、拒绝后继续、停止、搜索、子模型、扩展重启、记忆/分岔和进程输入 |
+| `scripts/acceptance/gui_personal_agent.py` | 显式运行的真实 Web/Chromium 验收；不由默认后端 CI 收集，缺少构建或真实浏览器时不得记为通过 |
+
+### 功能验收入口
+
+安装锁定的 `dev` 检查依赖后，可单独运行后端产品验收及进程恢复；此命令不包含真实付费模型验收：
+
+```bash
+PYTHONPATH=python uv run --no-sync python -m pytest \
+  scripts/acceptance python/tests/integration/test_langgraph_process_recovery.py \
+  python/tests/integration/test_http_api.py -vv --tb=short
+```
+
+Web/浏览器验收须先构建 `VITE_MOCK=0` 的真实 UI，再显式运行；`MAIGOKITE_ACCEPTANCE_CHROME` 可指定已有 Chrome/Chromium。用例不会自动安装浏览器、关闭沙箱或连接用户账号：
+
+```bash
+# 在项目根目录执行；构建脚本读取 web/ 中的依赖。
+(cd web && VITE_MOCK=0 npm run build:web)
+PYTHONPATH=python MAIGOKITE_ACCEPTANCE_WEB_DIR="$PWD/web/dist" \
+  uv run --no-sync python -m pytest scripts/acceptance/gui_personal_agent.py -vv --tb=short
+```
+
+PowerShell 可先设置 `$env:PYTHONPATH = "python"`，再运行同样的 `uv run --no-sync python -m pytest ...` 后端命令；这不代表 Windows 原生验收已通过。GUI 用例的当前运行证据为 Linux，不能外推为 Electron 安装包验收。
+
+新增产品验收只替代模型 HTTP/SSE 输出，Core、LangGraph、PermissionPolicy、Repository、工具、MCP 与 GUI 保持真实；沿用现有进程恢复测试的启动入口。子 Core 使用独立工作区/SQLite/checkpoint，剥离继承的模型/Tracing 密钥。真实浏览器测试访问公开测试页面，Cookie 为自建 canary，不包含真实登录；命令 stdin/stop 使用测试自己启动的进程及显式完全访问，不视为 OS 沙箱隔离验收。
 
 完整批次 HITL 必须验证全部决定齐备前无写入，旧预期“首项批准立即写第一个文件”不再适用。多项文件批准与部分批准后重启已有定向记录，但不覆盖后续驳回语义调整；两者的验证范围须分开，不能删除失败测试后宣称通过。
 
@@ -49,7 +74,7 @@ lint/类型检查失败后，仍继续执行测试并保留失败状态，不使
 
 此工作流不发布制品、不启动桌面窗口，也不验证独立安装包或真实模型服务。浏览器测试使用替身，不能计为真实 Chromium 验收；Bubblewrap 用例因宿主限制跳过时，须查看 pytest 的跳过原因。
 
-Core 的命令/搜索契约用例在执行器边界使用替身，断言规范化目录、沙箱模式、网络权限与审批前不执行；另测沙箱不可用时返回结构化失败且不回退到宿主进程。真实 Bubblewrap 用例保留 `pwd`、工作区搜索、宿主读取隔离及工作区写入断言，只有实际探测可用时运行，跳过不计为隔离验收通过，不通过修改系统安全设置让测试通过。
+Core 的命令契约用例在执行器边界使用替身，断言规范化目录、沙箱模式、网络权限与审批前不执行；另测沙箱不可用时返回 `SANDBOX_UNAVAILABLE` 且不回退到宿主进程。受限 `glob/grep` 单独验收可信 ripgrep、固定参数、临时工作目录、最小环境与有限只读快照，命令沙箱不可用不应阻塞搜索；缺少可信 ripgrep 时返回 `RIPGREP_UNAVAILABLE`，不改走 shell 或任意命令。真实搜索验证默认 ignore/隐藏文件过滤、显式正向 glob 的原生包含覆盖语义、始终生效的敏感路径排除、符号链接、快照读取和临时目录回收，不 mock 搜索结果。真实 Bubblewrap 用例保留 `pwd`、宿主读取隔离及工作区写入断言，只有实际探测可用时运行，跳过不计为隔离验收通过，不通过修改系统安全设置让测试通过。
 
 前端用例使用真实 router、i18n 和可交互的选择/确认组件，按页面实际请求提供 API fixtures。未 mock 的 `fetch` 会被阻止并使测试失败，即使组件捕获了异常；不得连接开发者正在运行的后端作为隐式测试依赖。
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -356,34 +357,46 @@ async def _assert_scoped_workspace_search(core, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_glob_and_grep_pass_confined_workspace_defaults_to_executor(core, tmp_path, monkeypatch):
-    invocations = []
+async def test_glob_and_grep_use_trusted_search_without_command_sandbox(core, tmp_path, monkeypatch):
+    unavailable = AsyncMock(side_effect=SandboxUnavailableError("fixture: command isolation unavailable"))
+    spawn = AsyncMock(wraps=asyncio.create_subprocess_exec)
+    monkeypatch.setattr(SandboxExecutor, "execute_argv", unavailable)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setenv("MAIGOKITE_SEARCH_SECRET", "fixture-do-not-inherit")
+    monkeypatch.setenv("RIPGREP_CONFIG_PATH", str(tmp_path / "untrusted-rg-config"))
 
-    async def execute(executor, args, **options):
-        assert executor.workspace_root == executor.workdir == tmp_path.resolve()
-        assert executor.mode == "read_only" and executor.allow_network is False
-        assert args[0] == "rg" and args[-1] == "." and "--no-config" in args
-        invocations.append(args)
-        if "--files" in args:
-            assert args[args.index("--glob") + 1] == "workspace-only.txt"
-            return SandboxExecutionResult(exit_code=0, stdout="./workspace-only.txt\0", sandboxed=True)
-        assert args[args.index("--") + 1] == "workspace needle"
-        match = {"type": "match", "data": {
-            "path": {"text": "./workspace-only.txt"}, "line_number": 1,
-            "lines": {"text": "workspace needle"},
-        }}
-        return SandboxExecutionResult(exit_code=0, stdout=json.dumps(match), sandboxed=True)
-
-    monkeypatch.setattr(SandboxExecutor, "execute_argv", execute)
+    # Run the real policy, file reader, snapshot builder and installed ripgrep.
+    # Only observe the public subprocess boundary; do not replace search results.
     await _assert_scoped_workspace_search(core, tmp_path)
-    assert len(invocations) == 2
+    unavailable.assert_not_awaited()
+    assert spawn.await_count == 3  # glob discovery; grep discovery and snapshot search
+    calls = spawn.await_args_list
+    for call in calls:
+        executable = Path(call.args[0])
+        directory = Path(call.kwargs["cwd"])
+        environment = call.kwargs["env"]
+        assert executable.is_absolute() and not executable.is_relative_to(tmp_path)
+        assert executable.name in {"rg", "rg.exe"}
+        assert not directory.is_relative_to(tmp_path)
+        assert environment["PATH"] == str(executable.parent)
+        assert environment["HOME"] == str(directory)
+        assert not {
+            "MAIGOKITE_SEARCH_SECRET", "RIPGREP_CONFIG_PATH", "OPENAI_API_KEY", "PYTHONPATH",
+        } & environment.keys()
+        assert {"--no-config", "--no-follow", "--no-ignore-parent", "--no-ignore-global"} <= set(call.args)
+        assert not {"--pre", "--follow", "--search-zip"} & set(call.args)
+        assert not directory.exists(), "temporary search directories must be reclaimed"
+    assert calls[0].args[calls[0].args.index("--glob") + 1] == "workspace-only.txt"
+    assert calls[0].args[-2:] == ("--", str(tmp_path.resolve()))
+    assert calls[1].args[-2:] == ("--", str(tmp_path.resolve()))
+    assert calls[2].args[-3:] == ("--", "workspace needle", "files")
+    assert {"--json", "--no-ignore", "--hidden"} <= set(calls[2].args)
+    assert calls[1].kwargs["cwd"] == calls[2].kwargs["cwd"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool,arguments", [
     ("exec_command", {"command": "pwd", "shell": "direct"}),
-    ("glob", {"pattern": "*.txt"}),
-    ("grep", {"pattern": "needle"}),
 ])
 async def test_unavailable_sandbox_reports_failure_without_host_fallback(core, monkeypatch, tool, arguments):
     unavailable = AsyncMock(side_effect=SandboxUnavailableError("fixture: isolation unavailable"))
@@ -403,6 +416,43 @@ async def test_unavailable_sandbox_reports_failure_without_host_fallback(core, m
     failures = [payload for kind, payload in events if kind == "tool.failed"]
     assert len(failures) == 1
     assert failures[0]["error_code"] == "SANDBOX_UNAVAILABLE"
+    assert failures[0]["user_hint"]
+    assert result["response"] == failures[0]["summary"]
+    assert not any(kind == "tool.completed" for kind, _ in events)
+    assert (await core.repository.get_tool_call(failures[0]["tool_call_id"]))["status"] == "failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool,arguments", [
+    ("glob", {"pattern": "*.txt"}),
+    ("grep", {"pattern": "needle"}),
+])
+async def test_unavailable_ripgrep_reports_failure_without_command_fallback(
+    core, tmp_path, monkeypatch, tool, arguments,
+):
+    # A workspace-supplied executable must not satisfy the trusted dependency.
+    executable = tmp_path / "rg"
+    executable.write_text("untrusted workspace executable", encoding="utf-8")
+    executable.chmod(0o755)
+    (tmp_path / "rg.exe").write_bytes(b"untrusted workspace executable")
+    monkeypatch.setenv("PATH", str(tmp_path))
+    command = AsyncMock(side_effect=AssertionError("search must not request arbitrary command execution"))
+    spawn = AsyncMock(side_effect=AssertionError("untrusted search must not start a host process"))
+    monkeypatch.setattr(SandboxExecutor, "execute_argv", command)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    events = []
+
+    async def capture(kind, payload):
+        events.append((kind, payload))
+
+    core.event_bus.subscribe("*", capture)
+    conversation = await core.create_conversation(permission_mode="read_only")
+    result = await core.run(f"/tool {tool} " + json.dumps(arguments), {"conversation_id": conversation["id"]})
+    command.assert_not_awaited()
+    spawn.assert_not_awaited()
+    failures = [payload for kind, payload in events if kind == "tool.failed"]
+    assert len(failures) == 1
+    assert failures[0]["error_code"] == "RIPGREP_UNAVAILABLE"
     assert failures[0]["user_hint"]
     assert result["response"] == failures[0]["summary"]
     assert not any(kind == "tool.completed" for kind, _ in events)

@@ -639,8 +639,8 @@ class SandboxExecutor:
         ):
             if Path(source).exists():
                 command.extend(["--ro-bind", source, source])
-        for source in self._read_mounts:
-            command.extend(["--ro-bind", str(source), str(source)])
+        for mount_path in self._read_mounts:
+            command.extend(["--ro-bind", str(mount_path), str(mount_path)])
 
         # Bind destinations need their parent hierarchy in the fresh mount namespace.
         parent = self.workspace_root.parent
@@ -760,7 +760,8 @@ class SandboxExecutor:
                 directory.is_relative_to(root) for root in roots
             )
         return directory.is_relative_to(self.workspace_root) or any(
-            directory.is_relative_to(root) for root in [*(Path(path) for path in self._SYSTEM_MOUNTS), *self._read_mounts]
+            directory.is_relative_to(root)
+            for root in [*(Path(path) for path in self._SYSTEM_MOUNTS), *self._read_mounts]
         )
 
     def _execution_path(self) -> str:

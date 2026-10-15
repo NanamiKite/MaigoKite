@@ -81,6 +81,7 @@ async def _start_model_server(*, two_writes: bool = False) -> tuple[web.AppRunne
 
 async def _start_core(
     tmp_path: Path, port: int, model_base_url: str, *, barrier: str = "", observe_writes: bool = False,
+    web_dir: Path | None = None,
 ) -> tuple[asyncio.subprocess.Process, str]:
     python_root = Path(__file__).resolve().parents[2]
     repository_root = python_root.parent
@@ -88,6 +89,13 @@ async def _start_core(
     for name in list(environment):
         if name.startswith("MAIGOKITE_"):
             environment.pop(name)
+    # A developer's shell may contain paid provider or tracing credentials.
+    # Child Core processes must use only this test's loopback model service.
+    for name in (
+        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_COMPATIBLE_API_KEY", "AZURE_OPENAI_API_KEY",
+        "DEEPSEEK_API_KEY", "GOOGLE_API_KEY", "LANGCHAIN_API_KEY", "LANGSMITH_API_KEY",
+    ):
+        environment.pop(name, None)
     environment.update({
         "PYTHONPATH": str(python_root),
         "MAIGOKITE_DB_PATH": str(tmp_path / "product.sqlite"),
@@ -98,11 +106,15 @@ async def _start_core(
         "MAIGOKITE_MODEL_BASE_URL": model_base_url,
         "NO_PROXY": "127.0.0.1,localhost",
         "MAIGOKITE_TEST_WRITE_BARRIER": barrier,
+        "LANGSMITH_TRACING": "false", "LANGCHAIN_TRACING_V2": "false",
     })
     entry = ([str(Path(__file__).with_name("runtime_recovery_worker.py"))]
              if barrier or observe_writes else ["-m", "agent.main"])
+    arguments = [sys.executable, *entry, "run", "--host", "127.0.0.1", "--port", str(port)]
+    if web_dir is not None:
+        arguments.extend(["--web-dir", str(web_dir)])
     process = await asyncio.create_subprocess_exec(
-        sys.executable, *entry, "run", "--host", "127.0.0.1", "--port", str(port),
+        *arguments,
         cwd=repository_root, env=environment,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )

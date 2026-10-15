@@ -202,6 +202,28 @@ Linux、Windows 的普通搜索和只读子 Agent 使用同一条受控搜索路
 API 启动日志和工作区 `runtime-status` 分开报告搜索依赖与命令沙箱。找不到可信 ripgrep 时提示安装；Linux 命令沙箱不兼容时提示更新 bubblewrap 后重启，不删除隔离参数重试，也不影响文件搜索。命令仍遵循原审批和沙箱要求，不能将搜索路径当作执行任意程序的入口。
 历史 `bash` 名称只兼容旧显式调用，不再交给模型。
 
+### Linux 命令工具链与缓存
+
+普通文件读写、`glob/grep` 不依赖命令沙箱。编译、运行解释器和安装依赖仍通过命令沙箱执行，审批不能替代实际隔离。Linux 复用 [bubblewrap 的公开挂载和环境选项](https://github.com/containers/bubblewrap/blob/main/bwrap.xml)，不新增运行时或沙箱后端。
+
+对于安装在用户目录、`/opt` 等位置的可信工具链，可在**实际启动使用的 YAML** 中明确配置只读目录，重启后端生效：
+
+```yaml
+tools:
+  linux_sandbox:
+    allow_read: []  # 填写本机存在的精确 SDK 目录，例如 /opt/company-sdk/1.0
+    workspace_cache: true
+```
+
+- `allow_read` 默认空，最多 32 项，仅允许受限命令读取或执行指定目录中的内容，不扩大原生文件工具或 MCP 的授权。目录必须已存在，不能是整个用户目录、当前工作区的父目录、默认 `~/.maigokite` 私有目录、设备/系统运行目录或临时目录，也不能包含 socket、设备等特殊文件。存放秘密的其他自定义目录同样不得用于工具链授权。
+- 附加目录通过 bubblewrap `--ro-bind` 只读挂载，沿用敏感路径扫描和挂载遮蔽。扫描仍受合计 10 万项、5 秒和挂载数上限约束，不会为扫描成功而跳过保护。不要挂入整个磁盘或大型开发目录。
+- 可执行文件须位于进程 PATH 中，或通过绝对路径调用。配置只读目录不会自动选择 SDK 版本或修改宿主 PATH；PATH 目录别名会规范化为实际挂载目录。虚拟环境解释器若为符号链接，其目标运行库也必须可见。程序已安装但被隔离时返回 `executable_outside_sandbox`，与“未安装”区分。
+- `workspace_cache: true` 时，Linux 可写沙箱将 XDG、uv、pip、npm、Go 缓存分别放入当前工作区 `.maigokite/cache` 的子目录，按实际使用创建。不同文件夹不共享缓存，也不复制宿主凭证或登录配置。缓存不是可信代码来源，且没有总磁盘配额；只读沙箱或设为 `false` 时使用本次临时缓存。
+- HOME 指向本次沙箱的临时目录，不映射真实用户目录，也不继承宿主 Git 全局配置、密钥或包管理器登录态；项目配置仍由各工具处理。本仓库已忽略 `.maigokite/cache/`，其他工作区需自行添加所需忽略规则。应用不会修改其 Git 元数据，也不自动删除历史缓存。
+- 安装依赖需要联网时，保持 `sandbox_permissions=use_default`，仅申请 `network_access=true`，批准后仍保留文件隔离。附加只读路径作为命令参数时，仍须经过现有越界审批；配置不自动授权任意参数。只有需要宿主执行时才请求 `require_escalated`，不能因依赖缺失或缓存不可用而自动升级权限。
+
+Windows 继续使用 `tools.windows_sandbox.allow_read` 和上游 SRT 环境，本节缓存策略仅适用于 Linux。Git 元数据仍只读，设备、系统服务和宿主凭证不会自动开放。
+
 ### 命令资源限制
 
 `max_output_bytes` 仅控制回复中的每路预览。后端从管道保存日志，stdout/stderr 每次调用合计最多 **8 MiB**，超出后请求停止所属进程、等待清理并返回 `COMMAND_OUTPUT_LIMIT`；日志只保留上限内的字节。这不限制命令直接写文件、历史日志累计或整个工作区磁盘占用。

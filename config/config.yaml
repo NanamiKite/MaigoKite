@@ -45,6 +45,11 @@ tools:
   command_limits:
     cpu_seconds: 0
     address_space_mb: 0
+  # Trusted SDK/toolchain directories only; no automatic access to the host home.
+  # Paths are read-only and cannot contain the workspace or Core's private state.
+  linux_sandbox:
+    allow_read: []
+    workspace_cache: true  # Reuse .maigokite/cache within each writable workspace.
   # Optional native Windows backend. Provision explicitly with scripts/sandbox.ps1;
   # enabling this alone never installs accounts, ACLs or WFP rules. Upstream is alpha.
   windows_sandbox:

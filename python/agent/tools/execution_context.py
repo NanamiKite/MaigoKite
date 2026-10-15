@@ -28,6 +28,7 @@ class ExecutionMetadata(TypedDict, total=False):
     api_keys: dict[str, str]
     process_registry: ProcessRegistry
     command_limits: JSONObject
+    linux_sandbox: JSONObject
     windows_sandbox: JSONObject
     model_id: str
     model_calls: int

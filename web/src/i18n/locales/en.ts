@@ -285,6 +285,8 @@ const en: Record<string, string> = {
   '任务需要分步进行时，Agent 的计划会显示在这里。':
     'When a task needs multiple steps, the Agent’s plan appears here.',
   '已完成 {0} / {1} 步': '{0} / {1} steps completed',
+  计划进度: 'Plan progress',
+  未开始: 'Not started',
   等你处理: 'Needs your attention',
   '{0} 项等你处理': '{0} items need your attention',
   双击重命名对话: 'Double-click to rename this chat',

@@ -240,6 +240,16 @@ class SandboxExecutor:
         if self.mode not in {"read_only", "workspace", "danger_full_access"}:
             raise ValueError("invalid process sandbox mode")
         self.allow_network = bool(values.get("allow_network", False))
+        self.linux_sandbox = values.get("linux_sandbox") or {}
+        if not isinstance(self.linux_sandbox, dict):
+            raise ValueError("linux_sandbox must be an object")
+        self.workspace_cache = self.linux_sandbox.get("workspace_cache", True)
+        if not isinstance(self.workspace_cache, bool):
+            raise ValueError("linux_sandbox.workspace_cache must be a boolean")
+        # Only startup configuration supplies these grants, never tool arguments.
+        self._read_mounts = (
+            self._linux_read_paths() if platform.system() == "Linux" and self.mode != "danger_full_access" else []
+        )
         self.windows_sandbox = values.get("windows_sandbox") or {}
         if not isinstance(self.windows_sandbox, dict):
             raise ValueError("windows_sandbox must be an object")
@@ -500,8 +510,6 @@ class SandboxExecutor:
         bubblewrap = shutil.which("bwrap") if platform.system() == "Linux" else None
         if bubblewrap and _bubblewrap_works(bubblewrap, self.allow_network):
             resolved = self._resolve_argv(args)
-            if not self._visible_in_sandbox(Path(resolved[0]).resolve()):
-                raise SandboxUnavailableError("Executable is outside the sandbox mounts. No command was started.")
             return self._bubblewrap_argv(bubblewrap, self._limited_argv(resolved)), True, resolved[0]
         probe = _bubblewrap_probe(bubblewrap, self.allow_network) if platform.system() == "Linux" else None
         raise SandboxUnavailableError(
@@ -513,7 +521,10 @@ class SandboxExecutor:
     def _resolve_argv(self, args: list[str]) -> list[str]:
         """Resolve against the tool PATH, never Windows' implicit current-directory search."""
         executable = Path(args[0])
-        if executable.is_absolute() or any(separator in args[0] for separator in (os.sep, os.altsep) if separator):
+        explicit_path = executable.is_absolute() or any(
+            separator in args[0] for separator in (os.sep, os.altsep) if separator
+        )
+        if explicit_path:
             candidates = [executable if executable.is_absolute() else self.workdir / executable]
         else:
             candidates = [Path(directory) / executable for directory in self._execution_path().split(os.pathsep)
@@ -521,13 +532,86 @@ class SandboxExecutor:
         for candidate in candidates:
             resolved = shutil.which(str(candidate))
             if resolved:
+                if self.mode != "danger_full_access" and not all(
+                    self._visible_in_sandbox(path) for path in (Path(resolved).absolute(), Path(resolved).resolve())
+                ):
+                    raise self._executable_outside_sandbox()
                 if os.name == "nt" and Path(resolved).suffix.casefold() in {".cmd", ".bat"}:
                     raise ValueError(
                         "Windows batch files require shell=powershell or shell=pwsh; "
                         "direct argv cannot safely quote cmd.exe syntax"
                     )
                 return [resolved, *args[1:]]
+        # Report an installed but excluded tool separately from a missing program.
+        # This lookup never executes the host candidate or adds it to the mounts.
+        if self.mode != "danger_full_access" and not explicit_path and shutil.which(args[0]):
+            raise self._executable_outside_sandbox()
         raise FileNotFoundError(f"Executable not found in the tool PATH: {args[0]}")
+
+    @staticmethod
+    def _executable_outside_sandbox() -> SandboxUnavailableError:
+        setting = "tools.windows_sandbox.allow_read" if os.name == "nt" else "tools.linux_sandbox.allow_read"
+        return SandboxUnavailableError(
+            "Executable is installed outside the configured sandbox paths. No command was started.",
+            reason="executable_outside_sandbox",
+            hint=f"程序已安装但不在沙箱可读范围；请在 {setting} 配置精确的可信工具链目录后重启。"
+                 "符号链接的目标运行库也须可见；不要开放整个用户目录或为了此问题开启完全访问。",
+        )
+
+    def _linux_read_paths(self) -> list[Path]:
+        paths = self.linux_sandbox.get("allow_read", [])
+        if not isinstance(paths, list) or len(paths) > 32 or any(not isinstance(path, str) for path in paths):
+            raise UserFacingError("tools.linux_sandbox.allow_read 必须是最多 32 项的绝对目录路径列表。")
+        if not paths:
+            return []
+        home = Path.home().resolve()
+        private = home / ".maigokite"
+        reserved = [Path(root).resolve() for root in ("/proc", "/sys", "/dev", "/run", "/tmp", "/var/tmp")]
+        result: list[Path] = []
+        for entry in paths:
+            value = Path(entry).expanduser()
+            if not value.is_absolute() or is_sensitive_path(value):
+                raise UserFacingError("Linux 沙箱只读目录须使用绝对路径，不能指向已知凭证路径。")
+            try:
+                value = value.resolve(strict=True)
+            except OSError:
+                raise UserFacingError(
+                    "tools.linux_sandbox.allow_read 中的目录不存在或无法访问；请修正配置后重启。"
+                ) from None
+            if (not value.is_dir() or is_sensitive_path(value) or home.is_relative_to(value)
+                    or self.workspace_root.is_relative_to(value) or value.is_relative_to(private)
+                    or private.is_relative_to(value) or any(
+                        value.is_relative_to(root) or root.is_relative_to(value) for root in reserved
+                    )):
+                raise UserFacingError(
+                    "Linux 沙箱只读目录必须是具体工具链目录；不能开放整个用户目录、工作区父目录、"
+                    "默认私有数据目录、设备、系统运行目录或临时目录。"
+                )
+            if value.is_relative_to(self.workspace_root) or any(
+                value.is_relative_to(Path(root).resolve()) for root in self._SYSTEM_MOUNTS
+            ):
+                continue  # Already visible; avoid overlaying the writable workspace or system mounts.
+            result.append(value)
+        # Parent grants already include their children. Scan/mount each subtree once.
+        return [path for path in sorted(set(result)) if not any(
+            path != other and path.is_relative_to(other) for other in result
+        )]
+
+    def _linux_environment(self) -> dict[str, str]:
+        # HOME is disposable, so SDK caches do not require exposing login files.
+        # Cache locations stay inside the existing write grant, not a shared host cache.
+        cache = (self.workspace_root / ".maigokite" / "cache"
+                 if self.mode == "workspace" and self.workspace_cache else Path("/tmp/maigokite-cache"))
+        return {
+            "HOME": "/tmp/maigokite-home", "PATH": self._execution_path(),
+            "LANG": os.environ.get("LANG", "C.UTF-8"), "LC_ALL": os.environ.get("LC_ALL", "C.UTF-8"),
+            "TMPDIR": "/tmp", "TMP": "/tmp", "TEMP": "/tmp",
+            "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",
+            "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_PAGER": "cat",
+            "XDG_CACHE_HOME": str(cache), "UV_CACHE_DIR": str(cache / "uv"),
+            "PIP_CACHE_DIR": str(cache / "pip"), "npm_config_cache": str(cache / "npm"),
+            "GOCACHE": str(cache / "go-build"), "GOMODCACHE": str(cache / "go-mod"),
+        }
 
     def _bubblewrap_argv(self, binary: str, args: list[str]) -> list[str]:
         command = [
@@ -555,6 +639,8 @@ class SandboxExecutor:
         ):
             if Path(source).exists():
                 command.extend(["--ro-bind", source, source])
+        for source in self._read_mounts:
+            command.extend(["--ro-bind", str(source), str(source)])
 
         # Bind destinations need their parent hierarchy in the fresh mount namespace.
         parent = self.workspace_root.parent
@@ -576,34 +662,13 @@ class SandboxExecutor:
                 "--chdir",
                 str(self.workdir),
                 "--clearenv",
-                "--setenv",
-                "HOME",
-                str(self.workspace_root),
-                "--setenv",
-                "PATH",
-                self._execution_path(),
-                "--setenv",
-                "LANG",
-                os.environ.get("LANG", "C.UTF-8"),
-                "--setenv",
-                "LC_ALL",
-                os.environ.get("LC_ALL", "C.UTF-8"),
-                "--setenv",
-                "TMPDIR",
-                "/tmp",
-                "--setenv", "PYTHONUTF8", "1",
-                "--setenv", "PYTHONIOENCODING", "utf-8",
-                "--setenv",
-                "GOCACHE",
-                "/tmp/go-build",
-                "--setenv",
-                "GOMODCACHE",
-                "/tmp/go-mod",
-                "--setenv",
-                "npm_config_cache",
-                "/tmp/npm-cache",
             ]
         )
+        # Create scratch only inside the namespace; package managers create their
+        # persistent cache on demand while already subject to the workspace mount.
+        command.extend(["--dir", "/tmp/maigokite-home", "--dir", "/tmp/maigokite-cache"])
+        for key, value in self._linux_environment().items():
+            command.extend(["--setenv", key, value])
         command.extend(self._protected_mounts())
         command.extend(["--", *args])
         return command
@@ -631,7 +696,7 @@ class SandboxExecutor:
             raise PermissionError("A credential directory cannot be used as the command workspace")
         denied_read: list[Path] = []
         denied_write: list[Path] = []
-        pending = [self.workspace_root]
+        pending = [self.workspace_root, *self._read_mounts]
         entries = 0
         deadline = time.monotonic() + 5
         while pending:
@@ -639,11 +704,18 @@ class SandboxExecutor:
                 for entry in children:
                     entries += 1
                     if entries > 100_000 or time.monotonic() > deadline or len(denied_read) + len(denied_write) > 1000:
-                        raise UserFacingError("工作区保护扫描超出 10 万项、5 秒或挂载预算，命令未启动；请缩小工作区。")
+                        raise UserFacingError(
+                            "工作区或附加只读目录的保护扫描超出 10 万项、5 秒或挂载预算，命令未启动；请缩小范围。"
+                        )
                     path = Path(entry.path)
                     sensitive = is_sensitive_path(Path(entry.name))
                     git = entry.name.casefold() == ".git"
                     info = entry.stat(follow_symlinks=False)
+                    if (not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode))
+                            and any(path.is_relative_to(root) for root in self._read_mounts)):
+                        raise UserFacingError(
+                            "附加只读目录含套接字、设备或其他特殊文件；请只选择工具链文件目录，命令未启动。"
+                        )
                     if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
                         if os.name == "nt":
                             raise UserFacingError(
@@ -688,7 +760,7 @@ class SandboxExecutor:
                 directory.is_relative_to(root) for root in roots
             )
         return directory.is_relative_to(self.workspace_root) or any(
-            directory.is_relative_to(Path(root)) for root in self._SYSTEM_MOUNTS
+            directory.is_relative_to(root) for root in [*(Path(path) for path in self._SYSTEM_MOUNTS), *self._read_mounts]
         )
 
     def _execution_path(self) -> str:
@@ -709,7 +781,9 @@ class SandboxExecutor:
             # Changing PATH must not widen the mount boundary to arbitrary home directories.
             if self.mode != "danger_full_access" and not self._visible_in_sandbox(directory.resolve()):
                 continue
-            value = str(directory)
+            # A configured SDK root may be referenced by a PATH symlink. Use the
+            # actual directory mounted into the namespace, preserving venv leaf executables.
+            value = str(directory.resolve()) if self.mode != "danger_full_access" else str(directory)
             if value not in directories:
                 directories.append(value)
         return os.pathsep.join(directories)

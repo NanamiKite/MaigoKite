@@ -21,13 +21,15 @@ loopback/Origin 限制不是完整设备认证。当前未完成本次启动的�
 
 AccessPolicy 和 ToolPolicy 都需通过。模型/技能/MCP 自报能力不能授权；具体参数、范围、摘要值/版本和单次审批规则只在工具权限文档维护。
 
-exec_command 的受限模式要求可用的系统沙箱，默认不批准联网；Linux 使用网络 namespace，Windows SRT 不隔离系统 DNS，不能统称完全断网。沙箱不可用时不静默回退；不能把进程内文件工具的路径校验称为完整 OS 隔离。MCP 当前信任边界是部署者显式配置，最小环境和受限 cwd 已有，全面资源隔离/独立 Grant 尚未交付。详见 [MCP](../agent-capabilities/mcp/mcp-integration.md)。
+`exec_command` 的受限模式要求可用的系统沙箱，默认不批准联网。Linux 使用网络 namespace，Windows SRT 不隔离系统 DNS，不能统称完全断网。沙箱不可用时不自动回退到宿主执行；进程内文件工具的路径校验也不等于完整 OS 隔离。
+
+MCP 程序由部署者显式配置并信任，当前使用最小环境和受限 cwd；全面资源隔离与独立 Grant 尚未交付。详见 [MCP](../agent-capabilities/mcp/mcp-integration.md)。
 
 当前没有覆盖整个 Agent 的统一 OS 沙箱，各能力的实际边界如下：
 
 | 执行路径 | 当前边界 | 不提供的保证 |
 |---|---|---|
-| Linux 受限命令 | bubblewrap 文件挂载、网络/PID namespace；启动时嵌套敏感路径遮蔽 | 内容 DLP、硬链接别名检测、工作区总磁盘配额 |
+| Linux 受限命令 | bubblewrap 工作区挂载、显式工具链只读挂载、网络/PID namespace；嵌套敏感路径遮蔽；工作区缓存与临时 HOME | 内容 DLP、硬链接别名检测、工作区/缓存总磁盘配额 |
 | Linux / Windows 受限搜索 | 固定可信 ripgrep、句柄校验、有限只读内容快照；不依赖命令沙箱 | 任意程序/网络隔离；被替换的 ripgrep 隔离；硬链接与所有宿主竞态防护 |
 | Windows 受限命令（可选、默认关闭） | SRT 0.0.79 alpha：专用账户、Token、ACL、WFP、Job；启动前检查，停止等待清理 | DNS 阻断、公开可读路径隐藏、其他 SRT 客户端隔离、交互 stdin、进程树资源配额；未实机验收 |
 | 原生文件工具 | 进程内路径与授权检查 | 整个 Core 的文件系统隔离、所有 TOCTOU 防护 |

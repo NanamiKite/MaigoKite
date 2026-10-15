@@ -38,7 +38,9 @@ HTTP 与 WebSocket 均检查直接连接的 loopback 地址、Host 和浏览器 
 
 凭证通过 `keyring` 的系统后端保存，不允许明文 fallback。沿用原 `MaigoKite/{kind}/{workspace}` 与 account 命名：Linux 读取原 login collection；macOS 读取原服务/账号；Windows 兼容读取旧 Go 目标与 UTF-8 blob，写入新后端并读回确认后才删除旧项。平台迁移代码未完成实机验收。
 
-新消息、审批、回答和恢复入口在执行前恢复当前模型、准入时的子模型清单和已生效扩展的凭证。拒绝审批只尽力恢复模型，不启动被拒绝的 MCP。秘密不进入 DTO、日志、业务表或 checkpoint。
+新消息、审批、回答和恢复入口在执行前，先恢复当前主模型凭证，再按准入时的清单准备可选子模型及已生效扩展的凭证。清单中已删除的可选子模型不阻断主对话；实际委派选中缺失模型时仍报错，不自动替换模型。
+
+拒绝审批只尽力恢复模型，不启动被拒绝的 MCP。秘密不进入 DTO、日志、业务表或 checkpoint。
 
 修改模型端点或删除配置时，先在现有 `workspace_settings` 中持久撤销凭证引用，并清除 Core 的内存凭证，再尝试删除系统密钥链条目。密钥链不可用不阻塞无密钥模型管理：撤销记录阻止重启或重新创建同 ID 后复用旧密钥，物理清理失败写入 `credential.revoked / cleanup_pending` 审计。
 

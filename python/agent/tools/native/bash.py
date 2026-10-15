@@ -78,8 +78,9 @@ BASH_DESCRIPTION = (
     "Direct argv has no shell expansion. Linux restricted commands use a workspace sandbox with no network. "
     "Windows restricted commands use the optional native SRT backend when installed and enabled; "
     "otherwise report sandbox unavailable. Never silently fall back to host execution. "
-    "Request network_access for networking within the sandbox, "
-    "or require_escalated plus network_access for host execution; policy decides approval. "
+    "Prefer file_read/glob/grep for reading and discovery; they do not require a command sandbox. "
+    "Request network_access for dependency downloads within the sandbox; this keeps file isolation. "
+    "For host execution, request require_escalated plus network_access; policy decides approval. "
     "Returns bounded stdout/stderr, exit code and log paths. Use file_read with offset to inspect more output."
 )
 
@@ -113,6 +114,7 @@ class ExecCommandTool(BaseTool):
              "output_limit": int(arguments.get("max_output_bytes", 8000)),
              "cpu_seconds": limits.get("cpu_seconds", 0),
              "address_space_mb": limits.get("address_space_mb", 0),
+             "linux_sandbox": context.metadata.get("linux_sandbox", {}),
              "windows_sandbox": context.metadata.get("windows_sandbox", {}),
              "output_directory": str(workspace_root / ".maigokite" / "outputs")}
         )
@@ -133,7 +135,10 @@ class ExecCommandTool(BaseTool):
                 shell=str(arguments.get("shell", "auto")),
             )
         except SandboxUnavailableError as exc:
-            return ToolResult.failure({}, public_error(exc), error_code="SANDBOX_UNAVAILABLE", user_hint=exc.user_hint)
+            return ToolResult.failure(
+                {"sandbox_reason": exc.reason}, public_error(exc),
+                error_code="SANDBOX_UNAVAILABLE", user_hint=exc.user_hint,
+            )
         except FileNotFoundError as exc:
             return ToolResult.failure(
                 {},
@@ -163,6 +168,7 @@ class ExecCommandTool(BaseTool):
                                    "address_space_mb": executor.address_space_mb,
                                    "scope": "per_process"},
                 "sandboxed": result.sandboxed,
+                "network_authorized": executor.allow_network,
                 "stdout_path": result.stdout_path,
                 "stderr_path": result.stderr_path,
                 "shell": result.shell,

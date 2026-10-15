@@ -413,6 +413,8 @@ Linux 区分 `bubblewrap_not_installed / bubblewrap_incompatible / bubblewrap_pe
 
 响应另含 `file_search: {status, backend: "ripgrep", requires_process_sandbox: false, verified: false, reason, hint}`。发现工作区之外的可信可执行文件时 `status=available` 并附 `executable`，否则 `status=unavailable, reason=trusted_ripgrep_not_found`。此项仅做 PATH/文件检查，不启动搜索进程；`available` 表示依赖已发现，不是搜索执行验收通过。与 `sandbox.status` 独立，受限命令不可用不能解释为普通文件搜索不可用。API 启动日志也报告这两项。
 
+命令工具失败结果可附 `data.sandbox_reason`，例如 `executable_outside_sandbox` 表示程序已安装但不在命令可读范围，区别于 `COMMAND_UNAVAILABLE`。已执行命令的结果附 `network_authorized`，表示本次策略是否授权联网，不表示网络连通性或请求已成功。Linux 工具链只读目录与缓存策略来自启动 YAML，不是模型参数、客户端授权或新的设置写入接口；宿主能力探测不验证每个工作区的这些目录。
+
 `per_process_rlimits_available` 仅表示 Linux 系统位置存在 prlimit；是否配置见启动 YAML，实际应用失败时命令不会执行。它不是 cgroup/Job Object 总资源配额，因此原 `cpu_memory_limits` 继续为 `false`。`captured_log_limit_bytes=8388608` 表示单次命令捕获日志总量上限，`disk_quota=false` 明确没有工作区磁盘配额。工具结果新增 `output_limit_exceeded / output_bytes_limit / process_limits`；`process_limits` 的零值表示未额外施加该限制，超量输出返回 `COMMAND_OUTPUT_LIMIT`。旧客户端可忽略新增字段；本批未修改设置界面。
 
 #### 本地用量与可查询额度（2026-10-13）

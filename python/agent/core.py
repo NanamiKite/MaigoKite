@@ -979,6 +979,9 @@ class AgentCore:
             "command_limits": JSON_OBJECT.validate_python(
                 self.config.get("tools.command_limits", {}) or {}, strict=True
             ),
+            "linux_sandbox": JSON_OBJECT.validate_python(
+                self.config.get("tools.linux_sandbox", {}) or {}, strict=True
+            ),
             "windows_sandbox": JSON_OBJECT.validate_python(
                 self.config.get("tools.windows_sandbox", {}) or {}, strict=True
             ),

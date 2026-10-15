@@ -45,6 +45,7 @@ logs/
 # Data
 data/
 /.workspace/
+.maigokite/cache/
 *.db
 *.sqlite
 

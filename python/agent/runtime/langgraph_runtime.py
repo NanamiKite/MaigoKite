@@ -550,12 +550,18 @@ class LangGraphRuntime:
         planning = TodoListMiddleware(
             system_prompt=(
                 "Use write_todos for complex work or an explicitly requested plan, not simple chat. "
-                "Keep steps concise and update their real status; never mark unfinished work completed. "
+                "Each call replaces the entire plan: include unchanged and unfinished steps too. "
+                "Keep step descriptions concise and stable when only their status changes. "
+                "Mark work in_progress before starting it, then update that step to completed only "
+                "after its result confirms success; leave other steps at their actual status. "
+                "A successful tool call does not complete the whole plan. Do not batch completion "
+                "updates until the end or call write_todos more than once in a model turn. "
                 "Read files in bounded pages and prefer targeted searches over large raw outputs."
             ),
             tool_description=(
-                "Replace the current task plan with concise steps and their actual status: "
-                "pending, in_progress or completed. Use only when a plan is helpful."
+                "Replace the full task plan, not just changed steps. Include pending (not started), "
+                "in_progress (unfinished) and completed (confirmed done) steps. Preserve unchanged "
+                "steps; omit a step only when deliberately removing it from the plan."
             ),
         )
         summarizer = SafeSummarizationMiddleware(
@@ -1503,20 +1509,25 @@ class LangGraphRuntime:
         interrupts = data.get("__interrupt__")
         if interrupts:
             await self._handle_interrupts(interrupts, context)
-        for node, update in data.items():
-            if node == "model" and isinstance(update, list):
-                # ExtendedModelResponse yields separate public Command writes:
-                # one new answer, one checkpoint replacement. Only the answer
-                # is a UI event; retained historical tool calls must not replay.
-                update = next((part for part in update if isinstance(part, dict)
-                               and isinstance(part.get("messages"), list)
-                               and not any(isinstance(item, RemoveMessage) and item.id == REMOVE_ALL_MESSAGES
-                                           for item in part["messages"])), {})
+        # A tool batch can write messages more than once; LangGraph then streams
+        # a list of channel updates, including the authoritative write_todos plan.
+        updates = (
+            (node, part)
+            for node, update in data.items()
+            for part in (update if isinstance(update, list) else [update])
+        )
+        for node, update in updates:
             if not isinstance(update, dict):
+                continue
+            messages = update.get("messages")
+            if node == "model" and isinstance(messages, list) and any(
+                isinstance(item, RemoveMessage) and item.id == REMOVE_ALL_MESSAGES for item in messages
+            ):
+                # Compaction's checkpoint replacement is not a new answer or
+                # a new tool proposal; never replay its retained history.
                 continue
             if isinstance(update.get("todos"), list):
                 await self._emit(context, "plan.updated", {"items": update["todos"]})
-            messages = update.get("messages")
             if not isinstance(messages, list):
                 continue
             for message in messages:

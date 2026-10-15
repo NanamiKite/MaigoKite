@@ -46,7 +46,7 @@ API 资源归属检查                  Python ToolPolicy
 
 个人版权限配置只有 `default_mode`，会话使用自己的 `permission_mode`。后端不再保存或传递逐工具可调风险矩阵，也没有独立的内存 grant/scope 权限存储。历史数据库中的 `tool_levels` 被忽略，下次保存该设置时清除；已有风险标签和审批审计保留。
 
-`read_only` 允许用户对具体写入批准。Linux 搜索使用只读挂载，Windows 搜索使用固定可信 ripgrep 与校验后的只读快照，后者不是通用进程隔离。是否启用工具和是否允许调用仍是独立边界。没有独立审核模型，不注册“帮我批准”，也不增加调用模型判断风险的隐性成本。借鉴 [DSH 基础预设](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/interaction/permission-presets/src/index.ts) 的沙箱/审批分离，不移植其插件框架或实验 Auto review。
+`read_only` 允许用户对具体写入批准。Linux、Windows 的受限搜索统一使用固定可信 ripgrep 与校验后的只读内容快照，不依赖命令沙箱，也不是通用进程隔离。是否启用工具和是否允许调用仍是独立边界。没有独立审核模型，不注册“帮我批准”，也不增加调用模型判断风险的隐性成本。借鉴 [DSH 基础预设](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/interaction/permission-presets/src/index.ts) 的沙箱/审批分离，不移植其插件框架或实验 Auto review。
 
 ## 4. 基础工具映射
 
@@ -87,7 +87,7 @@ PermissionManager.evaluate(tool_name, arguments, approved, risk_override, mode)
 
 受限命令通过 `sandbox_permissions=require_escalated` 请求单次沙箱外执行，或通过 `network_access=true` 仅请求网络；参数只是请求，不是授权。普通模式下都必须审批。Git 元数据在沙箱内只读，修改 Git 必须先提出明确升级请求。已明确禁用的操作仍不能借升级绕过。
 
-当前宿主命令没有独立网络隔离后端，所以单次沙箱外命令还必须明确包含 `network_access=true` 并一起批准，否则不启动。只有 `network_access=true` 不会解除工作区文件隔离。完全访问模式已经显式包含宿主网络许可。越界 glob/grep 批准仅允许读取指定目录，Linux 继续使用只读、断网沙箱，Windows 继续受控只读搜索；不借批准获得任意宿主命令权限。
+当前宿主命令没有独立网络隔离后端，所以单次沙箱外命令还必须明确包含 `network_access=true` 并一起批准，否则不启动。只有 `network_access=true` 不会解除工作区文件隔离。完全访问模式已经显式包含宿主网络许可。越界 glob/grep 批准仅允许读取指定目录，继续使用受控只读搜索；不借批准获得任意宿主命令权限。该固定搜索程序不是 OS 沙箱，不宣称具有命令沙箱的网络隔离保证。
 
 已知路径与命令规则只是确定性保护，不是完整敏感数据检测/DLP。任意代码在允许目录内的副作用不能只靠字符串匹配可靠识别。
 
@@ -133,8 +133,9 @@ version
 - 内置工具使用路径、进程和网络策略限制。
 - `exec_command` 的 `shell=direct` 不经过 shell 展开；`auto` 在 Windows 优先选择 PowerShell 7、缺失时选择 Windows PowerShell 5.1，其他平台保持 direct。显式 `pwsh` / `powershell` 不互相回退。PowerShell 脚本整体交给对应解释器，不用 POSIX `shlex` 拆分。
 - Shell 选择在审批前归一化，与原始脚本一起进入已有审批参数/hash；传输用的 Base64 不替换审计正文。PowerShell 脚本按 L5 不透明操作处理，非完全访问模式需单次批准，不生成任务/会话复用授权。已配置的命令前缀白名单对脚本只允许全文匹配，不因开头命令允许而放行后续语句；工作目录仍校验路径。产品不声称能静态识别脚本中的所有敏感访问。
-- Linux 复用 bubblewrap，只挂载只读运行库和指定工作区，受限命令默认不共享网络。启动参数显式要求 user namespace、禁止嵌套 user namespace、去除全部 capabilities；安装版本或系统不支持时拒绝受限执行，不删除保护参数重试。可用性探测与实际执行使用相同隔离选项，断网探测不再带 `--share-net`。搜索使用只读工作区；启动前递归遮蔽已知凭证路径，嵌套 `.git` 只读，不遍历符号链接。扫描遇到保护项符号链接、权限错误、超过 10 万项/5 秒或挂载参数预算时拒绝启动。此处仅是已存在路径的保护，不检测内容、改名凭证、硬链接或并发宿主修改；不能称为完整 DLP。PowerShell 安装位置不在挂载范围时，受限执行同样拒绝，不自动扩大挂载。
-- 受限进程沙箱不可用时返回 `SANDBOX_UNAVAILABLE`，不再回退为普通宿主命令。Windows 已接可选 SRT 原生后端，默认关闭、alpha 且待实机验收，见下节；macOS 后端未接入。`file_read` 等进程内工具继续使用产品路径校验。
+- Linux 复用 bubblewrap，只挂载只读运行库和指定工作区，受限命令默认不共享网络。启动参数显式要求 user namespace、禁止嵌套 user namespace、去除全部 capabilities；安装版本或系统不支持时拒绝受限执行，不删除保护参数重试。可用性探测与实际执行使用相同隔离选项，断网探测不再带 `--share-net`。命令启动前递归遮蔽已知凭证路径，嵌套 `.git` 只读，不遍历符号链接。扫描遇到保护项符号链接、权限错误、超过 10 万项/5 秒或挂载参数预算时拒绝启动。此处仅是已存在路径的保护，不检测内容、改名凭证、硬链接或并发宿主修改；不能称为完整 DLP。PowerShell 安装位置不在挂载范围时，受限执行同样拒绝，不自动扩大挂载。
+- 受限进程沙箱不可用时返回 `SANDBOX_UNAVAILABLE`，区分缺少 bubblewrap、不支持所需参数、系统拒绝、启动失败和探测超时；不回退为普通宿主命令。Windows 已接可选 SRT 原生后端，默认关闭、alpha 且待实机验收，见下节；macOS 后端未接入。`file_read` 等进程内工具继续使用产品路径校验，`glob/grep` 的受控路径不受命令沙箱可用性阻塞。
+- 受限 `glob/grep` 只运行工作区及搜索目录之外、绝对 PATH 下的可信 ripgrep；模型不能提供程序、shell、额外 argv 或环境。固定参数禁用外部配置、符号链接跟随及父目录/全局 ignore，目录内 ignore/glob 规则仍由 ripgrep 处理。文件内容通过句柄逐层打开，拒绝链接、重解析点及已知敏感路径，再制作有限临时快照。文件名发现仍访问实时目录和目录内 ignore 文件；这不是完整 OS 隔离或 DLP，不防御被替换的可信程序、硬链接别名或所有并发宿主修改。限制及清理见[配置指南](../../user-guide/Configuration.md#工作区工具)。
 - 工作区仍不得配置为文件系统根目录。单次已批准的显式升级命令、以及 `danger_full_access` 模式使用宿主 argv 执行，仍保留输出限制、取消、超时和进程清理。
 - 越界文件操作只有匹配审批/窄授权或显式完全访问才执行；浏览器文件操作同时校验页面 URL 和会话归属。完全访问不增加 Browser/MCP/子 Agent 的新功能。
 - MCP 工具结果是不可信输入，但当前 **MCP Server 程序必须由部署者信任**：它由官方 SDK 直接启动，拥有宿主用户权限；最小环境、cwd 和审批不构成该进程的 OS 隔离。不得把工具结果不可信与进程已隔离混为一谈。

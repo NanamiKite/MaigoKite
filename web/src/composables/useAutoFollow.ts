@@ -10,7 +10,7 @@ export function useAutoFollow(element: Ref<HTMLElement | null>, revision: () => 
     if (frame) cancelAnimationFrame(frame)
     frame = requestAnimationFrame(() => {
       frame = 0
-      if (element.value) element.value.scrollTop = element.value.scrollHeight
+      if (following.value && element.value) element.value.scrollTop = element.value.scrollHeight
     })
   }
   function onScroll() {
@@ -20,6 +20,11 @@ export function useAutoFollow(element: Ref<HTMLElement | null>, revision: () => 
   function resume() {
     following.value = true
     void follow()
+  }
+  function pause() {
+    following.value = false
+    if (frame) cancelAnimationFrame(frame)
+    frame = 0
   }
   watch(
     revision,
@@ -32,5 +37,5 @@ export function useAutoFollow(element: Ref<HTMLElement | null>, revision: () => 
     disposed = true
     if (frame) cancelAnimationFrame(frame)
   })
-  return { following, onScroll, resume }
+  return { following, onScroll, resume, pause }
 }

@@ -197,8 +197,9 @@ tools:
 `default_tools: []` 关闭默认内置工具，不关闭已显式连接的 MCP 工具。MCP 加载范围由
 服务级工具列表控制，再由设置页选择。`glob/grep` 需要安装 ripgrep（`rg`），缺失会提示；
 grep 使用 Rust 正则语法而非 Python 正则语法。非 Windows 的 `exec_command` 默认使用 direct argv，不解释管道、重定向或 Shell 展开；Windows 行为见本节 PowerShell 说明。
-Linux 受限 `glob/grep` 需要可用的 bubblewrap。Windows 普通搜索和只读子 Agent 改用固定参数的可信 ripgrep，无需完全访问或 WSL；`rg.exe` 必须安装在工作区、搜索目录之外的绝对 PATH 目录。文件名发现复用 ripgrep 的 glob/ignore 规则，内容搜索通过已校验的文件句柄制作临时快照，再由 ripgrep 匹配；不允许模型指定程序、shell 或额外命令参数。这是应用级只读能力，不是 Windows 通用进程沙箱。
-Windows 受限搜索拒绝 UNC 路径、目录 junction/reparse point，过滤各层已知敏感路径。每次最多检查 2000 个候选文件、每文件 2 MiB、内容快照共 32 MiB；超过限额或跳过不可读取项时返回 `truncated=true`，不要将零匹配理解为完整扫描。请缩小搜索路径继续。临时快照在完成、失败或协作取消后删除；后端被强制终止时可能留下系统临时目录残留。
+Linux、Windows 的普通搜索和只读子 Agent 使用同一条受控搜索路径，无需完全访问、bubblewrap 或 WSL。`rg` / `rg.exe` 必须安装在工作区、搜索目录之外的绝对 PATH 目录。文件名发现复用 ripgrep 的 glob/ignore 规则，禁用外部配置及父目录/全局 ignore；内容搜索通过已校验的文件句柄制作临时快照，再由 ripgrep 匹配。不允许模型指定程序、shell 或额外命令参数。这是应用级只读能力，不是通用进程沙箱。
+受限搜索不跟随发现的符号链接，文件句柄校验拒绝符号链接和目录 junction/reparse point；拒绝 UNC 路径，过滤各层已知敏感路径。`glob` 最多检查请求的 `max_results` 个候选项（上限 10000），只读取文件元数据；`grep` 每次最多检查 2000 个候选文件、每文件 2 MiB、内容快照共 32 MiB。超过限额或跳过不可读取项时返回 `truncated=true`，不要将零匹配理解为完整扫描。请缩小搜索路径继续。整次搜索有 30 秒超时，复用进程取消与输出限制；临时快照在完成、失败或协作取消后删除，后端被强制终止时可能留下系统临时目录残留。
+API 启动日志和工作区 `runtime-status` 分开报告搜索依赖与命令沙箱。找不到可信 ripgrep 时提示安装；Linux 命令沙箱不兼容时提示更新 bubblewrap 后重启，不删除隔离参数重试，也不影响文件搜索。命令仍遵循原审批和沙箱要求，不能将搜索路径当作执行任意程序的入口。
 历史 `bash` 名称只兼容旧显式调用，不再交给模型。
 
 ### 命令资源限制

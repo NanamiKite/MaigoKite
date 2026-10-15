@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 from urllib.parse import urlsplit
 
+from anyio import to_thread
 from fastapi import Depends, FastAPI, Request, WebSocket
 from fastapi.exceptions import RequestValidationError, ResponseValidationError, WebSocketRequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -26,6 +27,8 @@ from agent.api.credentials import Credentials
 from agent.api.execution import Execution
 from agent.errors import public_error
 from agent.repository import ConversationBusyError, MessageConflictError
+from agent.tools.native.file_search import file_search_status
+from agent.utils.sandbox import process_sandbox_status
 
 if TYPE_CHECKING:
     from agent.core import AgentCore
@@ -166,6 +169,16 @@ def create_app(core: AgentCore, web_dir: Path | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
             await core.initialize()
+            # Missing confinement disables commands, not the API or trusted file
+            # tools. Show both dependencies before the first model tool call.
+            search = await to_thread.run_sync(file_search_status, core.config.workspace_root)
+            logger.info("File search dependency: %s (binary discovery only)", search["status"])
+            if search["hint"]:
+                logger.warning("File search: %s", search["hint"])
+            sandbox = await to_thread.run_sync(process_sandbox_status, core.config.get("tools.windows_sandbox", {}))
+            logger.info("Command sandbox: %s (%s)", sandbox["status"], sandbox["backend"])
+            if sandbox.get("hint"):
+                logger.warning("Command sandbox: %s", sandbox["hint"])
             yield
         finally:
             try:

@@ -23,9 +23,13 @@ def parent_directory(root: Path, relative: str) -> Iterator[int | Path]:
             yield root.joinpath(*parts)
         return
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-    descriptor = os.open(root, flags)
+    if not root.is_absolute():
+        raise PermissionError("absolute workspace root required")
+    # Open each ancestor relative to an owned descriptor, including the root's
+    # parents. Opening root as one path would follow swapped ancestor symlinks.
+    descriptor = os.open(root.anchor, flags)
     try:
-        for part in parts:
+        for part in (*root.parts[1:], *parts):
             following = os.open(part, flags, dir_fd=descriptor)
             os.close(descriptor)
             descriptor = following
@@ -128,4 +132,4 @@ def read_file(root: Path, relative: str, limit: int) -> tuple[bytes, os.stat_res
             info = os.fstat(file.fileno())
             if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
                 raise PermissionError("only regular files may be previewed")
-            return file.read(limit + 1), info
+            return (file.read(limit + 1) if limit else b""), info

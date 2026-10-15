@@ -31,9 +31,11 @@ MaigoKite 是一个运行在你电脑上的个人 Agent，用来处理文件、�
 
 - Python 3.14.x（项目固定使用 3.14 系列）
 - Node.js 22.22.2+（22.x）、24.15.0+（24.x）或 26+ / npm
-- ripgrep (`rg`)
+- ripgrep (`rg`，安装在工作区之外的绝对 PATH 目录)
 
 推荐安装 [uv](https://github.com/astral-sh/uv)，以便按锁文件安装 Python 依赖。请在运行应用的机器上安装依赖，不要复制其他机器的 `.venv` 或 `node_modules`。详细环境要求见 [开发指南](docs/development/DevelopmentGuide.md)。
+
+Linux 受限命令另需支持所需隔离参数的 bubblewrap；版本或系统限制会显示具体提示，不会静默改为宿主执行。普通 `glob/grep` 文件搜索不依赖命令沙箱，也不要求开启完全访问，边界见[工作区工具](docs/user-guide/Configuration.md#工作区工具)。
 
 升级 Python 环境前先退出应用，按 [开发指南](docs/development/DevelopmentGuide.md#2-初始化) 更新依赖；启动脚本不会自动替换旧环境。
 

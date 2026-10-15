@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
-from agent.security.sensitive_paths import is_sensitive_path, search_exclusions
+from agent.security.sensitive_paths import is_sensitive_path
 from agent.tools.base import BaseTool, ExecutionContext, ToolResult
-from agent.utils.sandbox import SandboxExecutor, SandboxUnavailableError
+from agent.tools.native.file_search import RIPGREP_HINT, RipgrepUnavailableError, resolve_ripgrep, search
+from agent.utils.sandbox import SandboxExecutor
 
 
 class GlobParams(BaseModel):
@@ -39,33 +39,36 @@ class GlobTool(BaseTool):
         if not full_access and is_sensitive_path(root):
             raise PermissionError("protected credential path")
         workspace = Path(context.metadata.get("workspace_root", str(root))).resolve()
-        executor = SandboxExecutor({
-            # After an exact outside-path approval, keep rg confined to that
-            # read-only directory rather than silently giving it host/network access.
-            "workspace_root": str(workspace if full_access or root.is_relative_to(workspace) else root),
-            "workdir": str(root),
-            "sandbox_mode": "danger_full_access" if full_access else "read_only",
-            "allow_network": full_access,
-        })
         try:
-            if os.name == "nt" and not full_access:
-                from agent.tools.native.windows_search import search
-                result = await search(root, workspace=workspace, pattern=args.pattern, files_only=True)
+            if not full_access:
+                # PermissionPolicy has resolved/approved this root. Search only
+                # this directory; it never requests arbitrary host execution.
+                result = await search(root, workspace=workspace, pattern=args.pattern, files_only=True,
+                                      max_files=args.max_results)
             else:
+                executable = resolve_ripgrep(root, workspace)
+                executor = SandboxExecutor({
+                    "workspace_root": str(workspace), "workdir": str(root),
+                    "sandbox_mode": "danger_full_access", "allow_network": True,
+                })
                 result = await executor.execute_argv([
-                    "rg", "--no-config", "--files", "--null", "--sort", "path", "--glob", args.pattern,
-                    *([] if full_access else search_exclusions()), ".",
+                    executable, "--no-config", "--files", "--null", "--sort", "path", "--glob", args.pattern,
+                    ".",
                 ])
-        except FileNotFoundError:
+        except RipgrepUnavailableError:
             return ToolResult.failure(
                 {},
-                "ripgrep is not installed.",
+                "Trusted ripgrep is unavailable.",
                 error_code="RIPGREP_UNAVAILABLE",
-                user_hint="文件搜索需要 ripgrep（rg）。Windows 请安装在工作区之外的可信 PATH 目录。",
+                user_hint=RIPGREP_HINT,
             )
-        except SandboxUnavailableError as exc:
-            return ToolResult.failure({}, str(exc), error_code="SANDBOX_UNAVAILABLE", user_hint=exc.user_hint)
-        if result.timed_out or result.exit_code not in {0, 1}:
+        except TimeoutError:
+            return ToolResult.failure({}, "File search timed out.", error_code="FILE_SEARCH_TIMEOUT",
+                                      user_hint="文件搜索超时，请缩小目录或匹配范围后重试。")
+        if result.timed_out:
+            return ToolResult.failure({}, "File search timed out.", error_code="FILE_SEARCH_TIMEOUT",
+                                      user_hint="文件搜索超时，请缩小目录或匹配范围后重试。")
+        if result.exit_code not in {0, 1}:
             return ToolResult.failure({}, result.stderr or "File search failed.", error_code="FILE_SEARCH_FAILED")
         # A capped output can end in half a filename; never present it as real.
         paths = [

@@ -19,6 +19,7 @@ from agent.api import contracts as dto
 from agent.api.sessions import owner
 from agent.api.workspace_fs import create_entry, read_file
 from agent.security.sensitive_paths import validate_windows_path
+from agent.tools.native.file_search import file_search_status
 from agent.utils.sandbox import process_sandbox_status
 
 if TYPE_CHECKING:
@@ -336,9 +337,10 @@ def routes(core: AgentCore, execution: Execution) -> APIRouter:
 
     @router.get("/runtime-status", dependencies=[Depends(owner)], response_model=None)
     async def status(workspace_id: str, request: Request, folder_id: str = "") -> dict[str, object]:
+        directory = await root(workspace_id, folder_id)
         return {
             "workspace_id": workspace_id,
-            "workspace_root": str(await root(workspace_id, folder_id)),
+            "workspace_root": str(directory),
             "workspace_source": "selection"
             if folder_id
             else "environment"
@@ -347,6 +349,7 @@ def routes(core: AgentCore, execution: Execution) -> APIRouter:
             "environment": core.config.get("app.environment", "development"),
             "backend": {"status": "serving" if core._initialized else "unavailable", "version": request.app.version},
             "sandbox": await to_thread.run_sync(process_sandbox_status, core.config.get("tools.windows_sandbox", {})),
+            "file_search": await to_thread.run_sync(file_search_status, directory),
             "restart": {
                 "pending": False,
                 "required_for": ["启动配置与服务端口"],

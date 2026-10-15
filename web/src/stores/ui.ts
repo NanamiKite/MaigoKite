@@ -87,6 +87,8 @@ export const useUIStore = defineStore('ui', () => {
   const drawerTab = ref<'changes' | 'jobs' | 'plan' | 'files' | 'pending'>('changes')
   const filePreviewRequest = ref<{ path: string; folderId: string; serial: number } | null>(null)
   let filePreviewSerial = 0
+  const chatTurnRequest = ref<{ sessionId: string; turnId: string; serial: number } | null>(null)
+  let chatTurnSerial = 0
   const commandOpen = ref(false),
     shortcutsOpen = ref(false)
   function setAppearance(patch: Partial<Appearance>) {
@@ -107,6 +109,13 @@ export const useUIStore = defineStore('ui', () => {
   function openFilePreview(path: string, folderId: string) {
     filePreviewRequest.value = { path, folderId, serial: ++filePreviewSerial }
     openDrawer('files')
+  }
+  // One-shot navigation intent only; no task or conversation state is copied here.
+  function locateChatTurn(sessionId: string, turnId: string) {
+    chatTurnRequest.value = { sessionId, turnId, serial: ++chatTurnSerial }
+  }
+  function clearChatTurnRequest(serial: number) {
+    if (chatTurnRequest.value?.serial === serial) chatTurnRequest.value = null
   }
   function closeOverlays() {
     drawerOpen.value = commandOpen.value = shortcutsOpen.value = false
@@ -169,12 +178,15 @@ export const useUIStore = defineStore('ui', () => {
     drawerOpen,
     drawerTab,
     filePreviewRequest,
+    chatTurnRequest,
     commandOpen,
     shortcutsOpen,
     setAppearance,
     setCapsuleShortcut,
     openDrawer,
     openFilePreview,
+    locateChatTurn,
+    clearChatTurnRequest,
     closeOverlays,
   }
 })

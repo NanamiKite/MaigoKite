@@ -174,6 +174,31 @@
 .turn {
   // The view bounds history to 20 entries; real heights drive the minimap.
   contain: style;
+  scroll-margin-block-start: var(--space-6);
+}
+.turn.located {
+  position: relative;
+  isolation: isolate;
+}
+.turn.located::before {
+  content: '';
+  position: absolute;
+  inset: 0 calc(-1 * var(--space-3));
+  z-index: var(--z-underlay);
+  pointer-events: none;
+  border-inline-start: var(--focus-width) solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--chat-focus-wash);
+  animation: chat-turn-locate var(--chat-focus-duration) var(--ease-out) both;
+}
+@keyframes chat-turn-locate {
+  from, to { opacity: 0; }
+  15%, 65% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .turn.located::before {
+    animation: paper-fade var(--motion-reduced) var(--ease-out) both;
+  }
 }
 .welcome-state {
   max-width: none;

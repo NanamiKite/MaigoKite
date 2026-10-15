@@ -27,8 +27,8 @@ exec_command 的受限模式要求可用的系统沙箱，默认不批准联网�
 
 | 执行路径 | 当前边界 | 不提供的保证 |
 |---|---|---|
-| Linux 受限命令/搜索 | bubblewrap 文件挂载、网络/PID namespace；启动时嵌套敏感路径遮蔽 | 内容 DLP、硬链接别名检测、工作区总磁盘配额 |
-| Windows 受限搜索 | 固定可信 ripgrep、句柄校验、有限只读内容快照 | 任意 PowerShell/程序隔离；被替换或恶意安装的 ripgrep 隔离 |
+| Linux 受限命令 | bubblewrap 文件挂载、网络/PID namespace；启动时嵌套敏感路径遮蔽 | 内容 DLP、硬链接别名检测、工作区总磁盘配额 |
+| Linux / Windows 受限搜索 | 固定可信 ripgrep、句柄校验、有限只读内容快照；不依赖命令沙箱 | 任意程序/网络隔离；被替换的 ripgrep 隔离；硬链接与所有宿主竞态防护 |
 | Windows 受限命令（可选、默认关闭） | SRT 0.0.79 alpha：专用账户、Token、ACL、WFP、Job；启动前检查，停止等待清理 | DNS 阻断、公开可读路径隐藏、其他 SRT 客户端隔离、交互 stdin、进程树资源配额；未实机验收 |
 | 原生文件工具 | 进程内路径与授权检查 | 整个 Core 的文件系统隔离、所有 TOCTOU 防护 |
 | MCP stdio | 部署者显式信任程序、最小环境、工具调用审批 | 服务进程的宿主文件/网络权限限制；cwd 不是 chroot |

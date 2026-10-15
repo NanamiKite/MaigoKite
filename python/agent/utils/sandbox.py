@@ -29,8 +29,15 @@ from agent.utils.command_shell import powershell_argv, resolve_command_shell
 class SandboxUnavailableError(RuntimeError):
     """A confined request must not silently become a host process."""
 
+    def __init__(self, message: str = "", *, reason: str = "", hint: str = "") -> None:
+        super().__init__(message)
+        self.reason = reason
+        self._hint = hint
+
     @property
     def user_hint(self) -> str:
+        if self._hint:
+            return self._hint
         if os.name == "nt":
             return ("请执行 scripts/setup.ps1 sandbox 安装依赖，再显式安装并启用 Windows 沙箱。"
                     "可用 scripts/sandbox.ps1 status 查看状态；不会自动安装系统组件或放行宿主执行。")
@@ -67,9 +74,18 @@ def _decode_preview(data: bytes, limit: int) -> tuple[str, bool]:
         return data[:limit].decode("utf-8", errors="replace"), True
 
 
+@dataclass(frozen=True)
+class _SandboxProbe:
+    available: bool
+    reason: str = ""
+    hint: str = ""
+
+
 @lru_cache(maxsize=8)
-def _bubblewrap_works(binary: str, allow_network: bool = False) -> bool:
-    """Return whether bubblewrap can create a minimal namespace on this host."""
+def _bubblewrap_probe(binary: str | None, allow_network: bool = False) -> _SandboxProbe:
+    """Probe the required profile once; expose authored reasons, never raw runner diagnostics."""
+    if not binary:
+        return _SandboxProbe(False, "bubblewrap_not_installed", "未找到 bubblewrap；受限命令不可用，文件搜索不受影响。")
     try:
         result = subprocess.run(
             [
@@ -101,14 +117,38 @@ def _bubblewrap_works(binary: str, allow_network: bool = False) -> bool:
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=2,
             check=False,
             env={"PATH": "/usr/bin:/bin"},
         )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        return _SandboxProbe(False, "bubblewrap_probe_timeout", "bubblewrap 隔离探测超时；命令未启动。")
+    except OSError:
+        return _SandboxProbe(False, "bubblewrap_launch_failed", "无法启动 bubblewrap；请检查安装与执行权限。")
+    if result.returncode == 0:
+        return _SandboxProbe(True)
+    diagnostic = result.stderr.casefold()
+    if "unknown option" in diagnostic or "unrecognized option" in diagnostic:
+        return _SandboxProbe(
+            False, "bubblewrap_incompatible",
+            "当前 bubblewrap 不支持所需隔离参数（包括 --disable-userns）；请更新后重启应用。"
+            "不会删除保护参数重试；文件搜索不依赖此沙箱。",
+        )
+    if any(value in diagnostic for value in ("operation not permitted", "permission denied", "no permissions")):
+        return _SandboxProbe(
+            False, "bubblewrap_permission_denied",
+            "系统拒绝创建隔离环境；请检查用户命名空间、AppArmor 或容器限制。文件搜索不受影响。",
+        )
+    return _SandboxProbe(False, "bubblewrap_probe_failed", "bubblewrap 无法建立所需隔离环境；受限命令未启动。")
+
+
+def _bubblewrap_works(binary: str, allow_network: bool = False) -> bool:
+    """Boolean capability check backed by the same diagnostic probe as command admission."""
+    return _bubblewrap_probe(binary, allow_network).available
 
 
 def process_sandbox_status(windows_settings: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -133,7 +173,7 @@ def process_sandbox_status(windows_settings: dict[str, Any] | None = None) -> di
             "captured_log_limit_bytes": SandboxExecutor._LOG_LIMIT,
             "disk_quota": False,
             "other_boundaries": {
-                "windows_search": "trusted_ripgrep_and_checked_snapshot",
+                "file_search": "trusted_ripgrep_and_checked_snapshot",
                 "native_files": "application_path_policy",
                 "mcp_stdio": "trusted_host_process",
                 "browser": "chromium_native_sandbox_not_workspace_isolation",
@@ -146,15 +186,15 @@ def process_sandbox_status(windows_settings: dict[str, Any] | None = None) -> di
             else SandboxUnavailableError().user_hint,
         }
     binary = shutil.which("bwrap") if system == "Linux" else None
-    available = bool(binary and _bubblewrap_works(binary))
+    probe = _bubblewrap_probe(binary) if system == "Linux" else _SandboxProbe(
+        False, "native_backend_not_integrated", SandboxUnavailableError().user_hint,
+    )
+    available = probe.available
     return {
         "platform": system,
         "backend": "bubblewrap" if system == "Linux" else "none",
         "status": "available" if available else "unavailable",
-        "reason": "" if available else (
-            "bubblewrap_probe_failed" if binary else "bubblewrap_not_installed" if system == "Linux"
-            else "native_backend_not_integrated"
-        ),
+        "reason": probe.reason,
         "network_isolation": available,
         "cpu_memory_limits": False,
         "per_process_rlimits_available": bool(_prlimit_binary()),
@@ -162,12 +202,12 @@ def process_sandbox_status(windows_settings: dict[str, Any] | None = None) -> di
         "disk_quota": False,
         "scope": "command_processes",
         "other_boundaries": {
-            "windows_search": "trusted_ripgrep_and_checked_snapshot",
+            "file_search": "trusted_ripgrep_and_checked_snapshot",
             "native_files": "application_path_policy",
             "mcp_stdio": "trusted_host_process",
             "browser": "chromium_native_sandbox_not_workspace_isolation",
         },
-        "hint": "" if available else SandboxUnavailableError().user_hint,
+        "hint": probe.hint,
     }
 
 
@@ -463,8 +503,11 @@ class SandboxExecutor:
             if not self._visible_in_sandbox(Path(resolved[0]).resolve()):
                 raise SandboxUnavailableError("Executable is outside the sandbox mounts. No command was started.")
             return self._bubblewrap_argv(bubblewrap, self._limited_argv(resolved)), True, resolved[0]
+        probe = _bubblewrap_probe(bubblewrap, self.allow_network) if platform.system() == "Linux" else None
         raise SandboxUnavailableError(
             f"Restricted process sandbox unavailable on {platform.system()}. No command was started."
+            + (f" {probe.hint}" if probe else ""),
+            reason=probe.reason if probe else "native_backend_not_integrated", hint=probe.hint if probe else "",
         )
 
     def _resolve_argv(self, args: list[str]) -> list[str]:

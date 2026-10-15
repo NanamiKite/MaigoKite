@@ -13,6 +13,7 @@ import { useAutoFollow } from '@/composables/useAutoFollow'
 import { presentationNodes, pendingItem, pendingOrder } from '@/utils/rail-presentation'
 import { remainingMessages } from '@/stores/session-projection'
 import { revealRailNode } from '@/utils/rail-navigation'
+import { overlayPanel } from '@/utils/layout-media'
 import { pickMygoQuote } from '@/config/mygo-quotes'
 import { paperLight, takeWelcomeIntroduction } from '@/utils/welcome-presentation'
 import { modelSwitches } from '@/utils/model-switches'
@@ -51,6 +52,7 @@ const scroll = ref<HTMLElement | null>(null),
   visibleCount = ref(20),
   sending = ref(false),
   restoring = ref(false)
+const highlightedTurn = ref('')
 const mode = ref<PermissionMode>('workspace')
 let draftPermissionChosen = false
 watch(() => settings.permissions.default_mode, (value) => {
@@ -175,7 +177,7 @@ const uncertainInputs = computed(() =>
 )
 const interrupted = computed(() => session.interruptedTask(sessionId.value))
 const submission = computed(() => session.submissions[sessionId.value])
-const { following, onScroll, resume } = useAutoFollow(scroll, () => {
+const { following, onScroll, resume, pause } = useAutoFollow(scroll, () => {
   const latest = timeline.value[timeline.value.length - 1]
   const turn = latest?.turn
   return [
@@ -221,6 +223,9 @@ watch(
     controlError = ''
     controls = Promise.resolve()
     visibleCount.value = 20
+    highlightedTurn.value = ''
+    if (ui.chatTurnRequest && ui.chatTurnRequest.sessionId !== id)
+      ui.clearChatTurnRequest(ui.chatTurnRequest.serial)
     if (id) void session.switchSession(id)
     else {
       session.activeSessionId = null
@@ -405,6 +410,40 @@ async function jump(node: { id: string; turnId: string }) {
     ),
   )
 }
+watch(
+  () => {
+    const request = ui.chatTurnRequest
+    if (!request || request.sessionId !== sessionId.value) return null
+    return timeline.value.some((item) => item.turn?.id === request.turnId)
+      ? request.serial : null
+  },
+  async (serial, _previous, onCleanup) => {
+    const request = ui.chatTurnRequest
+    if (!serial || !request) return
+    onCleanup(() => ui.clearChatTurnRequest(serial))
+    const index = timeline.value.findIndex((item) => item.turn?.id === request.turnId)
+    pause()
+    highlightedTurn.value = ''
+    visibleCount.value = Math.max(visibleCount.value, timeline.value.length - index)
+    const closeDrawer = ui.drawerOpen && overlayPanel('drawer')
+    if (closeDrawer) ui.drawerOpen = false
+    await nextTick()
+    // Let overlay focus restoration finish before focusing the destination.
+    if (closeDrawer) await nextTick()
+    if (ui.chatTurnRequest?.serial !== serial || sessionId.value !== request.sessionId) return
+    const target = scroll.value?.querySelector<HTMLElement>(
+      `[data-turn-id="${CSS.escape(request.turnId)}"]`,
+    )
+    if (!target) return
+    revealRailNode(target, 'start')
+    highlightedTurn.value = request.turnId
+    ui.clearChatTurnRequest(serial)
+  },
+  { flush: 'post', immediate: true },
+)
+function clearTurnHighlight(id: string | undefined) {
+  if (highlightedTurn.value === id) highlightedTurn.value = ''
+}
 async function locate(item: AwaitItem) {
   const index = timeline.value.findIndex((entry) => entry.turn?.id === item.turnId)
   if (index >= 0) visibleCount.value = Math.max(visibleCount.value, timeline.value.length - index)
@@ -542,6 +581,10 @@ watch(
               v-for="item in visibleTimeline"
               :key="item.key"
               class="turn"
+              :class="{ located: item.turn?.id === highlightedTurn }"
+              :data-turn-id="item.turn?.id"
+              :tabindex="item.turn ? -1 : undefined"
+              @animationend.self="clearTurnHighlight(item.turn?.id)"
             >
               <template v-if="item.message">
                 <UserMessage

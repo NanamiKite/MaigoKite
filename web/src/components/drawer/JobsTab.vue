@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { t } from '@/i18n'
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { api, type AgentTask, type ProcessJob } from '@/api/client'
 import { useRunStore } from '@/stores/run'
 import { useSessionStore } from '@/stores/session'
@@ -11,7 +12,9 @@ import RunEntry from './RunEntry.vue'
 import RunWorkspace from './RunWorkspace.vue'
 const run = useRunStore(),
   session = useSessionStore(),
-  ui = useUIStore()
+  ui = useUIStore(),
+  route = useRoute(),
+  router = useRouter()
 const tasks = ref<AgentTask[]>([]),
   jobs = ref<ProcessJob[]>([]),
   error = ref(''),
@@ -30,6 +33,17 @@ const pages = ref<InstanceType<typeof RunWorkspace> | null>(null)
 const historyLimit = ref(20)
 function openSubagent(turnId: string, childId: string) {
   pages.value?.open(turnId, childId)
+}
+async function locateTask(task: AgentTask) {
+  try {
+    if (route.name !== 'Chat' || route.params.id !== task.conversation_id) {
+      const failure = await router.push({ name: 'Chat', params: { id: task.conversation_id } })
+      if (failure) return
+    }
+    ui.locateChatTurn(task.conversation_id, task.id)
+  } catch {
+    error.value = t('暂时无法定位到对话，请重试。')
+  }
 }
 watch(
   () => session.activeSessionId,
@@ -228,6 +242,7 @@ onUnmounted(cleanup)
         :operation="operation(task)"
         :stopping="session.stoppingTaskIds.includes(task.id)"
         @stop="stop(task)"
+        @locate="locateTask(task)"
         @open-subagent="openSubagent"
       />
       <article v-for="job in jobs" :key="job.id">
@@ -286,6 +301,7 @@ onUnmounted(cleanup)
           :task="task"
           :turn="turnById.get(task.id)"
           :label="$t(labels[task.status])"
+          @locate="locateTask(task)"
           @open-subagent="openSubagent"
         />
         <button

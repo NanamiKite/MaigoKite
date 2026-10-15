@@ -1,4 +1,7 @@
 const en: Record<string, string> = {
+  定位到对话: 'Show in conversation',
+  '定位到对话：{0}': 'Show in conversation: {0}',
+  '暂时无法定位到对话，请重试。': 'Could not locate this conversation. Please try again.',
   执行记录: 'Execution record',
   委派任务: 'Delegated task',
   '子 Agent 对话': 'Subagent conversation',

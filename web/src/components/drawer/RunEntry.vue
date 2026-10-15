@@ -16,7 +16,7 @@ const props = defineProps<{
   operation?: string
   label: string
 }>()
-const emit = defineEmits<{ stop: []; openSubagent: [turnId: string, childId: string] }>()
+const emit = defineEmits<{ stop: []; locate: []; openSubagent: [turnId: string, childId: string] }>()
 const expanded = ref(Boolean(props.active))
 const title = computed(() => props.task.title || props.task.input_text.split('\n')[0] || t('任务'))
 const children = computed(() => props.turn?.subagents || [])
@@ -60,6 +60,16 @@ function childStatus(child: SubagentRun) {
         <span :title="title">{{ title }}</span>
         <small>{{ label }}</small>
         <IconSymbol name="chevron" :size="12" :class="{ expanded }" />
+      </button>
+      <button
+        type="button"
+        class="entry-locate"
+        :disabled="!turn"
+        :title="$t(turn ? '定位到对话' : '运行明细尚未载入。')"
+        :aria-label="$t('定位到对话：{0}', [title])"
+        @click.stop="emit('locate')"
+      >
+        <IconSymbol name="target" :size="15" />
       </button>
       <button
         v-if="active"
@@ -152,6 +162,21 @@ function childStatus(child: SubagentRun) {
   flex-shrink: 0;
   color: var(--ink-2);
   font-size: var(--text-xs);
+}
+.entry-locate {
+  @include mixins.interactive-row;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: var(--space-7);
+  height: var(--space-7);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--transparent);
+  color: var(--ink-2);
+  &:focus-visible { color: var(--accent); }
+  @media (hover: hover) { &:not(:disabled):hover { color: var(--accent); } }
 }
 .expanded {
   transform: rotate(var(--measure-90deg));

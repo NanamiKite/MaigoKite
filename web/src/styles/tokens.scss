@@ -132,6 +132,8 @@
   --memory-meter-height: 2px;
   --memory-focus-wash: color-mix(in srgb, var(--accent) 12%, var(--transparent));
   --memory-focus-duration: 1600ms;
+  --chat-focus-wash: color-mix(in srgb, var(--accent) 12%, var(--transparent));
+  --chat-focus-duration: 1600ms;
   --memory-editor-height: 120px;
   --memory-skeleton-width: 75%;
   --memory-skeleton-short: 48%;

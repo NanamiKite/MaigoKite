@@ -2,6 +2,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { chooseOption, mockDialogs, testRouter } from './ui-harness'
 import { api } from '@/api/client'
+import { useUIStore } from '@/stores/ui'
 
 import InputBox from '@/components/chat-area/InputBox.vue'
 
@@ -26,13 +27,16 @@ describe('InputBox', () => {
       global,
       props: { sessionId: 'conv-1', modelId: 'model-1', modelOptions: configuredModel },
     })
+    await wrapper.get('textarea').setValue('   ')
+    await wrapper.get('textarea').trigger('keydown', { key: 's', code: 'KeyS', altKey: true })
+    expect(wrapper.emitted('send')).toBeUndefined()
     await wrapper.get('textarea').setValue('  hello  ')
     await wrapper.get('button[aria-label="发送消息"]').trigger('click')
-    expect(wrapper.emitted('send')?.[0]).toEqual(['hello'])
+    expect(wrapper.emitted('send')).toEqual([['hello']])
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
   })
 
-  it('sends with Enter but keeps Shift+Enter for a new line', async () => {
+  it('leaves Enter and Shift+Enter to the textarea and sends with Alt+S by default', async () => {
     const wrapper = mount(InputBox, {
       global,
       props: { sessionId: 'conv-1', modelId: 'model-1', modelOptions: configuredModel },
@@ -40,11 +44,46 @@ describe('InputBox', () => {
     const textarea = wrapper.get('textarea')
 
     await textarea.setValue('first line')
+    for (const shiftKey of [false, true]) {
+      const event = new KeyboardEvent('keydown', { key: 'Enter', shiftKey, bubbles: true, cancelable: true })
+      textarea.element.dispatchEvent(event)
+      await flushPromises()
+      expect(event.defaultPrevented).toBe(false)
+      expect(wrapper.emitted('send')).toBeUndefined()
+    }
+
+    await textarea.trigger('keydown', { key: 's', code: 'KeyS', altKey: true })
+    await flushPromises()
+    expect(wrapper.emitted('send')).toEqual([['first line']])
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it.each([{ ctrlKey: true }, { metaKey: true }])('preserves Ctrl/Cmd+Enter sending: %j', async (modifier) => {
+    const wrapper = mount(InputBox, {
+      global,
+      props: { sessionId: 'conv-1', modelId: 'model-1', modelOptions: configuredModel },
+    })
+    await wrapper.get('textarea').setValue('shortcut message')
+    await wrapper.get('textarea').trigger('keydown', { key: 'Enter', ...modifier })
+    await flushPromises()
+    expect(wrapper.emitted('send')).toEqual([['shortcut message']])
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('sends with Enter when explicitly configured, but Shift+Enter still does not send', async () => {
+    useUIStore().setAppearance({ enterBehavior: 'send', confirmEnterSend: false })
+    const wrapper = mount(InputBox, {
+      global,
+      props: { sessionId: 'conv-1', modelId: 'model-1', modelOptions: configuredModel },
+    })
+    const textarea = wrapper.get('textarea')
+    await textarea.setValue('configured Enter')
     await textarea.trigger('keydown', { key: 'Enter', shiftKey: true })
     expect(wrapper.emitted('send')).toBeUndefined()
-
     await textarea.trigger('keydown', { key: 'Enter' })
-    expect(wrapper.emitted('send')?.[0]).toEqual(['first line'])
+    await flushPromises()
+    expect(wrapper.emitted('send')).toEqual([['configured Enter']])
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('')
   })
 
   it('uses the configured assistant name in its placeholder', () => {
@@ -71,12 +110,12 @@ describe('InputBox', () => {
         modelOptions: configuredModel,
       },
     })
-    expect(wrapper.get('textarea').attributes('placeholder')).toBe('问问 小七…')
+    expect(wrapper.get('textarea').attributes('placeholder')).toBe('写下一条消息…')
     expect(wrapper.get('.composer').attributes('aria-busy')).toBe('true')
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
   })
 
-  it('turns the send control into an explicit stop action while running', async () => {
+  it('keeps stopping separate from queued sends while running', async () => {
     const wrapper = mount(InputBox, {
       global,
       props: {
@@ -87,9 +126,11 @@ describe('InputBox', () => {
       },
     })
     const button = wrapper.get('button[aria-label="停止任务"]')
+    expect(wrapper.find('button[aria-label="加入队列"]').exists()).toBe(true)
     expect(button.attributes('aria-label')).toBe('停止任务')
     await button.trigger('click')
     expect(wrapper.emitted('cancel')).toHaveLength(1)
+    expect(wrapper.emitted('send')).toBeUndefined()
   })
 
   it('emits model, capability-based thinking and approval-mode choices', async () => {

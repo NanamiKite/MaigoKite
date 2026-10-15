@@ -1,6 +1,7 @@
 import type { AgentEvent } from './client'
 import type { GatewayEvent, PlanItem, ToolHintAction, TurnSummary } from './events'
 import { mapModelEvent } from './model-events'
+import { mapSubagentEvent } from './subagent-events'
 import { t } from '@/i18n'
 
 const readTools = new Set([
@@ -50,6 +51,8 @@ export function mapGatewayEvent(event: AgentEvent): GatewayEvent[] {
   }
   const modelEvent = mapModelEvent(event, base)
   if (modelEvent) return [modelEvent]
+  const childEvents = mapSubagentEvent(event)
+  if (childEvents) return childEvents
   if (event.type === 'plan.updated' && event.task_id && Array.isArray(p.items)) {
     const items = p.items.flatMap((value): PlanItem[] => {
       const item = object(value)
@@ -83,43 +86,6 @@ export function mapGatewayEvent(event: AgentEvent): GatewayEvent[] {
     ]
   const tool = String(p.tool_name || t('工具'))
   const stepId = String(p.tool_call_id || event.event_id)
-  if (['subagent.queued', 'subagent.started', 'subagent.progress'].includes(event.type)) {
-    const pending = event.type === 'subagent.queued'
-    const model = [p.name || p.model, p.provider].filter(Boolean).join(' · ')
-    const label = text(p.label) || t('子 Agent')
-    return [
-      {
-        ...base,
-        type: 'step_start',
-        stepId: String(p.subagent_id),
-        tool: 'delegate',
-        kind: 'read',
-        title: pending
-          ? t('{0} 等待中 · 已派发 {1}/{2}', [label, p.used, p.limit])
-          : `${label}${model ? ` · ${model}` : ''} · ${event.type === 'subagent.progress' ? tool : t('执行中')}`,
-        input: {
-          ...object(p.arguments),
-          task: p.task,
-          model_id: p.model_id,
-          model: p.model,
-          provider: p.provider,
-        },
-        pending,
-      },
-    ]
-  }
-  if (['subagent.completed', 'subagent.failed', 'subagent.cancelled'].includes(event.type)) {
-    return [
-      {
-        ...base,
-        type: 'step_end',
-        stepId: String(p.subagent_id),
-        ok: event.type === 'subagent.completed',
-        output: text(p.summary || p.message || t('子 Agent 已停止')),
-        durationMs: 0,
-      },
-    ]
-  }
   if (event.type === 'task.resumed') return [{ ...base, type: 'turn_resumed' }]
   if (event.type === 'task.waiting_approval') return [{ ...base, type: 'turn_waiting' }]
   if (event.type === 'message.delta')

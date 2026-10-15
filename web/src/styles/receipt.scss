@@ -141,6 +141,15 @@ time {
 .receipt-details {
   width: 100%;
 }
+.receipt.embedded {
+  grid-template-columns: minmax(0, 1fr);
+  margin-block: var(--space-3) var(--space-5);
+  gap: 0;
+}
+.embedded .receipt-sheet {
+  max-width: none;
+  animation: none;
+}
 .compact {
   margin-block: var(--space-2) var(--space-7);
 }

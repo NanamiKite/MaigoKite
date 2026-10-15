@@ -3,12 +3,14 @@
   @include mixins.text-action;
 }
 .jobs-tab {
-  padding: var(--space-6);
-  overflow: auto;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 header,
-article > div,
-summary {
+article > div {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -69,16 +71,4 @@ pre {
     flex: 1;
     min-width: 0;
   }
-}
-details {
-  padding-block: var(--space-4);
-}
-summary {
-  cursor: pointer;
-}
-summary span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }

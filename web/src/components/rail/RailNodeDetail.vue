@@ -2,7 +2,7 @@
 import type { Step } from '@/api/events'
 import { formatDuration } from '@/utils/format'
 import CodeBlock from '@/components/common/CodeBlock.vue'
-defineProps<{ steps: Step[] }>()
+defineProps<{ steps: Step[]; ended?: boolean }>()
 const statusLabels = { pending: '等待执行', running: '进行中', completed: '完成', failed: '失败' }
 function argumentsText(input: unknown) {
   return JSON.stringify(input, null, 2)?.slice(0, 20_000) || '{}'
@@ -10,25 +10,29 @@ function argumentsText(input: unknown) {
 </script>
 <template>
   <div class="node-details">
-    <article
-      v-for="step in steps"
-      :key="step.id"
-    >
+    <article v-for="step in steps" :key="step.id">
       <header>
-        <span>{{ step.title }}</span><small>{{ $t(statusLabels[step.status]) }} · {{ formatDuration(step.durationMs)
-        }}<template v-if="step.exitCode !== undefined">{{
-          $t('· 退出码 {0}', [step.exitCode])
-        }}</template></small>
+        <span>{{ step.title }}</span
+        ><small
+          >{{
+            $t(
+              ended && ['running', 'pending'].includes(step.status)
+                ? '未记录结束状态'
+                : statusLabels[step.status],
+            )
+          }}
+          · {{ formatDuration(step.durationMs)
+          }}<template v-if="step.exitCode !== undefined">{{
+            $t('· 退出码 {0}', [step.exitCode])
+          }}</template></small
+        >
       </header>
       <details>
         <summary>{{ $t('参数') }}</summary>
         <p v-if="step.errorCode">
           {{ $t('错误代码：') }}<code>{{ step.errorCode }}</code>
         </p>
-        <CodeBlock
-          :content="argumentsText(step.input)"
-          language="JSON"
-        />
+        <CodeBlock :content="argumentsText(step.input)" language="JSON" />
       </details>
       <CodeBlock
         v-if="step.output"
@@ -38,16 +42,9 @@ function argumentsText(input: unknown) {
         "
         :title="$t('输出')"
       />
-      <p
-        v-if="step.hint || step.action"
-        class="hint"
-        role="status"
-      >
+      <p v-if="step.hint || step.action" class="hint" role="status">
         {{ step.hint
-        }}<router-link
-          v-if="step.action"
-          :to="step.action.to"
-        >
+        }}<router-link v-if="step.action" :to="step.action.to">
           {{ step.action.label }}
         </router-link>
       </p>

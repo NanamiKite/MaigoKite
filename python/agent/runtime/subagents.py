@@ -5,13 +5,17 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, cast, get_type_hints
+from uuid import uuid4
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
-from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse, ToolCallRequest
+from langchain.agents.middleware.types import (
+    AgentState, ExtendedModelResponse, ModelRequest, ModelResponse, ToolCallRequest,
+)
 from langchain.tools import ToolRuntime
 from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
@@ -33,6 +37,9 @@ if TYPE_CHECKING:
 
 READ_TOOLS = frozenset({"file_read", "glob", "grep"})
 CHILD_TAG = "maigokite:subagent"
+# Product transcript only; the graph/checkpoint still owns execution. Bound
+# individual journal records, and tell the UI when evidence has been clipped.
+_TRANSCRIPT_LIMIT = 64_000
 
 
 class DelegationError(UserFacingError):
@@ -101,12 +108,30 @@ class _ReadOnlyTools(AgentMiddleware[AgentState[object], ChildContext]):
     async def awrap_model_call(
         self, request: ModelRequest[ChildContext],
         handler: Callable[[ModelRequest[ChildContext]], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
-        await self.refresh_authority(request.runtime.context)
-        enabled = request.runtime.context.execution_metadata["enabled_tools"]
-        return await handler(
+    ) -> ModelResponse | ExtendedModelResponse:
+        child = request.runtime.context
+        await self.refresh_authority(child)
+        enabled = child.execution_metadata["enabled_tools"]
+        response = await handler(
             request.override(tools=[tool for tool in request.tools if getattr(tool, "name", "") in enabled])
         )
+        result = response.model_response if isinstance(response, ExtendedModelResponse) else response
+        for message in result.result:
+            if not isinstance(message, AIMessage):
+                continue
+            content, tagged_reasoning = split_thinking(child.adapter._raw_message_text(message))
+            reasoning = child.adapter._reasoning_text(message) or tagged_reasoning
+            if not content and not reasoning:
+                continue
+            await child.adapter._emit(child.parent, "subagent.message", {
+                "subagent_id": child.subagent_id,
+                "message_id": message.id or str(uuid4()),
+                "content": content[:_TRANSCRIPT_LIMIT],
+                "reasoning": reasoning[:_TRANSCRIPT_LIMIT],
+                "final": not message.tool_calls,
+                "truncated": len(content) > _TRANSCRIPT_LIMIT or len(reasoning) > _TRANSCRIPT_LIMIT,
+            })
+        return response
 
     async def awrap_tool_call(
         self, request: ToolCallRequest,
@@ -115,10 +140,24 @@ class _ReadOnlyTools(AgentMiddleware[AgentState[object], ChildContext]):
         # A child owns its reads. Drain them before returning a failed/timed-out
         # delegation; the parent root scope still owns the entire delegation.
         async def read() -> ToolMessage | Command[str]:
+            started = time.monotonic()
             try:
-                return await self._read(request, handler)
+                result = await self._read(request, handler)
             except Exception as exc:
-                return ToolMessage(content=public_error(exc), tool_call_id=request.tool_call["id"], status="error")
+                result = ToolMessage(content=public_error(exc), tool_call_id=request.tool_call["id"], status="error")
+            if isinstance(result, ToolMessage):
+                output = child.adapter._raw_message_text(result)
+                await child.adapter._emit(child.parent, "subagent.tool.completed", {
+                    "subagent_id": child.subagent_id,
+                    "tool_call_id": request.tool_call["id"],
+                    "tool_name": request.tool_call["name"],
+                    "arguments": request.tool_call.get("args") or {},
+                    "output": output[:_TRANSCRIPT_LIMIT],
+                    "ok": result.status != "error",
+                    "duration_ms": round((time.monotonic() - started) * 1000),
+                    "truncated": len(output) > _TRANSCRIPT_LIMIT,
+                })
+            return result
 
         child = cast(ChildContext, request.runtime.context)
         if child.scope is None:
@@ -148,7 +187,8 @@ class _ReadOnlyTools(AgentMiddleware[AgentState[object], ChildContext]):
         runtime = replace(cast(ToolRuntime[ChildContext], request.runtime), context=authority)
         request = replace(request, runtime=cast(ToolRuntime[None], runtime))
         await adapter._emit(parent, "subagent.progress", {
-            "subagent_id": child.subagent_id, "tool_name": call["name"], "arguments": decision.arguments,
+            "subagent_id": child.subagent_id, "tool_call_id": call["id"],
+            "tool_name": call["name"], "arguments": decision.arguments,
             **child.model_info,
         })
         result = await handler(request.override(tool_call={**call, "args": decision.arguments}))

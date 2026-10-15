@@ -1,4 +1,5 @@
 import type { SafetyRequestFormat, TaskInput } from './client'
+import type { SubagentRun, SubagentUpdate } from './subagent-events'
 
 export type PulseState = 'idle' | 'thinking' | 'acting' | 'waiting' | 'error' | 'offline'
 export type Verdict = 'allow' | 'allow_session' | 'deny'
@@ -99,6 +100,7 @@ export type GatewayEvent = {
   turnId: string
   time?: string
 } & (
+  | { type: 'subagent_update'; childId: string; update: SubagentUpdate }
   | { type: 'model_start' | 'model_failed'; callId: string; purpose: string }
   | ({ type: 'model_end'; callId: string; purpose: string; usage?: TokenUsage } & ModelTiming)
   | { type: 'context_update'; context: ContextUsage }
@@ -192,6 +194,7 @@ export interface RailNode {
   running?: boolean
 }
 export interface Turn {
+  subagents?: SubagentRun[]
   id: string
   sessionId: string
   status: 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled'

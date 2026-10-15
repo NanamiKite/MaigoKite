@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import type { AwaitItem, ContextUsage, GatewayEvent, PulseState, Turn } from '@/api/events'
 import type { AgentTask, ConversationSnapshot, TaskInput, TaskInspection } from '@/api/client'
 import { summarize } from './run-projection'
+import { projectSubagentEvent } from './run-subagents'
 import { latestContext, projectModelEvent, sessionUsage, type UsageStats } from './run-usage'
 export type { PulseState } from '@/api/events'
 
@@ -300,6 +301,7 @@ export const useRunStore = defineStore('run', () => {
       ? { ...previous }
       : {
           ...previous,
+          subagents: previous.subagents ? [...previous.subagents] : undefined,
           steps: previous.steps.map((item) => ({ ...item })),
           awaits: previous.awaits.map((item) => ({ ...item })),
           timeline: previous.timeline.map((item) => ({ ...item })),
@@ -317,6 +319,9 @@ export const useRunStore = defineStore('run', () => {
     const staleState = event.seq <= (stateSequences.get(stateKey) || 0)
     try {
       switch (event.type) {
+        case 'subagent_update':
+          projectSubagentEvent(turn, event)
+          break
         case 'model_start':
         case 'model_end':
         case 'model_failed':

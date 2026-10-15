@@ -636,6 +636,8 @@ tool.failed
 subagent.queued
 subagent.started
 subagent.progress
+subagent.message
+subagent.tool.completed
 subagent.completed
 subagent.failed
 subagent.cancelled
@@ -659,6 +661,15 @@ file.changed
 `message.*` 只承载用户可见的最终回答。模型主动输出的简短过程说明使用 `reasoning.*`，工具与子智能体生命周期分别使用 `tool.*` 和 `subagent.*`；三者均通过 `task_id` 关联任务，不写入消息资源。系统不传输模型隐藏思维链。
 
 `subagent.*` 的 `subagent_id` 对应父任务的 `delegate` 工具调用 ID，不是独立产品 task。queued 带 `used/limit/task/label/requested_model_id`；started 带 `task` 和实际 `model_id/name/provider/model/label`，progress 带相同模型身份及只读工具名/参数，completed 带摘要和模型身份，failed 带安全错误信息与请求 ID。前端将进度/结果映射到同一 delegate 活动；原 `tool.completed/failed` 投影继续保留，父任务终态保持不变。子 Agent 模型事件的 `purpose=subagent`、`subagent_id` 及实际模型身份用于用量归属，不复用主回复的 `message.delta`。
+
+子 Agent 对话页签继续读取父任务的事件历史，不新增 conversation、task 或独立执行状态。增量事件沿用现有可扩展 EventEnvelope：
+
+- `subagent.progress` 增加 `tool_call_id`，精确关联子 Agent 内部一次读取；旧事件没有该字段时仅保留委派级进度，不虚构内部工具调用。
+- `subagent.message`：`subagent_id/message_id/content/reasoning/final/truncated`。SDK 一次模型调用返回后记录公开文本与公开思考，不包含隐藏推理、签名、凭证或原始 provider metadata；`final` 表示此条回复未请求工具，不替代子 Agent 生命周期终态。
+- `subagent.tool.completed`：`subagent_id/tool_call_id/tool_name/arguments/output/ok/duration_ms/truncated`。记录工具真实返回（包括拒绝或失败），不通过该事件重新执行工具；取消时未返回的操作不伪造结果。
+- 单项正文、公开思考及工具输出各最多保存 64,000 个字符，超出时 `truncated=true`，不改变返回模型的原始工具结果或 checkpoint。页签按 journal sequence 排序、按消息/工具 ID 合并；历史没有这些增量记录时只展示已保存任务、摘要或错误。
+
+这些是产品展示投影，仍由官方 `create_agent`/LangGraph 驱动子 Agent 执行。关闭 UI 页签不取消执行，父任务停止与只读权限检查沿用原链路。
 
 `model.usage` 是可选的观测事件，不写入消息，也不表示任务完成。`payload.usage` 保存 Provider/SDK 提供的数值，例如 `input_tokens / output_tokens / total_tokens / cache_read_tokens / cache_creation_tokens / cache_miss_tokens / reasoning_tokens`；缺失缓存字段表示未提供。旧路径可能保留 `prompt_tokens / completion_tokens`。新路径同时覆盖主模型与摘要，通过 `purpose: response | summary`、`call_id` 区分；`model.call.started/failed` 记录调用次数和无完整结果的调用。SDK 内部重试与未返回的服务端用量无法据此补齐，因此不是完整账单。`context.compacted` 只给近似压缩前后/摘要 token 数和目标上限；`context.history` 标记 checkpoint 或可见历史导入，`execution_resumed: false` 表示开启新回合而非重放旧执行。未知事件类型不得阻断客户端的 sequence 推进。
 

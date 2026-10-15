@@ -5,10 +5,17 @@ import { formatDuration } from '@/utils/format'
 import { useSessionStore } from '@/stores/session'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { changedFiles, commandSteps } from '@/utils/receipt-details'
+import { summarize } from '@/stores/run-projection'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import ReceiptDetails from './ReceiptDetails.vue'
 import RailGlyph from './RailGlyph.vue'
-const props = defineProps<{ turn: Turn }>()
+const props = defineProps<{ turn: Turn; embedded?: boolean }>()
+const summary = computed(
+  () => props.turn.summary || (props.embedded ? summarize(props.turn) : undefined),
+)
+const detailsId = computed(
+  () => `receipt-${props.embedded ? 'drawer' : 'chat'}-${props.turn.id}-details`,
+)
 const session = useSessionStore(),
   workspace = useWorkspaceStore()
 type Category = 'files' | 'commands' | 'approvals' | 'failures'
@@ -58,13 +65,15 @@ const facts = computed(
 )
 const hasOperations = computed(() => facts.value.some((fact) => fact.count))
 const title = computed(() =>
-  props.turn.status === 'cancelled'
-    ? '已停止'
-    : props.turn.status === 'failed'
-      ? '执行未完成'
-      : hasOperations.value
-        ? '执行小结'
-        : '已回复',
+  ['running', 'waiting'].includes(props.turn.status)
+    ? '执行记录'
+    : props.turn.status === 'cancelled'
+      ? '已停止'
+      : props.turn.status === 'failed'
+        ? '执行未完成'
+        : hasOperations.value
+          ? '执行小结'
+          : '已回复',
 )
 function toggle(category: Category) {
   selected.value = selected.value === category ? null : category
@@ -74,8 +83,13 @@ function toggleSummary() {
 }
 </script>
 <template>
-  <section v-if="turn.summary" class="receipt" :class="[turn.status, { compact: !hasOperations }]">
+  <section
+    v-if="summary"
+    class="receipt"
+    :class="[turn.status, { compact: !hasOperations, embedded }]"
+  >
     <button
+      v-if="!embedded"
       type="button"
       class="end-glyph"
       :data-rail-node="turn.id + ':end'"
@@ -90,7 +104,7 @@ function toggleSummary() {
     <div class="receipt-sheet">
       <header>
         <h3>{{ $t(title) }}</h3>
-        <time>{{ formatDuration(turn.summary.durationMs) }}</time>
+        <time>{{ formatDuration(summary.durationMs) }}</time>
       </header>
       <template v-if="hasOperations">
         <div class="receipt-facts">
@@ -100,15 +114,15 @@ function toggleSummary() {
             type="button"
             :class="{ 'failed-fact': fact.id === 'failures', active: selected === fact.id }"
             :aria-expanded="selected === fact.id"
-            :aria-controls="'receipt-' + turn.id + '-details'"
+            :aria-controls="detailsId"
             @click="toggle(fact.id)"
           >
             <IconSymbol :name="fact.icon" :size="13" />
             <span>{{ $t(fact.label) }}</span
             ><strong>{{ fact.count }}</strong>
-            <template v-if="fact.id === 'files' && (turn.summary.added || turn.summary.removed)">
-              <small class="diff-added">+{{ turn.summary.added }}</small>
-              <small class="diff-removed">−{{ turn.summary.removed }}</small>
+            <template v-if="fact.id === 'files' && (summary.added || summary.removed)">
+              <small class="diff-added">+{{ summary.added }}</small>
+              <small class="diff-removed">−{{ summary.removed }}</small>
             </template>
             <IconSymbol name="chevron" :size="11" class="fact-chevron" />
           </button>
@@ -116,7 +130,7 @@ function toggleSummary() {
         <ReceiptDetails
           v-if="selected"
           :key="selected"
-          :id="'receipt-' + turn.id + '-details'"
+          :id="detailsId"
           :turn="turn"
           :category="selected"
           :files="files"

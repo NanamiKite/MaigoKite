@@ -337,6 +337,11 @@ class DelegateTool(BaseTool):
             # Recoverable failures become native tool results; TaskGroup won't
             # kill unrelated siblings merely because one investigation failed.
             # Provider exceptions may contain request URLs or credentials.
+            # TaskGroup wraps a single budget/permission error after draining
+            # the child's reads. Preserve that authored diagnostic, not the
+            # generic ExceptionGroup label or third-party exception text.
+            while isinstance(exc, ExceptionGroup) and len(exc.exceptions) == 1:
+                exc = exc.exceptions[0]
             if isinstance(exc, UserFacingError):
                 summary = str(exc)
             elif isinstance(exc, TimeoutError):

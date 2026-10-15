@@ -996,7 +996,11 @@ class SQLiteRepository:
                 task = db.execute(
                     "SELECT * FROM tasks WHERE workspace_id=? AND id=?", (workspace_id, task_id)
                 ).fetchone()
-                if task is None or task["status"] != "running":
+                # An already-admitted read-only child may drain while a sibling
+                # tool waits for approval. This is not a stop and grants no
+                # extra budget; the parent still cannot request another turn.
+                allowed_statuses = {"running", "waiting_approval"} if child else {"running"}
+                if task is None or task["status"] not in allowed_statuses:
                     raise UserFacingError("任务已停止，不能继续请求模型。")
                 if not task["model_call_limit"]:
                     return

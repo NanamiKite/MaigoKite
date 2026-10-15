@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useSettingsStore } from '@/stores/settings'
 import { useUIStore } from '@/stores/ui'
@@ -19,6 +20,7 @@ const session = useSessionStore(),
   ui = useUIStore(),
   inbox = useInboxStore()
 const { isElectron, platform } = useElectron()
+const route = useRoute()
 const viewportWidth = ref(window.innerWidth)
 const narrowSidebar = computed(() => overlayPanel('sidebar', viewportWidth.value))
 const narrowDrawer = computed(() => overlayPanel('drawer', viewportWidth.value))
@@ -156,6 +158,7 @@ onUnmounted(() => {
         />
         <main
           class="main-content"
+          :class="{ 'chat-content': route.name === 'Chat' }"
           :inert="activeOverlay ? true : undefined"
         >
           <router-view />
@@ -198,6 +201,12 @@ onUnmounted(() => {
   min-width: 0;
   min-height: 0;
   overflow: auto;
+}
+// Chat owns its message scroller; other routes keep page-level scrolling.
+.main-content.chat-content {
+  display: flex;
+  flex-direction: column;
+  overflow: clip;
 }
 .sidebar-shade {
   display: none;

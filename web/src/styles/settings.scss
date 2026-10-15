@@ -228,7 +228,8 @@
 @each $field in language, assistant-name, greeting-name, avatar, theme, accent, text-size, texture,
   context-usage, capsule-shortcut, models, model-base-url, model-api-key, model-selection,
   tool-selection, search-tools, permission-mode, runtime-status, safety-enabled, safety-base-url,
-  safety-model, safety-api-key, safety-format, safety-state, safety-threshold, safety-trusted
+  safety-model, safety-api-key, safety-format, safety-state, safety-threshold, safety-trusted,
+  subagent-calls, subagent-concurrent, subagent-models
 {
   .settings-content[data-highlight='#{$field}'] [data-settings-field='#{$field}'] {
     box-shadow: 0 0 0 var(--focus-width) var(--accent);

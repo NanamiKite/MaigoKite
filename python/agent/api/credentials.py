@@ -271,9 +271,16 @@ class Credentials:
             if task["conversation_id"] != conversation_id:
                 raise APIError(409, "TASK_MISMATCH", "任务不属于当前对话。")
             subagent_models_json = task["subagent_model_ids_json"]
-        model_ids = {conversation.get("model_id") or "", *json.loads(subagent_models_json or "[]")}
-        for model_id in model_ids:
-            await self.restore_model(workspace, model_id)
+        parent_model_id = conversation.get("model_id") or ""
+        await self.restore_model(workspace, parent_model_id)
+        for model_id in sorted(set(json.loads(subagent_models_json or "[]")) - {parent_model_id}):
+            try:
+                await self.restore_model(workspace, model_id)
+            except KeyError:
+                # Allowlist entries can outlive a deleted model configuration.
+                # They are optional until delegate selects one; its own lookup
+                # reports the missing model without substituting another model.
+                logger.warning("Optional subagent model no longer exists: %s", model_id)
         if models_only:
             return
         for service in ("tavily", "google"):

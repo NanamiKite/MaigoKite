@@ -93,15 +93,21 @@ class BrowserRuntime:
         if self._closing:
             raise BrowserRuntimeUnavailable("Browser runtime is shutting down")
         self.require_owner(session_id, owner)
+        # A live page already owns Playwright. Keep the SDK import lazy so
+        # browser installation failures do not prevent ordinary Core startup.
+        from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
         lock = self._operations[session_id]
         async with lock:
             self.require_owner(session_id, owner)
             try:
                 async with asyncio.timeout(90):
                     yield
-            except (asyncio.CancelledError, TimeoutError) as exc:
+            except (asyncio.CancelledError, TimeoutError, PlaywrightTimeoutError) as exc:
                 # Cancellation of the Python waiter alone does not stop Chromium.
                 # Only the caller holding this page's lock may close the context.
+                # Playwright's action timeouts are not Python TimeoutError;
+                # a timed-out click/upload must release its page here as well.
                 if session_id in self._contexts:
                     await self._close_after_error(session_id, exc)
                 raise
@@ -351,8 +357,11 @@ class BrowserRuntime:
         finally:
             if download is not None:
                 try:
-                    await download.cancel()
-                    await download.delete()
+                    # Cleanup is remote I/O too. Bound it so stopping a download
+                    # cannot leave the root waiting indefinitely.
+                    async with asyncio.timeout(10):
+                        await download.cancel()
+                        await download.delete()
                 except Exception as exc:
                     # The file may already be committed. Do not report that a
                     # successful download failed merely because Chromium closed.

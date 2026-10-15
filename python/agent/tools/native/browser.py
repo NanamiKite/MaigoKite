@@ -60,6 +60,14 @@ class BrowserTool(BaseTool):
 
     async def execute(self, context: ExecutionContext, arguments: dict[str, Any]) -> ToolResult:
         action = str(arguments["action"])
+        try:
+            from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+        except ImportError:
+            return ToolResult.failure(
+                {"action": action}, "Browser runtime is unavailable.",
+                error_code="BROWSER_RUNTIME_UNAVAILABLE",
+                user_hint="请安装 Playwright 及 Chromium 后再使用浏览器工具；其他工具不受影响。",
+            )
         unrestricted = context.metadata.get("sandbox_mode") == "danger_full_access"
         owner = (
             str(context.metadata.get("workspace_id", "personal")),
@@ -96,6 +104,14 @@ class BrowserTool(BaseTool):
             return ToolResult.failure(
                 {"action": action}, hint,
                 error_code="BROWSER_SESSION_EXPIRED", user_hint=hint,
+            )
+        except (TimeoutError, PlaywrightTimeoutError):
+            hint = (
+                "浏览器操作超时，已结束本次页面会话；点击、提交或上传可能已发生。"
+                "请先核实实际结果，不要自动重试；后续操作需重新打开页面，具名 profile 的登录态仍保留。"
+            )
+            return ToolResult.failure(
+                {"action": action}, hint, error_code="BROWSER_ACTION_TIMEOUT", user_hint=hint,
             )
         except (KeyError, ValueError) as exc:
             return ToolResult.failure(

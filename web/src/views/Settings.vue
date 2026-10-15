@@ -5,6 +5,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { settingsFields, type SettingsField } from '@/config/settings-fields'
 import SettingsSearch from '@/components/settings/SettingsSearch.vue'
 import ModelSettingsPanel from '@/components/settings/ModelSettingsPanel.vue'
+import SubagentSettingsPanel from '@/components/settings/SubagentSettingsPanel.vue'
 import UsageSettingsPanel from '@/components/settings/UsageSettingsPanel.vue'
 import ToolSettingsPanel from '@/components/settings/ToolSettingsPanel.vue'
 import PermissionSettingsPanel from '@/components/settings/PermissionSettingsPanel.vue'
@@ -19,6 +20,7 @@ const route = useRoute(),
 const tabs = [
   { id: 'general', label: '外观与称呼', icon: 'eye', component: AppearanceSettingsPanel },
   { id: 'models', label: '模型', icon: 'brain', component: ModelSettingsPanel },
+  { id: 'subagents', label: '子 Agent', icon: 'subagents', component: SubagentSettingsPanel },
   { id: 'statistics', label: '统计', icon: 'activity', component: UsageSettingsPanel },
   { id: 'tools', label: '工具', icon: 'files', component: ToolSettingsPanel },
   { id: 'permissions', label: '权限', icon: 'shield', component: PermissionSettingsPanel },

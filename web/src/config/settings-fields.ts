@@ -28,6 +28,9 @@ export const settingsFields: SettingsField[] = [
   },
   { id: 'capsule-shortcut', tab: 'general', label: '速记快捷键', keywords: 'capsule shortcut' },
   { id: 'models', tab: 'models', label: '模型', keywords: 'provider default model' },
+  { id: 'subagent-calls', tab: 'subagents', label: '每次任务最多派发（0 关闭）', keywords: 'subagent default delegate 子代理 默认 派发上限' },
+  { id: 'subagent-concurrent', tab: 'subagents', label: '最多同时运行', keywords: 'subagent concurrent 子代理 并行 并发' },
+  { id: 'subagent-models', tab: 'subagents', label: '允许指定的其他模型', keywords: 'subagent models 子代理 模型' },
   { id: 'usage-statistics', tab: 'statistics', label: '用量统计', keywords: 'statistics usage tokens balance quota cache 统计 余额 额度 缓存 供应商' },
   {
     id: 'model-base-url',

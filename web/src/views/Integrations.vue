@@ -175,7 +175,7 @@ async function saveCredential(removeValue = false) {
     if (removeValue) await api.deleteCredential(reference)
     else await api.saveCredential(reference, credentialValue.value)
     credentialValue.value = ''
-    notice.value = t('凭证已更新，重新连接后生效。')
+    notice.value = t('凭证已更新。请结束任务并处理审批后，点击“应用并检查连接”使更改生效；“恢复已有连接”不会轮换健康连接的凭证。')
   })
 }
 const directorySkills = computed(
@@ -539,9 +539,9 @@ watch([server, skill, credentialServer], async () => {
               <button
                 class="secondary-button"
                 :disabled="!editable"
-                @click="scoped(item.namespace, () => toggleServer(item.namespace))"
+                @click="scoped(item.namespace, refresh)"
               >
-                {{ $t('重试') }}
+                {{ $t('刷新') }}
               </button>
             </p>
             <p

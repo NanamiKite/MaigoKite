@@ -4,7 +4,13 @@ import { t } from '@/i18n'
  */
 
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { onScopeDispose, ref } from 'vue'
+import {
+  copySubagentSettings,
+  emptySubagentSettings,
+  validSubagentSettings,
+  type SubagentSettings,
+} from '@/config/subagents'
 import {
   api,
   type ChatModelProfile,
@@ -15,6 +21,15 @@ import {
 } from '@/api/client'
 
 const PREFERENCES_CACHE_KEY = import.meta.env.VITE_MOCK === '1' ? 'maigokite_user_preferences_demo' : 'maigokite_user_preferences'
+const SUBAGENT_DEFAULTS_KEY = import.meta.env.VITE_MOCK === '1' ? 'maigokite_subagent_defaults_demo' : 'maigokite_subagent_defaults'
+
+function cachedSubagentDefaults(): SubagentSettings {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(SUBAGENT_DEFAULTS_KEY) || 'null')
+    if (validSubagentSettings(value)) return copySubagentSettings(value)
+  } catch { /* Invalid or unavailable local storage keeps subagents disabled. */ }
+  return emptySubagentSettings()
+}
 
 function cachedAssistantName(): string {
   try {
@@ -36,6 +51,14 @@ export const useSettingsStore = defineStore('settings', () => {
   const defaultModelId = ref('')
   const profile = ref({ assistantName: cachedAssistantName() })
   const permissions = ref<PermissionSettings>({ default_mode: 'workspace' })
+  const subagentDefaults = ref(cachedSubagentDefaults())
+  // Other windows (including the capsule) must use newly saved defaults too.
+  function syncSubagentDefaults(event: StorageEvent) {
+    if (event.key === SUBAGENT_DEFAULTS_KEY || event.key === null)
+      subagentDefaults.value = cachedSubagentDefaults()
+  }
+  window.addEventListener('storage', syncSubagentDefaults)
+  onScopeDispose(() => window.removeEventListener('storage', syncSubagentDefaults))
   const runtimeStatus = ref<WorkspaceRuntimeStatus | null>(null)
   const runtimeLoading = ref(false)
   const runtimeError = ref<string | null>(null)
@@ -51,6 +74,18 @@ export const useSettingsStore = defineStore('settings', () => {
   let profileRequest: Promise<void> | null = null
   let runtimeRequest = 0
   let validationRequest = 0
+
+  function saveSubagentDefaults(value: SubagentSettings) {
+    if (!validSubagentSettings(value))
+      throw new Error(t('每次任务限 0–32 个，并行限 1–8 个且不能大于任务派发上限；允许指定的模型最多 32 个。'))
+    const next = copySubagentSettings(value)
+    try {
+      localStorage.setItem(SUBAGENT_DEFAULTS_KEY, JSON.stringify(next))
+    } catch {
+      throw new Error(t('无法保存设置，请检查本地存储是否可用。'))
+    }
+    subagentDefaults.value = next
+  }
 
   async function loadPreferences() {
     if (profileLoaded.value) return
@@ -360,6 +395,7 @@ export const useSettingsStore = defineStore('settings', () => {
     credentials,
     profile,
     permissions,
+    subagentDefaults,
     runtimeStatus,
     runtimeLoading,
     runtimeError,
@@ -372,6 +408,7 @@ export const useSettingsStore = defineStore('settings', () => {
     validation,
     loadPreferences,
     savePreferences,
+    saveSubagentDefaults,
     loadPermissionSettings,
     savePermissionSettings,
     loadRuntimeStatus,

@@ -1,4 +1,14 @@
 const en: Record<string, string> = {
+  新对话的默认配置: 'Defaults for new chats',
+  '新对话沿用此配置，已有对话不变。': 'New chats use these defaults. Existing chats keep their settings.',
+  保存默认配置: 'Save defaults',
+  关闭默认配置: 'Disable defaults',
+  清除模型选择: 'Clear model selection',
+  '子 Agent 仅可读取和搜索。': 'Subagents can only read and search.',
+  '当前服务不支持子 Agent。': 'This service does not support subagents.',
+  '当前服务不支持子 Agent，请在设置中关闭默认配置后重试。': 'This service does not support subagents. Disable their defaults in Settings and try again.',
+  '当前服务不支持指定子 Agent 模型，请取消模型选择后重试。': 'This service does not support choosing subagent models. Clear the model selection and try again.',
+  '无法保存设置，请检查本地存储是否可用。': 'Could not save settings. Check that local storage is available.',
   '展开或收起 {0} 的模型': 'Expand or collapse models for {0}',
   统计: 'Statistics',
   用量统计: 'Usage statistics',
@@ -994,6 +1004,8 @@ const en: Record<string, string> = {
   已连接: 'Connected',
   '已重新连接，但未能刷新会话状态。请重新打开对话。':
     'Reconnected, but could not refresh this chat. Reopen it.',
+  '连接已恢复，但任务状态尚未确认，请刷新对话，勿重复发送。':
+    'Connected, but the task status is not yet confirmed. Refresh the chat; do not resend.',
   '应用服务启动失败，请重新打开应用。': 'The application service could not start. Reopen the app.',
   应用服务无法启动: 'The application service could not start',
   '端口 {0} 已被占用，请先退出已有应用服务。': 'Port {0} is unavailable. Exit the existing application services first.',
@@ -1171,6 +1183,8 @@ const en: Record<string, string> = {
   '扩展名称已存在。': 'An extension with this name already exists.',
   '技能文件不能超过 256 KiB。': 'Skill files must not exceed 256 KiB.',
   '凭证已更新，重新连接后生效。': 'Credential updated. Reconnect to use the change.',
+  '凭证已更新。请结束任务并处理审批后，点击“应用并检查连接”使更改生效；“恢复已有连接”不会轮换健康连接的凭证。':
+    'Credential updated. Finish tasks and pending approvals, then use “Apply and check connections” for the change to take effect. “Restore existing connections” does not rotate credentials on healthy connections.',
   应用并检查连接: 'Apply and check connections',
   '保存不会打断当前任务。应用时会重新扫描技能、重连外部工具；请先结束任务与待处理审批。':
     'Saving will not interrupt tasks. Applying rescans Skills and reconnects tools; finish or cancel pending tasks and approvals first.',

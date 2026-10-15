@@ -14,8 +14,10 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+from anyio.streams.memory import MemoryObjectReceiveStream
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.shared.message import SessionMessage
 from mcp.types import Implementation, PaginatedRequestParams
 
 
@@ -46,6 +48,7 @@ class MCPClient:
         self.cwd = str(Path(cwd).expanduser().resolve()) if cwd is not None else None
         self.request_timeout = request_timeout
         self._session: ClientSession | None = None
+        self._read_stream: MemoryObjectReceiveStream[SessionMessage | Exception] | None = None
         self._owner: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._lifecycle_lock = asyncio.Lock()
@@ -85,6 +88,7 @@ class MCPClient:
             # Preserve the existing no-raw-server-stderr policy (it may contain secrets).
             with open(os.devnull, "w") as errlog:
                 async with stdio_client(parameters, errlog=errlog) as (read, write):
+                    self._read_stream = read
                     async with ClientSession(
                         read, write,
                         read_timeout_seconds=timedelta(seconds=self.request_timeout),
@@ -101,6 +105,7 @@ class MCPClient:
                 ready.set_exception(MCPError("MCP session could not start; check service configuration"))
         finally:
             self._session = None
+            self._read_stream = None
             if not ready.done():
                 ready.cancel()
 
@@ -127,12 +132,20 @@ class MCPClient:
     @property
     def is_running(self) -> bool:
         """Local SDK connection state, not a remote health or side-effect check."""
+        # The SDK receive loop can finish normally at EOF while our owner is
+        # still waiting for stop. AnyIO's public statistics distinguish that
+        # closed transport from a connected, merely idle server.
+        stream = self._read_stream
+        if stream is None:
+            return False
+        endpoints = stream.statistics()
         return (
             self._session is not None and not self._stop.is_set() and self._owner is not None and not self._owner.done()
+            and endpoints.open_send_streams > 0 and endpoints.open_receive_streams > 0
         )
 
     def _get_session(self) -> ClientSession:
-        if self._session is None or self._stop.is_set() or self._owner is None or self._owner.done():
+        if self._session is None or not self.is_running:
             raise MCPError("MCP session is not available") from self._failure
         return self._session
 

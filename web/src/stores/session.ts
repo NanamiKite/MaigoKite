@@ -18,6 +18,8 @@ import { mapGatewayEvent } from '@/api/event-adapter'
 import { useRunStore } from './run'
 import { activityGroups, projectMessage } from './session-projection'
 import { useWorkspaceStore } from './workspace'
+import { useSettingsStore } from './settings'
+import { copySubagentSettings, type SubagentSettings } from '@/config/subagents'
 
 export const useSessionStore = defineStore('session', () => {
   const workspace = useWorkspaceStore()
@@ -233,13 +235,20 @@ export const useSessionStore = defineStore('session', () => {
       },
       connection: (online) => {
         const reconnected = online && connectedOnce && run.connected[id] === false
+        // A task can commit its terminal row before its event is published.
+        // Successful heartbeat replay also reconciles active product facts;
+        // an open socket or an empty event page is not proof it is still running.
+        const needsReconciliation = online &&
+          (runningTaskIds.value[id] || []).some((task) => !task.startsWith('pending-'))
         if (online) connectedOnce = true
         if (online && error.value === syncError) error.value = null
         run.setConnection(id, online)
         if (!online && queuedMessages.value[id]?.length) queuedPaused.value[id] = true
-        if (reconnected)
+        // Snapshot installation calls retry() itself. Reuse that in-flight
+        // snapshot rather than recursively starting another reconciliation.
+        if ((reconnected || needsReconciliation) && !loadingSessions.has(id))
           void refreshSnapshot(id).catch(() => {
-            error.value = t('已重新连接，但未能刷新会话状态。请重新打开对话。')
+            error.value = t('连接已恢复，但任务状态尚未确认，请刷新对话，勿重复发送。')
           })
       },
     })
@@ -274,9 +283,24 @@ export const useSessionStore = defineStore('session', () => {
       isLoading.value = false
     }
   }
-  async function createSession(title: string, folderId = workspace.selectedId) {
+  async function createSession(title: string, folderId = workspace.selectedId, subagents?: SubagentSettings) {
     try {
-      const item = retainedWorkspace(await api.createConversation({ title, folder_id: folderId }))
+      const defaults = copySubagentSettings(subagents || useSettingsStore().subagentDefaults)
+      if (defaults.calls || defaults.modelIds.length) {
+        if (capabilities.value.subagents === undefined) capabilities.value = await api.getCapabilities()
+        if (!capabilities.value.subagents)
+          throw new Error(t('当前服务不支持子 Agent，请在设置中关闭默认配置后重试。'))
+        if (defaults.modelIds.length && !capabilities.value.subagent_model_selection)
+          throw new Error(t('当前服务不支持指定子 Agent 模型，请取消模型选择后重试。'))
+      }
+      // Every creation entry point uses the same defaults, in the create request itself.
+      const item = retainedWorkspace(await api.createConversation({
+        title,
+        folder_id: folderId,
+        max_subagent_calls: defaults.calls,
+        max_concurrent_subagents: defaults.concurrent,
+        subagent_model_ids: defaults.modelIds,
+      }))
       showArchived.value = false
       sessions.value.unshift(item)
       await switchSession(item.id)
@@ -335,7 +359,7 @@ export const useSessionStore = defineStore('session', () => {
         try {
           const [snapshot, available] = await Promise.all([
             api.getConversationSnapshot(id),
-            api.getCapabilities().catch(() => ({})),
+            api.getCapabilities().catch(() => capabilities.value),
           ])
           if (epoch !== lifecycle || deletedSessions.has(id)) return
           // Text still streaming is projected in run.turns from event history.

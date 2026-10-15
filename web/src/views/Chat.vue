@@ -16,6 +16,7 @@ import { revealRailNode } from '@/utils/rail-navigation'
 import { pickMygoQuote } from '@/config/mygo-quotes'
 import { paperLight, takeWelcomeIntroduction } from '@/utils/welcome-presentation'
 import { modelSwitches } from '@/utils/model-switches'
+import { copySubagentSettings } from '@/config/subagents'
 import { api, type ChatMessage, type PermissionMode } from '@/api/client'
 import UserMessage from '@/components/chat-area/UserMessage.vue'
 import AgentMessage from '@/components/chat-area/AgentMessage.vue'
@@ -58,10 +59,12 @@ watch(() => settings.permissions.default_mode, (value) => {
 const draftModel = ref(''),
   draftThinking = ref(''),
   savingThinking = ref(false)
-const draftSubagents = ref(0),
-  draftConcurrent = ref(1),
+const draftSubagents = ref(copySubagentSettings(settings.subagentDefaults)),
   savingSubagents = ref(false)
-const draftSubagentModels = ref<string[]>([])
+let draftSubagentsChosen = false
+watch(() => settings.subagentDefaults, (value) => {
+  if (!sessionId.value && !draftSubagentsChosen) draftSubagents.value = copySubagentSettings(value)
+})
 const draftMemory = ref(false), savingMemory = ref(false)
 const memoryEnabled = computed(() => sessionId.value ? session.activeSession?.memory_enabled === true : draftMemory.value)
 watch(() => workspace.selectedId, () => { draftMemory.value = false })
@@ -223,6 +226,8 @@ watch(
       session.activeSessionId = null
       draftPermissionChosen = false
       draftMemory.value = false
+      draftSubagentsChosen = false
+      draftSubagents.value = copySubagentSettings(settings.subagentDefaults)
       mode.value = settings.permissions.default_mode
     }
     resume()
@@ -264,7 +269,7 @@ async function send(content: string, intent: 'send' | 'guide' | 'later' = 'send'
     if (controlError) throw new Error(controlError)
     if (!id) {
       const useMemory = draftMemory.value
-      const item = await session.createSession('新对话')
+      const item = await session.createSession('新对话', workspace.selectedId, draftSubagents.value)
       id = item.id
       await router.replace('/chat/' + id)
       await session.setPermissionMode(mode.value, id)
@@ -274,13 +279,6 @@ async function send(content: string, intent: 'send' | 'guide' | 'later' = 'send'
         draftThinking.value,
         id,
       )
-      if (draftSubagents.value || draftSubagentModels.value.length)
-        await session.setSubagentLimits(
-          draftSubagents.value,
-          draftConcurrent.value,
-          id,
-          session.capabilities.subagent_model_selection ? draftSubagentModels.value : undefined,
-        )
     }
     await session.sendToSession(id, content)
     resume()
@@ -328,9 +326,12 @@ function permission(value: PermissionMode) {
 function subagents(value: { calls: number; concurrent: number; modelIds?: string[] }) {
   const id = sessionId.value
   if (!id) {
-    draftSubagents.value = value.calls
-    draftConcurrent.value = value.concurrent
-    if (value.modelIds) draftSubagentModels.value = value.modelIds
+    draftSubagentsChosen = true
+    draftSubagents.value = {
+      calls: value.calls,
+      concurrent: value.concurrent,
+      modelIds: value.modelIds ? [...value.modelIds] : [...draftSubagents.value.modelIds],
+    }
     return
   }
   savingSubagents.value = true
@@ -443,13 +444,13 @@ watch(
     >
       <SubagentSettings
         :key="sessionId"
-        :calls="sessionId ? (session.activeSession?.max_subagent_calls ?? 0) : draftSubagents"
+        :calls="sessionId ? (session.activeSession?.max_subagent_calls ?? 0) : draftSubagents.calls"
         :concurrent="
-          sessionId ? (session.activeSession?.max_concurrent_subagents ?? 1) : draftConcurrent
+          sessionId ? (session.activeSession?.max_concurrent_subagents ?? 1) : draftSubagents.concurrent
         "
         :model-options="settings.modelProfiles"
         :model-ids="
-          sessionId ? (session.activeSession?.subagent_model_ids ?? []) : draftSubagentModels
+          sessionId ? (session.activeSession?.subagent_model_ids ?? []) : draftSubagents.modelIds
         "
         :model-selection-supported="session.capabilities.subagent_model_selection === true"
         :saving="savingSubagents"

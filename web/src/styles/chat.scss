@@ -9,8 +9,12 @@
   isolation: isolate;
   display: flex;
   height: 100%;
+  flex: 1;
+  min-width: 0;
   min-height: 0;
   flex-direction: column;
+  // Clip without creating another scroll container, including focus scrolling.
+  overflow: clip;
   background: var(--paper);
   color: var(--ink);
 }
@@ -24,7 +28,6 @@
   opacity: var(--noise-canvas-opacity);
 }
 .chat-page.empty {
-  overflow: auto;
   justify-content: flex-start;
   align-items: center;
   padding: var(--workpaper-top) var(--space-8) var(--space-9);
@@ -34,14 +37,16 @@
   flex-direction: column;
   flex: 1;
   width: 100%;
+  min-width: 0;
   min-height: 0;
 }
 .workpaper {
   --paper-light: var(--workpaper-light-morning);
   position: relative;
   isolation: isolate;
-  flex: none;
+  flex: 0 1 auto;
   width: min(var(--workpaper-width), 100%);
+  max-height: 100%;
   margin: 0 auto;
   padding: var(--space-8) var(--workpaper-inset) var(--space-7);
   border: var(--hairline) solid var(--workpaper-edge);
@@ -119,13 +124,11 @@
   }
 }
 .chat-page.empty .conversation {
-  flex: none;
+  // Short windows scroll the welcome content, not the paper and composer.
+  flex: 0 1 auto;
 }
 .chat-page.empty .welcome-state {
   min-height: auto;
-}
-.chat-page.empty .message-list {
-  overflow: visible;
 }
 .chat-page.empty :deep(.composer-wrap) {
   width: 100%;
@@ -150,12 +153,16 @@
 }
 .conversation {
   position: relative;
+  min-width: 0;
   min-height: 0;
   flex: 1;
   display: flex;
 }
 .message-list {
+  flex: 1;
   width: 100%;
+  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
 }

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import ssl
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,6 +16,8 @@ from urllib.parse import urlsplit
 import httpx
 
 from agent.models.native_model import _is_local_endpoint
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,7 +127,10 @@ class ModelCatalog:
                 self.status = "known"
                 self.checked_at = datetime.now(UTC).isoformat()
                 self._next_refresh = time.monotonic() + 6 * 60 * 60
-            except (httpx.HTTPError, TimeoutError, ValueError):
+            except (httpx.HTTPError, ssl.SSLError, TimeoutError, ValueError) as exc:
+                # Streaming reads can surface unwrapped TLS errors. Keep the
+                # last complete catalog and use the same refresh backoff.
+                logger.warning("Model catalog refresh unavailable: %s", type(exc).__name__)
                 self.status = "model_catalog_unavailable"
                 self._next_refresh = time.monotonic() + 60
 

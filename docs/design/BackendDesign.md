@@ -74,12 +74,14 @@ Web 与 Electron 继续共用相对路径构建产物。HTTP 返回的入口 HTM
 
 未接入不等于应该删除。下面的模块保留用于后续开发，但不注册到 Core、ToolRegistry、API、能力声明或默认启动流程；不能通过默认配置或自动发现把未完成实现带入生产调用链。
 
+表中的 `ImageAdapter` 是未接入的实验适配器，不代表当前产品没有生图能力。生产生图使用 `models/image_generation.py` 与 `tools/native/image_generate.py`，看图使用当前聊天模型；入口、产物与限制见 [配置指南](../user-guide/Configuration.md#12-看图生图与文件预览)。
+
 | 模块 | 当前源码边界 | 未完成部分 |
 | --- | --- | --- |
 | `models/embedding_provider.py` | 抽象契约和 BGE/OpenAI/GTE 预留类保留；具体空方法明确抛出 `NotImplementedError` | 专用 Provider 的实现与产品接线 |
 | `models/embedding_adapter.py` | 使用 SDK 的异步 Embeddings；OpenAI 适配和显式传入的 SDK backend；维度来自配置或实际向量，不猜默认值 | BGE/GTE 本地加载、模型管理与生命周期的产品接线；不会自行下载模型 |
 | `utils/storage.py` / `inspector/timeline.py` | Storage 抽象契约、具体后端和 TimelineBuilder 保留并明确报未实现；TimelineEntry 正常保存构造参数 | 通用键值存储、时间线构建；当前业务持久化与 UI 事件仍使用 Repository |
-| `models/image_provider.py` / `image_adapter.py` | ImageResult 保存实际字段；实验性 SDK 返回远端 URL/内嵌数据；由调用方在完成后关闭 adapter | 图片落盘在请求前拒绝，不返回虚假本地路径；没有生图工具/API 接线 |
+| `models/image_provider.py` / `image_adapter.py` | ImageResult 保存实际字段；实验性 SDK 返回远端 URL/内嵌数据；由调用方在完成后关闭 adapter | 该实验适配器不接入生图工具/API；请求落盘时在发模型请求前拒绝，不返回虚假本地路径 |
 | `knowledge_base/store.py` | 内存文档存储使用 SDK Document，保留稳定 ID；批量重复 ID 在写入前拒绝 | 原始材料持久化、归属与版本生命周期 |
 | `knowledge_base/vector_store.py` | 预计算向量传给 FAISS/Chroma/Qdrant 的公开操作；批次与维度校验；返回原生分数 | FAISS 替换/恢复明确未实现；Qdrant 集合须预先配置，使用 UUID ID，调用方关闭 client；未接入记忆或索引任务 |
 | `knowledge_base/retriever.py` | 使用 SDK VectorStore/BaseRetriever 与异步检索；限制返回量，支持的过滤条件在检索前传入，不支持时拒绝 | 关键词语料/索引须由调用方显式提供，不用空白查询的样本冒充完整语料；不支持的按 ID 读取不伪装成“未找到” |

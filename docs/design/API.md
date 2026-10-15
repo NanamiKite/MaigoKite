@@ -114,7 +114,7 @@ GET    /workspaces/{workspace_id}/conversations/{conversation_id}/snapshot
 分岔的首次执行沿用现有产品历史导入入口，不恢复源任务；文件仍共享，源会话删除不删除分岔。GUI 从已保存助手回复下方的「⋯ → 从此处分叉新对话」传入该回复的 `message_id`，不再由会话管理默认从末尾分岔；不是逐节点执行 Fork 或文件回滚。
 请求键只在本次页面内保留；刷新后先查看会话列表，不保证找回原键。分岔删除后不保留去重墓碑。
 
-发送消息可带 `Idempotency-Key`（1–128 个无空格可打印 ASCII 字符）。键按工作区、会话、主体隔离，内容指纹覆盖 content 与 attachments；新请求返回 202，相同键/相同内容返回原任务的 200 `{task_id, conversation_id, status, replayed: true}` 和 `Idempotency-Replayed: true`，不同内容返回 409。返回旧任务不会重新发模型请求、写消息或广播历史事件；中断/失败任务也不会因重发键自动恢复。相同文本的新操作必须用新键。省略键保持旧行为；GUI 已为每次逻辑提交生成键，网络/5xx 错误时保留原键，用户点击确认才重试。4xx 明确拒绝会释放键；成功回执后刷新失败不等于提交失败。键仅保留在当前页面会话内，刷新页面后应先查询任务记录，不保证找回原键。服务端的键随任务保留，删除会话/任务后不再保留去重记录。最新 GUI 接线未验收。
+发送消息可带 `Idempotency-Key`（1–128 个无空格可打印 ASCII 字符）。键按工作区、会话、主体隔离，内容指纹覆盖 content 与 attachments；新请求返回 202，相同键/相同内容返回原任务的 200 `{task_id, conversation_id, status, replayed: true}` 和 `Idempotency-Replayed: true`，不同内容返回 409。返回旧任务不会重新发模型请求、写消息或广播历史事件；中断/失败任务也不会因重发键自动恢复。相同文本的新操作必须用新键。省略键保持旧行为；GUI 已为每次逻辑提交生成键，网络/5xx 错误时保留原键，用户点击确认才重试。4xx 明确拒绝会释放键；成功回执后刷新失败不等于提交失败。键仅保留在当前页面会话内，刷新页面后应先查询任务记录，不保证找回原键。服务端的键随任务保留，删除会话/任务后不再保留去重记录。正常 GUI 发送/完成与刷新已有定向验收，图片 API 也验证了相同键返回原任务；提交结果不明后的人工重试和幂等并发故障不在该通过范围。
 
 `snapshot` 返回 `messages / tasks / approvals / questions / last_sequence / truncated`，其中 approvals/questions 只含待处理项，嵌套审批和问题沿用已发布的 JSON 字符串字段（`arguments_json / options_json`），客户端 API 边界将审批参数和问题选项转换为界面 DTO。在单 Core 的同一个 Repository 锁内读取，每类最多 200 条最新记录并按时间返回，条目合用约 900 KB 序列化预算；省略时明确 `truncated: true`。这解决多个列表分开读取的观察窗口，不提供跨进程一致性或完整事件快照。GUI 已先订阅并缓冲，再取快照、补拉历史并按 event_id 合并；快照水位内的活动卡片与未完成回复仍回放，但不得覆盖较新的任务状态或重新触发排队发送。待审批/待回答卡片直接使用真实快照水位，不制造伪事件。`truncated` 会提示较早记录可能不完整，客户端不能因缺少某个待处理 ID 就关闭对应卡片。接线不等同于断线恢复验收。
 
@@ -124,7 +124,7 @@ GET    /workspaces/{workspace_id}/conversations/{conversation_id}/snapshot
 
 `files / files/content / changes / changes/diff / runtime-status` 支持可选 `folder_id` 查询参数，API 通过 Core 解析已登记目录，客户端不能直接传任意根目录。Runtime 权限校验与工具上下文使用会话所属目录，不变更共享全局根目录；MCP 进程启动目录和技能加载目录不因切换而变化。
 
-#### 图片输入、生成与文件预览（源码接线，尚未运行验收）
+#### 图片输入、生成与文件预览（本机协议/GUI 已验收，SVG 符号预览已复验）
 
 - `POST /workspaces/{workspace_id}/files/images?folder_id=...` 接受 `{data: "纯 Base64"}`，仅工作区所有者可上传。支持 PNG/JPEG/WebP/GIF，单张不超过 16 MiB；创建 `chat-images/` 下的独立文件，返回 `ImageReference`（type/path/folder_id/sha256/mime_type/size）。文件名由应用生成，不接受任意写入路径。仅此路由放宽请求体至 23 MiB，其余路由仍为 2 MiB。
 - 消息 `attachments` 接受上述引用，最多 4 张、总计 16 MiB。准入检查当前文件夹归属和内容哈希，再构造 LangChain `HumanMessage` 多模态内容；附件不是 URL 抓取入口。普通消息查询与 `task.started` 的 `attachments_json` 只含文件引用，图片快照保存在 LangGraph 消息状态供后续追问/恢复使用。
@@ -135,6 +135,8 @@ GET    /workspaces/{workspace_id}/conversations/{conversation_id}/snapshot
 - `GET /files/content` 增加 mime_type/data_url。文本上限 512 KiB，受支持栅格图片上限 16 MiB，超限不返回截断 Base64。Markdown 由前端净化后渲染；HTML 为无脚本、无网络、无同源权限的静态 iframe。SVG 沿用文本接口，由前端 XML 解析与 DOMPurify 净化后作为 `<img>` 图片预览，不作为内联 DOM 或可执行文档；外部引用、脚本与嵌入网页不可用，保留本地片段引用和内嵌栅格图片。截断、畸形或含自定义实体的 SVG 不渲染，保留源码入口。
 
 上面的路径仍受既有本机访问和工作区授权边界约束。不新增多模态 Runtime，不表示所有模型均支持图片输入，也不包含任意厂商原生图片输出、图生图/蒙版编辑、视频或音频。
+
+2026-10-15 已运行真实 Core/SDK 与 Web/Chromium 定向验收；图片上传/引用/重启、两种生图协议、审批/取消/失败与基础预览通过。当时发现 SVG 本地 `<use href="#…">` 被净化器移除。**2026-10-16 局部放行 `use` 后，原失败单测与真实 GUI 复验均通过，并新增 `xlink:href`、非法/外部引用过滤和实际渲染像素检查，SVG 缺陷关闭。** 历史失败数字保留。真实服务、密钥链、旧库迁移和 Windows 不在通过范围，准确回执见 [当前验收状态](../project/Roadmap.md#当前验收状态)。
 
 协议参考：[OpenAI 图片输入说明](https://developers.openai.com/api/docs/guides/images-vision)、[Responses 生图工具](https://developers.openai.com/api/docs/guides/tools-image-generation)。
 
@@ -262,7 +264,7 @@ apply 默认接受 `{"revision": <保存后的版本>}`，应用新配置。API 
 
 凭证沿用 3.6 的 POST/PUT/DELETE 接口；值不进入扩展配置/GET/审计。更新/删除凭证不改活动进程环境，下次显式 apply 或重建缺失连接时生效；restore_only 不替换健康连接的凭证。复用连接的内存凭证快照取自该 client 实际启动环境，不把并发请求读到的新密钥误记为已生效；显式 apply 同样按实际环境比较，凭证变化时准备替换连接。卸载配置不删除程序、目录或凭证。当前只支持本地 stdio 与 Markdown/目录技能，不是技能包安装、版本授权或 Grant 平台，扩展边界见 [技能](../agent-capabilities/skills/skill-lifecycle.md)。
 
-本次配置与管理接口是源码接入状态，未运行新增链路测试；只读列表或此前 MCP SDK 的验收不能代替它。
+配置保存/应用、失败保留健康版本、Skill 读取及 Core 重启加载生效配置已通过真实进程验收；凭证重启/轮换、并发恢复/应用中断、扫描故障及设置 GUI 全流程不在该通过范围，见 [当前验收状态](../project/Roadmap.md#当前验收状态)。
 
 ### 3.6 设置、模型和凭证引用
 
@@ -605,7 +607,7 @@ MCP 失败沿用工具事件：`MCP_UNAVAILABLE` 表示本次请求未发送；`
 
 生命周期只允许一个 worker。HTTP 入口完成输入与工作区归属校验，Core 决定执行、审批、取消及恢复；客户端不能自选可信 principal。请求体上限 2 MiB，系统文件/凭证操作在工作线程中完成，HTTP 断线不取消已接纳任务。
 
-原有会话、消息、任务、审批与事件 JSON 保持兼容；`runtime-status` 的 `gateway / agent_core` 合并为 `backend`，前端按单服务状态展示。Web 构建版由同一后端提供页面，未知 API 地址不返回 SPA 页面。2026-10-12 迁移仅完成源码与接口清单核对，未运行测试或构建。
+原有会话、消息、任务、审批与事件 JSON 保持兼容；`runtime-status` 的 `gateway / agent_core` 合并为 `backend`，前端按单服务状态展示。Web 构建版由同一后端提供页面，未知 API 地址不返回 SPA 页面。迁移后已补真实 Core HTTP/WS、审批重启与文件恢复、Web 构建及指定 GUI 场景验收；不代表全部 API、平台或安装包通过，见 [当前验收状态](../project/Roadmap.md#当前验收状态)。
 
 ## 6. WebSocket 事件
 

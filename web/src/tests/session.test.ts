@@ -10,14 +10,28 @@ describe('session store', () => {
   let onEvent: ((event: AgentEvent) => void) | undefined
   let snapshot: ConversationSnapshot
   const task = (id: string, status: AgentTask['status'] = 'running'): AgentTask => ({
-    id, workspace_id: 'personal', conversation_id: 'conv-1', title: 'task', status,
-    input_text: 'work', last_error: '', version: 1,
-    created_at: '2026-09-18T00:00:00Z', updated_at: '2026-09-18T00:00:01Z',
+    id,
+    workspace_id: 'personal',
+    conversation_id: 'conv-1',
+    title: 'task',
+    status,
+    input_text: 'work',
+    last_error: '',
+    version: 1,
+    created_at: '2026-09-18T00:00:00Z',
+    updated_at: '2026-09-18T00:00:01Z',
   })
   async function ready() {
     const store = useSessionStore()
     await store.switchSession('conv-1')
-    onEvent!({ schema_version: 1, event_id: 'ready', sequence: 0, type: 'stream.ready', conversation_id: 'conv-1', payload: {} })
+    onEvent!({
+      schema_version: 1,
+      event_id: 'ready',
+      sequence: 0,
+      type: 'stream.ready',
+      conversation_id: 'conv-1',
+      payload: {},
+    })
     await flushPromises()
     return store
   }
@@ -27,9 +41,28 @@ describe('session store', () => {
     vi.restoreAllMocks()
     setActivePinia(createPinia())
     vi.useFakeTimers()
-    snapshot = { messages: [], tasks: [], approvals: [], questions: [], last_sequence: 0, truncated: false }
-    vi.spyOn(api, 'getConversation').mockResolvedValue({ id: 'conv-1', workspace_id: 'personal', title: 't', model_id: 'model-1', permission_mode: 'read_only', response_mode: 'balanced', created_at: '', updated_at: '', message_count: 0 })
-    vi.spyOn(api, 'getConversationSnapshot').mockImplementation(async () => structuredClone(snapshot))
+    snapshot = {
+      messages: [],
+      tasks: [],
+      approvals: [],
+      questions: [],
+      last_sequence: 0,
+      truncated: false,
+    }
+    vi.spyOn(api, 'getConversation').mockResolvedValue({
+      id: 'conv-1',
+      workspace_id: 'personal',
+      title: 't',
+      model_id: 'model-1',
+      permission_mode: 'read_only',
+      response_mode: 'balanced',
+      created_at: '',
+      updated_at: '',
+      message_count: 0,
+    })
+    vi.spyOn(api, 'getConversationSnapshot').mockImplementation(async () =>
+      structuredClone(snapshot),
+    )
     vi.spyOn(api, 'getCapabilities').mockResolvedValue({})
     vi.spyOn(api, 'listTaskEvents').mockResolvedValue([])
     vi.spyOn(api, 'connectEvents').mockImplementation((_id, callback) => {
@@ -126,17 +159,24 @@ describe('session store', () => {
       hint: '请检查网络，或配置其他搜索服务。',
       action: { label: '设置工具', to: '/settings?tab=tools' },
     })
-    expect(JSON.parse(useRunStore().getTurn('conv-1', 'task-search').steps[0].output)).toEqual({ results: [], error: 'search provider request failed' })
+    expect(JSON.parse(useRunStore().getTurn('conv-1', 'task-search').steps[0].output)).toEqual({
+      results: [],
+      error: 'search provider request failed',
+    })
     expect(store.activeMessages).toEqual([])
   })
 
   it('adds an optimistic message and completes a streamed reply', async () => {
     let acknowledge!: () => void
-    const receipt = new Promise<void>(resolve => { acknowledge = resolve })
+    const receipt = new Promise<void>((resolve) => {
+      acknowledge = resolve
+    })
     vi.spyOn(api, 'sendMessage').mockImplementation(async () => {
       await receipt
       snapshot.tasks = [task('task-1')]
-      snapshot.messages = [{ id: 'user-1', conversation_id: 'conv-1', role: 'user', content: 'hello', created_at: '' }]
+      snapshot.messages = [
+        { id: 'user-1', conversation_id: 'conv-1', role: 'user', content: 'hello', created_at: '' },
+      ]
       return { task_id: 'task-1', status: 'processing' }
     })
     const store = useSessionStore()
@@ -153,7 +193,11 @@ describe('session store', () => {
     })
     await ready()
     const sending = store.sendMessage('hello')
-    expect(store.activeMessages[0]).toMatchObject({ id: expect.stringMatching(/^local-/), content: 'hello', role: 'user' })
+    expect(store.activeMessages[0]).toMatchObject({
+      id: expect.stringMatching(/^local-/),
+      content: 'hello',
+      role: 'user',
+    })
     expect(store.isSending).toBe(true)
     acknowledge()
     await sending
@@ -188,34 +232,71 @@ describe('session store', () => {
     expect(useRunStore().getTurn('conv-1', 'task-1').text).toBe('world')
     expect(store.isSending).toBe(true)
     snapshot.tasks = [task('task-1', 'succeeded')]
-    snapshot.messages.push({ id: 'answer-1', conversation_id: 'conv-1', role: 'assistant', content: 'world', created_at: '' })
+    snapshot.messages.push({
+      id: 'answer-1',
+      conversation_id: 'conv-1',
+      role: 'assistant',
+      content: 'world',
+      created_at: '',
+    })
     snapshot.last_sequence = 3
-    onEvent!({ schema_version: 1, event_id: '3', sequence: 3, type: 'task.succeeded', conversation_id: 'conv-1', task_id: 'task-1', payload: {} })
+    onEvent!({
+      schema_version: 1,
+      event_id: '3',
+      sequence: 3,
+      type: 'task.succeeded',
+      conversation_id: 'conv-1',
+      task_id: 'task-1',
+      payload: {},
+    })
     await publish()
     expect(store.isSending).toBe(false)
-    expect(store.activeMessages.map(message => message.content)).toEqual(['hello', 'world'])
-    expect(api.sendMessage).toHaveBeenCalledWith('conv-1', 'hello', expect.stringMatching(/^[a-f0-9]{32}$/))
+    expect(store.activeMessages.map((message) => message.content)).toEqual(['hello', 'world'])
+    expect(api.sendMessage).toHaveBeenCalledWith(
+      'conv-1',
+      'hello',
+      expect.stringMatching(/^[a-f0-9]{32}$/),
+      [],
+    )
   })
 
   it('restores activity from durable events and cancels the active task', async () => {
     snapshot.tasks = [
       {
-        id: 'task-running', workspace_id: 'personal', conversation_id: 'conv-1',
-        title: 'task', status: 'running', input_text: 'work', last_error: '', version: 1,
-        created_at: '2026-09-18T00:00:00Z', updated_at: '2026-09-18T00:00:01Z',
+        id: 'task-running',
+        workspace_id: 'personal',
+        conversation_id: 'conv-1',
+        title: 'task',
+        status: 'running',
+        input_text: 'work',
+        last_error: '',
+        version: 1,
+        created_at: '2026-09-18T00:00:00Z',
+        updated_at: '2026-09-18T00:00:01Z',
       },
     ]
     vi.mocked(api.listTaskEvents).mockResolvedValueOnce([
       {
-        schema_version: 1, event_id: 'persisted-1', sequence: 1,
-        type: 'tool.started', conversation_id: 'conv-1', task_id: 'task-running',
+        schema_version: 1,
+        event_id: 'persisted-1',
+        sequence: 1,
+        type: 'tool.started',
+        conversation_id: 'conv-1',
+        task_id: 'task-running',
         payload: { tool_call_id: 'call-1', tool_name: 'browser' },
       },
     ])
     vi.spyOn(api, 'cancelTask').mockResolvedValue({
-      id: 'task-running', workspace_id: 'personal', conversation_id: 'conv-1',
-      title: 'task', status: 'cancelled', input_text: 'work', last_error: 'Cancelled by user',
-      version: 2, created_at: '', updated_at: '',
+      id: 'task-running',
+      workspace_id: 'personal',
+      conversation_id: 'conv-1',
+      title: 'task',
+      status: 'cancelled',
+      input_text: 'work',
+      last_error: 'Cancelled by user',
+      version: 2,
+      created_at: '',
+      updated_at: '',
     })
     const store = await ready()
     await publish()
@@ -228,7 +309,15 @@ describe('session store', () => {
     expect(store.isSending).toBe(true)
     snapshot.tasks = [task('task-running', 'cancelled')]
     snapshot.last_sequence = 2
-    onEvent!({ schema_version: 1, event_id: 'cancelled', sequence: 2, type: 'task.cancelled', conversation_id: 'conv-1', task_id: 'task-running', payload: {} })
+    onEvent!({
+      schema_version: 1,
+      event_id: 'cancelled',
+      sequence: 2,
+      type: 'task.cancelled',
+      conversation_id: 'conv-1',
+      task_id: 'task-running',
+      payload: {},
+    })
     await publish()
     expect(store.isSending).toBe(false)
   })
@@ -236,15 +325,22 @@ describe('session store', () => {
   it('restores a completed message by its durable message id without duplication', async () => {
     snapshot.messages = [
       {
-        id: 'message-1', conversation_id: 'conv-1', role: 'assistant',
-        content: '已完成', created_at: '2026-09-18T00:00:00Z',
+        id: 'message-1',
+        conversation_id: 'conv-1',
+        role: 'assistant',
+        content: '已完成',
+        created_at: '2026-09-18T00:00:00Z',
       },
     ]
     snapshot.last_sequence = 3
     vi.mocked(api.listTaskEvents).mockResolvedValueOnce([
       {
-        schema_version: 1, event_id: 'completed-1', sequence: 3,
-        type: 'message.completed', conversation_id: 'conv-1', task_id: 'task-1',
+        schema_version: 1,
+        event_id: 'completed-1',
+        sequence: 3,
+        type: 'message.completed',
+        conversation_id: 'conv-1',
+        task_id: 'task-1',
         occurred_at: '2026-09-18T00:00:00Z',
         payload: { message_id: 'message-1', content: '已完成' },
       },
@@ -316,8 +412,9 @@ describe('session store', () => {
     expect(store.activeMessages).toEqual([])
     const turn = useRunStore().getTurn('conv-1', 'task-1')
     expect(turn.thinking).toBe('先检查项目文件。')
-    expect(turn.steps.map(step => [step.id, step.tool, step.status])).toEqual([
-      ['call-1', 'file_read', 'completed'], ['reviewer', 'delegate', 'completed'],
+    expect(turn.steps.map((step) => [step.id, step.tool, step.status])).toEqual([
+      ['call-1', 'file_read', 'completed'],
+      ['reviewer', 'delegate', 'completed'],
     ])
     expect(turn.steps[1].output).toBe('检查完成')
 
@@ -346,9 +443,25 @@ describe('session store', () => {
     expect(store.activeMessages[0].content).not.toContain('先检查项目文件')
     expect(store.isSending).toBe(true)
     snapshot.tasks = [task('task-1', 'succeeded')]
-    snapshot.messages = [{ id: 'final', conversation_id: 'conv-1', role: 'assistant', content: '这是最终回答。', created_at: '' }]
+    snapshot.messages = [
+      {
+        id: 'final',
+        conversation_id: 'conv-1',
+        role: 'assistant',
+        content: '这是最终回答。',
+        created_at: '',
+      },
+    ]
     snapshot.last_sequence = 9
-    onEvent!({ schema_version: 1, event_id: '9', sequence: 9, type: 'task.succeeded', conversation_id: 'conv-1', task_id: 'task-1', payload: {} })
+    onEvent!({
+      schema_version: 1,
+      event_id: '9',
+      sequence: 9,
+      type: 'task.succeeded',
+      conversation_id: 'conv-1',
+      task_id: 'task-1',
+      payload: {},
+    })
     await publish()
     expect(store.activeActivityGroups[0].status).toBe('completed')
   })

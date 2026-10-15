@@ -16,7 +16,11 @@ const props = defineProps<{
   operation?: string
   label: string
 }>()
-const emit = defineEmits<{ stop: []; locate: []; openSubagent: [turnId: string, childId: string] }>()
+const emit = defineEmits<{
+  stop: []
+  locate: []
+  openSubagent: [turnId: string, childId: string]
+}>()
 const expanded = ref(Boolean(props.active))
 const title = computed(() => props.task.title || props.task.input_text.split('\n')[0] || t('任务'))
 const children = computed(() => props.turn?.subagents || [])
@@ -48,7 +52,10 @@ function childStatus(child: SubagentRun) {
 }
 </script>
 <template>
-  <section class="run-entry" :class="{ active }">
+  <section
+    class="run-entry"
+    :class="{ active }"
+  >
     <div class="entry-heading">
       <button
         type="button"
@@ -59,7 +66,11 @@ function childStatus(child: SubagentRun) {
         <Pulse :state="pulse" />
         <span :title="title">{{ title }}</span>
         <small>{{ label }}</small>
-        <IconSymbol name="chevron" :size="12" :class="{ expanded }" />
+        <IconSymbol
+          name="chevron"
+          :size="12"
+          :class="{ expanded }"
+        />
       </button>
       <button
         type="button"
@@ -69,7 +80,10 @@ function childStatus(child: SubagentRun) {
         :aria-label="$t('定位到对话：{0}', [title])"
         @click.stop="emit('locate')"
       >
-        <IconSymbol name="target" :size="15" />
+        <IconSymbol
+          name="target"
+          :size="15"
+        />
       </button>
       <button
         v-if="active"
@@ -81,19 +95,53 @@ function childStatus(child: SubagentRun) {
         {{ $t(stopping ? '请求停止中…' : '停止') }}
       </button>
     </div>
-    <div v-if="expanded" class="entry-content">
-      <p v-if="task.input_text" class="entry-request">{{ task.input_text }}</p>
-      <p v-if="active && operation" class="entry-operation" role="status">{{ operation }}</p>
-      <time :datetime="task.updated_at">{{
-        new Date(task.updated_at).toLocaleString($i18n.locale)
-      }}</time>
-      <Receipt v-if="turn" :turn="turn" embedded />
-      <p v-else class="empty-copy">{{ $t('运行明细尚未载入。') }}</p>
-      <div v-if="operations.length" class="operation-list">
+    <div
+      v-if="expanded"
+      class="entry-content"
+    >
+      <p
+        v-if="task.input_text"
+        class="entry-request"
+      >
+        {{ task.input_text }}
+      </p>
+      <p
+        v-if="active && operation"
+        class="entry-operation"
+        role="status"
+      >
+        {{ operation }}
+      </p>
+      <time :datetime="task.updated_at">
+        {{ new Date(task.updated_at).toLocaleString($i18n.locale) }}
+      </time>
+      <Receipt
+        v-if="turn"
+        :turn="turn"
+        embedded
+      />
+      <p
+        v-else
+        class="empty-copy"
+      >
+        {{ $t('运行明细尚未载入。') }}
+      </p>
+      <div
+        v-if="operations.length"
+        class="operation-list"
+      >
         <h4>{{ $t('操作记录') }}</h4>
-        <RunOperation v-for="step in operations" :key="step.id" :step="step" :ended="!active" />
+        <RunOperation
+          v-for="step in operations"
+          :key="step.id"
+          :step="step"
+          :ended="!active"
+        />
       </div>
-      <div v-if="children.length" class="child-list">
+      <div
+        v-if="children.length"
+        class="child-list"
+      >
         <h4>{{ $t('子 Agent') }}</h4>
         <button
           v-for="child in children"
@@ -112,15 +160,24 @@ function childStatus(child: SubagentRun) {
                   : 'idle'
             "
           />
-          <span class="child-copy"
-            ><strong>{{ child.label || $t('子 Agent') }}</strong
-            ><small>{{ child.task || child.summary }}</small></span
-          >
+          <span class="child-copy">
+            <strong>{{ child.label || $t('子 Agent') }}</strong>
+            <small>{{ child.task || child.summary }}</small>
+          </span>
           <small class="child-status">{{ $t(childStatus(child)) }}</small>
-          <IconSymbol name="chevron" :size="12" />
+          <IconSymbol
+            name="chevron"
+            :size="12"
+          />
         </button>
       </div>
-      <p v-if="task.last_error" class="entry-error" role="alert">{{ task.last_error }}</p>
+      <p
+        v-if="task.last_error"
+        class="entry-error"
+        role="alert"
+      >
+        {{ task.last_error }}
+      </p>
     </div>
   </section>
 </template>
@@ -175,8 +232,14 @@ function childStatus(child: SubagentRun) {
   border-radius: var(--radius-sm);
   background: var(--transparent);
   color: var(--ink-2);
-  &:focus-visible { color: var(--accent); }
-  @media (hover: hover) { &:not(:disabled):hover { color: var(--accent); } }
+  &:focus-visible {
+    color: var(--accent);
+  }
+  @media (hover: hover) {
+    &:not(:disabled):hover {
+      color: var(--accent);
+    }
+  }
 }
 .expanded {
   transform: rotate(var(--measure-90deg));

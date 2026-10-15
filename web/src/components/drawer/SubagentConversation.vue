@@ -38,26 +38,38 @@ const hasFinal = computed(() =>
 )
 </script>
 <template>
-  <section class="subagent-conversation" :aria-label="child.label || $t('子 Agent 对话')">
+  <section
+    class="subagent-conversation"
+    :aria-label="child.label || $t('子 Agent 对话')"
+  >
     <header>
       <strong>{{ child.label || $t('子 Agent') }}</strong>
-      <span role="status"
-        ><Pulse :state="live ? 'acting' : child.status === 'failed' ? 'error' : 'idle'" />{{
-          $t(status)
-        }}</span
-      >
+      <span role="status">
+        <Pulse :state="live ? 'acting' : child.status === 'failed' ? 'error' : 'idle'" />
+        {{ $t(status) }}
+      </span>
     </header>
-    <p v-if="turn.userText" class="parent-label" :title="turn.userText">
+    <p
+      v-if="turn.userText"
+      class="parent-label"
+      :title="turn.userText"
+    >
       {{ $t('来自运行：{0}', [turn.userText.split('\n')[0]]) }}
     </p>
-    <p v-if="child.model || child.provider" class="model-label">
+    <p
+      v-if="child.model || child.provider"
+      class="model-label"
+    >
       {{ [child.model, child.provider].filter(Boolean).join(' · ') }}
     </p>
     <section class="delegated-task">
       <h3>{{ $t('委派任务') }}</h3>
       <p>{{ child.task || $t('这条记录未保存委派内容。') }}</p>
     </section>
-    <template v-for="entry in entries" :key="entry.kind + ':' + entry.id">
+    <template
+      v-for="entry in entries"
+      :key="entry.kind + ':' + entry.id"
+    >
       <template v-if="entry.message">
         <ThinkingPanel
           v-if="entry.message.reasoning"
@@ -71,23 +83,43 @@ const hasFinal = computed(() =>
           :assistant-name="child.label || $t('子 Agent')"
           :timestamp="entry.message.time ? new Date(entry.message.time) : undefined"
         />
-        <p v-if="entry.message.truncated" class="record-note">
+        <p
+          v-if="entry.message.truncated"
+          class="record-note"
+        >
           {{ $t('内容较长，仅显示已保存的部分。') }}
         </p>
       </template>
-      <RunOperation v-else-if="entry.step" :step="entry.step" :ended="!live" />
+      <RunOperation
+        v-else-if="entry.step"
+        :step="entry.step"
+        :ended="!live"
+      />
     </template>
-    <p v-if="!live && !entries.length" class="record-note">{{ $t('这次运行未保存完整过程。') }}</p>
+    <p
+      v-if="!live && !entries.length"
+      class="record-note"
+    >
+      {{ $t('这次运行未保存完整过程。') }}
+    </p>
     <AgentMessage
       v-if="child.summary && !hasFinal && child.status === 'completed'"
       :content="child.summary"
       :assistant-name="child.label || $t('子 Agent')"
     />
-    <p v-else-if="child.summary && child.status === 'failed'" role="alert" class="failure">
+    <p
+      v-else-if="child.summary && child.status === 'failed'"
+      role="alert"
+      class="failure"
+    >
       {{ child.summary }}
     </p>
     <InkLoader v-if="live" />
-    <p v-if="live" class="record-note" role="status">
+    <p
+      v-if="live"
+      class="record-note"
+      role="status"
+    >
       {{ $t(child.status === 'queued' ? '等待开始…' : '正在执行，回复和操作结果会显示在这里。') }}
     </p>
   </section>

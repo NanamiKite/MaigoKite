@@ -14,7 +14,7 @@
 - 用户主动用当前草稿“从服务获取”目录，成功后选入草稿；不自动保存，也不是后台能力探测。
 - 目录不可用可手输真实模型 ID，不能把服务显示名称当 ID。
 - 默认用于新会话，现有会话选择持久化；单次任务不会因普通延迟静默换模型。
-- 子 Agent 默认跟随本回合父模型；会话可选择允许显式使用的其他配置项。主 Agent 按需用 `list_subagent_models` 发现 ID，再调用 `delegate(model_id=...)`，不新建 Registry、不接受模型自行提交端点/密钥。缺失/未授权/连接失败不静默替换，名称歧义须询问。此增量已接源码，尚未重新验收；具体边界见 [运行时设计](../../design/AgentRuntime.md#7-技能子任务与工作流边界)。
+- 子 Agent 默认跟随本回合父模型；会话可选择允许显式使用的其他配置项。主 Agent 按需用 `list_subagent_models` 发现 ID，再调用 `delegate(model_id=...)`，不新建 Registry、不接受模型自行提交端点/密钥。缺失/未授权/连接失败不静默替换，名称歧义须询问。指定允许模型的实际子图工具回合及主/子回复分离已通过真实 Core＋本机协议服务验收；自然语言选模和真实 Provider 不在其通过范围，见 [当前验收状态](../../project/Roadmap.md#当前验收状态) 与 [运行时设计](../../design/AgentRuntime.md#7-技能子任务与工作流边界)。
 - API 密钥按配置项 ID 保存在凭证存储，只回显存在状态，受控同步到核心服务内存。
 - 模型提供方/基础地址变化后不得把旧凭证发往新端点；本地模型提供方不借用云端环境密钥。
 - 安全审查的决策模型独立于聊天模型目录，按工作区保存在 `settings/safety`：端点与模型 ID 进配置，密钥走 `safety.decision_model` 凭证引用，只回显存在状态。请求格式为 `jev_like`（jev 类及开源实现 kev）、`laya` 或 `openai`（OpenAI 兼容 chat/completions 结构化输出），请求由 `state`（可自定义；`jev_like`/`laya` 留空省略附加字段，`openai` 留空用内置默认指令）和 `question`（由库生成）组成；`jev_like` 按 `jev_layout` 选择布局（默认 `message`，增量放 `state.message`；`inline` 内嵌问题指令，0.8B 与 4B 实测对比见[配置指南](../../Prompt-security/configuration.md#2-jev_like含开源实现-kev)）、`laya` 把待审查增量放 `state.message`；`openai` 把两段映射为 system/user 消息，并用 `response_format` 约束结构化返回。`laya` 发往 `{decision_base_url}/predict`（缺失后缀自动补），`decision_model` 只接受 `english`/`typed-decisions`（留空默认 `typed-decisions`），`multilingual` 因实测反向误判禁用，且必须显式指定检查点、不用服务端自动路由。主模型调用前审查新增提示词，可信模型跳过，失败保守拦截。字段、错误码与 `safety.reviewed` 事件契约见 [API 设计](../../design/API.md#36-设置模型和凭证引用)。
@@ -57,7 +57,9 @@ LM Studio 专属加载窗口和思考能力查询仅对 `models.routes` 中明�
 
 ## 4. 未交付的候选
 
-统一 ModelRegistry、后台能力探测、自动能力/成本路由、产品降级、向量嵌入/索引尚未完成；已有的手动模型目录获取不代表这些能力。图片输入及 Images/Responses 生图首版已接源码、未验收，入口与限制见 [配置指南](../../user-guide/Configuration.md#12-看图生图与文件预览)。历史“阶段 2”表示后续候选，不要求同时建设。
+统一 ModelRegistry、后台能力探测、自动能力/成本路由、产品降级、向量嵌入/索引尚未完成；已有的手动模型目录获取不代表这些能力。图片输入及 Images/Responses 生图首版已有本机协议和真实 Web 定向验收，SVG 本地符号预览缺陷已于 2026-10-16 复验关闭；不计真实模型 LIVE PASS。入口与限制见 [配置指南](../../user-guide/Configuration.md#12-看图生图与文件预览)。历史“阶段 2”表示后续候选，不要求同时建设。
+
+2026-10-16 完整后端回归发现公共目录离线回退缺陷：`models.dev` 下载发生原生 `ssl.SSLError` 时未进入已有回退，可能阻断等待刷新的模型创建。已新增受控 HTTP 响应流的失败回归，未修改产品源码；HTTPX 读取错误的回退仍通过。它不是模型服务故障或账户额度不足，不能用配置/凭证用例通过掩盖；当前状态见 [验收回执](../../project/Roadmap.md#当前验收状态)。
 
 不维护一份假想 YAML Registry。只有出现真实多模型策略需求，才在现有配置项引用上做最小扩展，记录能力的来源/时间，优先复用模型提供方元数据。禁止新建大型模型平台。
 
@@ -71,6 +73,6 @@ LM Studio 专属加载窗口和思考能力查询仅对 `models.routes` 中明�
 
 当前允许只读未配置页，不允许可保存的空表单、静态模型清单或仅改前端内存的控件。候选只有完整后端闭环和验收记录后才转当前有效。
 
-图片增量复用官方 OpenAI SDK，并接入既有工具审批、凭证库和工作区文件，不启用实验 `ImageAdapter` 的模型别名猜测。`image_generate` 配置独立于聊天配置；多模态看图走当前聊天模型的 LangChain 内容块。Images/Responses 由用户显式选择，不自动协议降级。生成文件为用户工作区文件，保留与清理由用户决定；尚未运行真实服务、取消或恢复验收，不标记 LIVE PASS。
+图片增量复用官方 OpenAI SDK，并接入既有工具审批、凭证库和工作区文件，不启用实验 `ImageAdapter` 的模型别名猜测。`image_generate` 配置独立于聊天配置；多模态看图走当前聊天模型的 LangChain 内容块。Images/Responses 由用户显式选择，不自动协议降级。生成文件为用户工作区文件，保留与清理由用户决定。官方 SDK 对接本机协议服务的生成/取消/崩溃后不自动重发已验收；真实服务、计费和远端取消未验收，不标记 LIVE PASS。
 
 模型提供方验收的 PROTOCOL/LIVE/UNVERIFIED 口径唯一来源为 [测试与验收](../../testing/TestPlan.md)；本页不复制会过期的真实服务验收矩阵。

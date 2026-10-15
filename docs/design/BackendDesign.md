@@ -68,7 +68,7 @@ API/ASGI 复用 FastAPI、Uvicorn 和 AnyIO，系统凭证复用 keyring；MCP�
 
 Web 与 Electron 继续共用相对路径构建产物。HTTP 返回的入口 HTML 补充 `<base href="/">`，让直接打开 `/chat/<id>` 时资源仍从站点根目录加载；磁盘文件不改写，Electron `file://` 保持相对路径。不存在的资源与 API（含 HEAD 请求）不回退为 SPA 页面。Windows 构建参数与共享脚本一致，不再接受 `go` 目标。
 
-2026-10-12 后端迁移已更新锁文件、启动脚本和文档，未运行软件测试、类型检查、lint、构建或平台实机验收，记录见 [交付路线与状态](../project/Roadmap.md)。独立桌面 Python runtime bundling、手机远程认证和发布 E2E 仍未完成。不能把旧 Go 链路验收记录当成新接口验收。
+2026-10-12 迁移落码时未执行运行验收；2026-10-15 已补当前 Python HTTP/WS、真实 Core 恢复与 Web 定向验收，后续图片增量也有独立通过/失败记录，见 [当前验收状态](../project/Roadmap.md#当前验收状态)。这不是全部路由或发布验收；独立桌面 Python runtime bundling、手机远程认证和平台凭证迁移仍未完成。不能把旧 Go 链路记录当成新接口证据。
 
 ## 6. 保留但未接入的基础设施
 

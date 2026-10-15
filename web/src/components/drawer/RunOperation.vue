@@ -25,9 +25,17 @@ watch(
       <Pulse :state="step.status === 'failed' ? 'error' : active ? 'acting' : 'idle'" />
       <span>{{ step.title }}</span>
       <small>{{ step.tool }}</small>
-      <IconSymbol name="chevron" :size="12" :class="{ expanded }" />
+      <IconSymbol
+        name="chevron"
+        :size="12"
+        :class="{ expanded }"
+      />
     </button>
-    <RailNodeDetail v-if="expanded" :steps="[step]" :ended="ended" />
+    <RailNodeDetail
+      v-if="expanded"
+      :steps="[step]"
+      :ended="ended"
+    />
   </div>
 </template>
 <style scoped lang="scss">

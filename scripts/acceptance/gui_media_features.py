@@ -119,3 +119,12 @@ async def test_gui_svg_preserves_documented_local_symbol_reference(product, page
     await expect(preview).to_be_visible()
     source = unquote((await preview.get_attribute("src")).split(",", 1)[1])
     assert '<use href="#tile"' in source, "sanitization must preserve the documented local symbol reference"
+    pixel = await preview.evaluate("""async img => {
+        await img.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 40;
+        const context = canvas.getContext('2d');
+        context.drawImage(img, 0, 0);
+        return Array.from(context.getImageData(20, 20, 1, 1).data);
+    }""")
+    assert pixel == [255, 0, 0, 255], "the referenced red tile must actually render, not merely survive serialization"

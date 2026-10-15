@@ -24,7 +24,12 @@ const unassigned = '__unassigned__'
 function reload() {
   return memory.load(search.value, selectedScope.value === unassigned ? null : selectedScope.value)
 }
-watch(() => workspace.selectedId, (id) => { selectedScope.value = id })
+watch(
+  () => workspace.selectedId,
+  (id) => {
+    selectedScope.value = id
+  },
+)
 watch(selectedScope, () => {
   draft.value = undefined
   search.value = ''
@@ -87,9 +92,18 @@ watch(
 onMounted(async () => {
   if (focusedId.value) search.value = ''
   await workspace.load()
-  await Promise.all([reload(), settings.loadPreferences(), api.getCapabilities().then((flags) => {
-    runtimeMemory.value = flags.scoped_memory === true
-  }).catch(() => { runtimeMemory.value = false })])
+  await Promise.all([
+    reload(),
+    settings.loadPreferences(),
+    api
+      .getCapabilities()
+      .then((flags) => {
+        runtimeMemory.value = flags.scoped_memory === true
+      })
+      .catch(() => {
+        runtimeMemory.value = false
+      }),
+  ])
   name.value = settings.profile.assistantName
 })
 onUnmounted(() => {
@@ -160,7 +174,8 @@ function retryName() {
           :aria-label="$t('搜索记忆')"
           :placeholder="$t('找一条记忆…')"
           maxlength="200"
-        ><button
+        />
+        <button
           class="secondary-button"
           :disabled="memory.loading"
         >
@@ -169,21 +184,46 @@ function retryName() {
       </form>
     </header>
     <section class="memory-scope">
-      <label>{{ $t('记忆归属') }}
-        <InkSelect v-model="selectedScope" :disabled="memory.saving || memory.savingSettings"
-          :options="[...workspace.folders.map(folder => ({ value: folder.id, label: folder.name })), { value: unassigned, label: $t('未归属的旧记忆') }]" />
+      <label>
+        {{ $t('记忆归属') }}
+        <InkSelect
+          v-model="selectedScope"
+          :disabled="memory.saving || memory.savingSettings"
+          :options="[
+            ...workspace.folders.map((folder) => ({ value: folder.id, label: folder.name })),
+            { value: unassigned, label: $t('未归属的旧记忆') },
+          ]"
+        />
       </label>
-      <p v-if="selectedScope === unassigned">{{ $t('这些记录仅供查看和编辑，不会自动带入任何对话。') }}</p>
+      <p v-if="selectedScope === unassigned">
+        {{ $t('这些记录仅供查看和编辑，不会自动带入任何对话。') }}
+      </p>
       <template v-else>
-        <button class="secondary-button" type="button" role="switch" :aria-checked="memory.enabled"
-          :disabled="!runtimeMemory || !memory.settingsReady || memory.loading || memory.savingSettings"
-          @click="memory.setEnabled(!memory.enabled)">
+        <button
+          class="secondary-button"
+          type="button"
+          role="switch"
+          :aria-checked="memory.enabled"
+          :disabled="
+            !runtimeMemory || !memory.settingsReady || memory.loading || memory.savingSettings
+          "
+          @click="memory.setEnabled(!memory.enabled)"
+        >
           {{ memory.enabled ? $t('本工作区记忆：开启') : $t('本工作区记忆：关闭') }}
         </button>
-        <p v-if="runtimeMemory">{{ $t('在对话中也开启记忆后，所选模型会收到本工作区的记忆。') }}</p>
-        <p v-else>{{ $t('记忆暂时不能用于对话，仍可查看和编辑。') }}</p>
+        <p v-if="runtimeMemory">
+          {{ $t('在对话中也开启记忆后，所选模型会收到本工作区的记忆。') }}
+        </p>
+        <p v-else>
+          {{ $t('记忆暂时不能用于对话，仍可查看和编辑。') }}
+        </p>
         <p>{{ $t('关闭或删除记忆不会清除已有对话内容。') }}</p>
-        <p v-if="memory.settingsError" role="alert">{{ memory.settingsError }}</p>
+        <p
+          v-if="memory.settingsError"
+          role="alert"
+        >
+          {{ memory.settingsError }}
+        </p>
       </template>
     </section>
     <p
@@ -198,15 +238,17 @@ function retryName() {
       class="memory-loading"
       :aria-label="$t('正在读取记忆')"
     >
-      <InkLoader /><InkLoader /><InkLoader />
+      <InkLoader />
+      <InkLoader />
+      <InkLoader />
     </div>
     <p
       v-if="memory.error"
       class="memory-error"
       role="alert"
     >
-      {{ memory.error
-      }}<button
+      {{ memory.error }}
+      <button
         class="secondary-button"
         :disabled="memory.loading"
         @click="reload()"
@@ -223,15 +265,22 @@ function retryName() {
           <AppIcon
             v-if="ui.appearance.avatar === '助'"
             :size="48"
-          /><span
+          />
+          <span
             v-else
             class="avatar-letter"
-          >{{ ui.appearance.avatar }}</span><strong>{{ settings.profile.assistantName }}</strong>
+          >
+            {{ ui.appearance.avatar }}
+          </span>
+          <strong>{{ settings.profile.assistantName }}</strong>
         </div>
-        <label>{{ $t('助手名字') }}<input
-          v-model="name"
-          maxlength="32"
-        ></label>
+        <label>
+          {{ $t('助手名字') }}
+          <input
+            v-model="name"
+            maxlength="32"
+          />
+        </label>
         <button
           class="secondary-button"
           :disabled="!name.trim() || settings.saving"
@@ -240,22 +289,24 @@ function retryName() {
         >
           {{ settings.saving ? $t('正在保存…') : $t('保存称呼') }}
         </button>
-        <label>{{ $t('头像字')
-        }}<input
-          :value="ui.appearance.avatar"
-          @input="
-            ui.setAppearance({
-              avatar: Array.from(($event.target as HTMLInputElement).value)[0] || '助',
-            })
-          "
-        ></label>
+        <label>
+          {{ $t('头像字') }}
+          <input
+            :value="ui.appearance.avatar"
+            @input="
+              ui.setAppearance({
+                avatar: Array.from(($event.target as HTMLInputElement).value)[0] || '助',
+              })
+            "
+          />
+        </label>
         <p
           v-if="settings.error"
           class="memory-error"
           role="alert"
         >
-          {{ settings.error
-          }}<button
+          {{ settings.error }}
+          <button
             class="secondary-button"
             :disabled="settings.saving"
             @click="retryName"

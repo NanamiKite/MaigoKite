@@ -5,8 +5,14 @@ defineProps<{ model: string }>()
 </script>
 
 <template>
-  <p class="model-switch-notice" role="note">
-    <IconSymbol name="cube" :size="14" />
+  <p
+    class="model-switch-notice"
+    role="note"
+  >
+    <IconSymbol
+      name="cube"
+      :size="14"
+    />
     <span>{{ $t('模型已切换为 {0}', [model]) }}</span>
   </p>
 </template>
@@ -22,6 +28,12 @@ defineProps<{ model: string }>()
   font-size: var(--text-xs);
   line-height: var(--leading-small);
 }
-.icon-symbol { flex: none; color: var(--accent); }
-span { min-width: 0; overflow-wrap: anywhere; }
+.icon-symbol {
+  flex: none;
+  color: var(--accent);
+}
+span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 </style>

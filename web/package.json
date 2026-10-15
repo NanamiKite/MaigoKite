@@ -20,7 +20,7 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "lint": "eslint . --ext .vue,.ts,.tsx",
+    "lint": "eslint . --ext .vue,.ts,.tsx --max-warnings=0",
     "lint:check": "eslint --max-warnings=0",
     "lint:fix": "eslint --fix",
     "format": "prettier --write src/",

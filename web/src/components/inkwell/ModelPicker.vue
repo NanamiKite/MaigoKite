@@ -27,7 +27,8 @@ const open = ref(false),
   activeId = ref('')
 const position = ref({ left: '0px', top: '0px' })
 const keyboardNavigation = ref(false)
-const collapsedGroups = ref(new Set<string>()), searchCollapsed = ref(new Set<string>())
+const collapsedGroups = ref(new Set<string>()),
+  searchCollapsed = ref(new Set<string>())
 const providerIds = new Map<string, string>()
 function providerId(groupId: string) {
   if (!providerIds.has(groupId)) providerIds.set(groupId, `${id}-provider-${providerIds.size}`)
@@ -44,8 +45,12 @@ function toggleGroup(groupId: string) {
 }
 const groups = computed(() => groupModelProfiles(props.models))
 const current = computed(() => props.models.find((item) => item.id === props.modelValue))
-const currentGroup = computed(() => groups.value.find((group) => group.models.some((item) => item.id === props.modelValue)))
-const label = computed(() => current.value?.model || (props.models.length ? t('选择模型') : t('未配置模型')))
+const currentGroup = computed(() =>
+  groups.value.find((group) => group.models.some((item) => item.id === props.modelValue)),
+)
+const label = computed(
+  () => current.value?.model || (props.models.length ? t('选择模型') : t('未配置模型')),
+)
 const visibleGroups = computed(() => {
   const terms = query.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
   return groups.value
@@ -59,15 +64,33 @@ const visibleGroups = computed(() => {
     }))
     .filter((group) => group.models.length)
 })
-const choices = computed(() => visibleGroups.value.filter(group => isExpanded(group.id)).flatMap(group => group.models))
-interface NavigationNode { id: string; domId: string; groupId: string; modelId?: string }
-const navigation = computed<NavigationNode[]>(() => visibleGroups.value.flatMap(group => [
-  { id: providerId(group.id), domId: providerId(group.id), groupId: group.id },
-  ...(isExpanded(group.id) ? group.models.map(item => ({ id: item.id, domId: `${id}-${item.id}`, groupId: group.id, modelId: item.id })) : []),
-]))
-const activeNode = computed(() => navigation.value.find(node => node.id === activeId.value))
+const choices = computed(() =>
+  visibleGroups.value.filter((group) => isExpanded(group.id)).flatMap((group) => group.models),
+)
+interface NavigationNode {
+  id: string
+  domId: string
+  groupId: string
+  modelId?: string
+}
+const navigation = computed<NavigationNode[]>(() =>
+  visibleGroups.value.flatMap((group) => [
+    { id: providerId(group.id), domId: providerId(group.id), groupId: group.id },
+    ...(isExpanded(group.id)
+      ? group.models.map((item) => ({
+          id: item.id,
+          domId: `${id}-${item.id}`,
+          groupId: group.id,
+          modelId: item.id,
+        }))
+      : []),
+  ]),
+)
+const activeNode = computed(() => navigation.value.find((node) => node.id === activeId.value))
 useDialog(dialog, () => open.value)
-function close() { open.value = false }
+function close() {
+  open.value = false
+}
 function place() {
   const anchor = trigger.value?.getBoundingClientRect(),
     panel = dialog.value
@@ -84,7 +107,9 @@ async function show(event?: MouseEvent) {
   query.value = ''
   searchCollapsed.value.clear()
   activeId.value = current.value?.id || props.models[0].id
-  const selectedGroup = groups.value.find(group => group.models.some(item => item.id === activeId.value))
+  const selectedGroup = groups.value.find((group) =>
+    group.models.some((item) => item.id === activeId.value),
+  )
   if (selectedGroup) collapsedGroups.value.delete(selectedGroup.id)
   open.value = true
   await nextTick()
@@ -94,7 +119,8 @@ async function show(event?: MouseEvent) {
 }
 function scrollToActive() {
   const node = activeNode.value
-  const element = node && document.getElementById(node.modelId ? node.domId : `${node.domId}-heading`)
+  const element =
+    node && document.getElementById(node.modelId ? node.domId : `${node.domId}-heading`)
   if (element && dialog.value?.contains(element)) element.scrollIntoView({ block: 'nearest' })
 }
 function choose(value: string) {
@@ -112,8 +138,11 @@ function onKey(event: KeyboardEvent) {
   }
   if (event.altKey) return
   keyboardNavigation.value = true
-  const focusedId = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-node-id]')?.dataset.nodeId : undefined
-  const node = navigation.value.find(item => item.id === (focusedId || activeId.value))
+  const focusedId =
+    event.target instanceof HTMLElement
+      ? event.target.closest<HTMLElement>('[data-node-id]')?.dataset.nodeId
+      : undefined
+  const node = navigation.value.find((item) => item.id === (focusedId || activeId.value))
   // Preserve caret movement in the search text; tree arrows apply when it is empty.
   if (!query.value && node && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
     event.preventDefault()
@@ -122,12 +151,18 @@ function onKey(event: KeyboardEvent) {
       else if (isExpanded(node.groupId)) toggleGroup(node.groupId)
     } else if (!node.modelId) {
       if (!isExpanded(node.groupId)) toggleGroup(node.groupId)
-      else activeId.value = visibleGroups.value.find(group => group.id === node.groupId)?.models[0]?.id || node.id
+      else
+        activeId.value =
+          visibleGroups.value.find((group) => group.id === node.groupId)?.models[0]?.id || node.id
     }
     search.value?.focus()
     return
   }
-  const index = menuSelectionIndex(event.key, navigation.value.findIndex(item => item.id === (focusedId || activeId.value)), navigation.value.length)
+  const index = menuSelectionIndex(
+    event.key,
+    navigation.value.findIndex((item) => item.id === (focusedId || activeId.value)),
+    navigation.value.length,
+  )
   if (index !== null) {
     event.preventDefault()
     activeId.value = navigation.value[index]?.id || ''
@@ -140,20 +175,32 @@ function onKey(event: KeyboardEvent) {
 }
 watch(query, () => {
   searchCollapsed.value.clear()
-  activeId.value = choices.value.find(item => !query.value.trim() && item.id === props.modelValue)?.id || choices.value[0]?.id || navigation.value[0]?.id || ''
+  activeId.value =
+    choices.value.find((item) => !query.value.trim() && item.id === props.modelValue)?.id ||
+    choices.value[0]?.id ||
+    navigation.value[0]?.id ||
+    ''
 })
 watch(navigation, () => {
   if (!navigation.value.some((item) => item.id === activeId.value))
     activeId.value = choices.value[0]?.id || navigation.value[0]?.id || ''
 })
-watch(activeId, async () => { await nextTick(); if (keyboardNavigation.value && document.activeElement === search.value) scrollToActive() })
+watch(activeId, async () => {
+  await nextTick()
+  if (keyboardNavigation.value && document.activeElement === search.value) scrollToActive()
+})
 watch(navigation, async () => {
   if (open.value) {
     await nextTick()
     place()
   }
 })
-watch(() => props.disabled, disabled => { if (disabled) close() })
+watch(
+  () => props.disabled,
+  (disabled) => {
+    if (disabled) close()
+  },
+)
 watch(() => props.modelValue, close)
 watch(open, (visible) => {
   if (visible) {
@@ -171,7 +218,9 @@ onScopeDispose(() => {
 </script>
 <template>
   <button
-    ref="trigger" type="button" class="model-trigger"
+    ref="trigger"
+    type="button"
+    class="model-trigger"
     :disabled="disabled || !models.length"
     :title="current ? `${currentGroup?.name || current.name} · ${current.model}` : label"
     :aria-label="$t('当前对话模型：{0}', [label])"
@@ -180,21 +229,44 @@ onScopeDispose(() => {
     :aria-controls="open ? id : undefined"
     @click="show"
   >
-    <IconSymbol name="cube" :size="14" />
+    <IconSymbol
+      name="cube"
+      :size="14"
+    />
     <span>{{ label }}</span>
-    <IconSymbol class="model-chevron" name="chevron" :size="12" />
+    <IconSymbol
+      class="model-chevron"
+      name="chevron"
+      :size="12"
+    />
   </button>
   <Teleport to="body">
     <dialog
-      :id="id" ref="dialog" class="model-menu inkline-shell" :style="position"
+      :id="id"
+      ref="dialog"
+      class="model-menu inkline-shell"
+      :style="position"
       :aria-label="$t('选择对话模型')"
-      @cancel.prevent="close" @close="close" @click.self="close" @keydown="onKey" @keydown.esc.stop
-      @pointermove="keyboardNavigation = false" @pointerdown="keyboardNavigation = false" @pointerleave="keyboardNavigation = false"
+      @cancel.prevent="close"
+      @close="close"
+      @click.self="close"
+      @keydown="onKey"
+      @keydown.esc.stop
+      @pointermove="keyboardNavigation = false"
+      @pointerdown="keyboardNavigation = false"
+      @pointerleave="keyboardNavigation = false"
     >
       <label class="model-search">
-        <IconSymbol name="search" :size="15" />
+        <IconSymbol
+          name="search"
+          :size="15"
+        />
         <input
-          ref="search" v-model="query" type="text" role="combobox" aria-haspopup="tree"
+          ref="search"
+          v-model="query"
+          type="text"
+          role="combobox"
+          aria-haspopup="tree"
           :aria-label="$t('搜索模型或服务')"
           aria-autocomplete="list"
           :aria-expanded="open"
@@ -203,27 +275,46 @@ onScopeDispose(() => {
           :placeholder="$t('搜索模型或服务…')"
           autocomplete="off"
           @input="keyboardNavigation = true"
-        >
+        />
       </label>
       <div
-        :id="`${id}-list`" class="model-list" role="tree"
+        :id="`${id}-list`"
+        class="model-list"
+        role="tree"
         :aria-label="$t('已配置的模型')"
       >
         <ModelPickerGroup
           v-for="group in visibleGroups"
           :key="group.id"
-          :group="group" :menu-id="id" :provider-id="providerId(group.id)"
-          :expanded="isExpanded(group.id)" :model-value="modelValue" :active-id="activeId"
+          :group="group"
+          :menu-id="id"
+          :provider-id="providerId(group.id)"
+          :expanded="isExpanded(group.id)"
+          :model-value="modelValue"
+          :active-id="activeId"
           :keyboard-navigation="keyboardNavigation"
-          @toggle="toggleGroup(group.id)" @highlight="activeId = $event" @choose="choose"
+          @toggle="toggleGroup(group.id)"
+          @highlight="activeId = $event"
+          @choose="choose"
         />
       </div>
-      <p v-if="!visibleGroups.length" class="model-empty" role="status">
+      <p
+        v-if="!visibleGroups.length"
+        class="model-empty"
+        role="status"
+      >
         {{ $t('没有匹配的模型。') }}
       </p>
       <footer>
-        <router-link to="/settings?tab=models" @click="close">
-          <IconSymbol name="settings" :size="14" />{{ $t('管理模型') }}
+        <router-link
+          to="/settings?tab=models"
+          @click="close"
+        >
+          <IconSymbol
+            name="settings"
+            :size="14"
+          />
+          {{ $t('管理模型') }}
         </router-link>
         <span>{{ $t('↑ ↓ 选择 · Enter 确认 · Alt + 数字') }}</span>
       </footer>

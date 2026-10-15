@@ -41,33 +41,58 @@ function toggle(event: Event) {
 }
 </script>
 <template>
-  <details class="receipt-entry" @toggle="toggle">
+  <details
+    class="receipt-entry"
+    @toggle="toggle"
+  >
     <summary>
-      <SealMark v-if="item.mode === 'approval' && verdict" :verdict="verdict" />
-      <IconSymbol v-else name="pending" :size="14" />
+      <SealMark
+        v-if="item.mode === 'approval' && verdict"
+        :verdict="verdict"
+      />
+      <IconSymbol
+        v-else
+        name="pending"
+        :size="14"
+      />
       <span class="approval-title">
-        <span>{{
-          item.mode === 'approval' ? description.action : item.title || $t('Agent 在等你回答')
-        }}</span>
+        <span>
+          {{ item.mode === 'approval' ? description.action : item.title || $t('Agent 在等你回答') }}
+        </span>
         <small v-if="item.mode === 'approval'">{{ description.target }}</small>
       </span>
       <small class="approval-status">{{ $t(status) }}</small>
-      <IconSymbol name="chevron" :size="12" class="entry-chevron" />
+      <IconSymbol
+        name="chevron"
+        :size="12"
+        class="entry-chevron"
+      />
     </summary>
     <template v-if="opened">
       <p v-if="description.command && item.mode === 'approval'">
         <code>{{ description.command }}</code>
       </p>
-      <p v-if="item.answer !== undefined">{{ item.answer }}</p>
-      <p v-if="item.note || record?.note">{{ item.note || record?.note }}</p>
+      <p v-if="item.answer !== undefined">
+        {{ item.answer }}
+      </p>
+      <p v-if="item.note || record?.note">
+        {{ item.note || record?.note }}
+      </p>
       <template v-if="record?.authorization_scope && verdict && verdict !== 'deny'">
         <p>{{ $t('批准范围') }} · {{ $t(scope) }}</p>
-        <p v-for="line in approvalScopeDescription(record.reuse_scope)" :key="line">{{ line }}</p>
+        <p
+          v-for="line in approvalScopeDescription(record.reuse_scope)"
+          :key="line"
+        >
+          {{ line }}
+        </p>
       </template>
       <details v-if="rawDetails">
         <summary>{{ $t('操作详情') }}</summary>
         <pre>{{ rawDetails.slice(0, 20_000) }}</pre>
-        <p v-if="rawDetails.length > 20_000">{{ $t('参数较长，仅显示前 20,000 个字符。') }}</p>
+        <p v-if="rawDetails.length > 20_000">
+          {{ $t('参数较长，仅显示前 20,000 个字符。') }}
+        </p>
       </details>
       <p v-if="item.risk || record?.risk_level">
         {{ $t('风险等级：{0}', [item.risk || record?.risk_level]) }}

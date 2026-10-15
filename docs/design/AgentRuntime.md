@@ -51,7 +51,7 @@ adaptive/effort 和 Ollama think；元数据客户端由 Core 模型生命周期
 - 聊天准入使用 Repository 方法，在一个事务中准入任务、保存用户消息并拒绝同会话未结束任务。可选 `Idempotency-Key` 绑定工作区、会话、主体和请求内容；重发相同键返回原任务，不重新执行。相同文本使用不同键仍是不同请求，不做语义去重。
 - `context.history` 区分 checkpoint 延续与产品历史导入。失败/取消/中断后的导入带执行边界说明：副作用可能已发生，应检查实际状态，不意味着回滚或重新授权。
 - 内部 `recover` 拒绝已结束任务、存在更新回合或当前仍在执行的会话；没有 checkpoint 就不恢复。未增加自动重试/通用恢复 API。
-- 会话产品快照接口在同一 Core Repository 锁内取得消息、任务、待审批、待回答问题与事件水位。它不是 checkpoint，也不覆盖所有活动增量；接口与截断语义见 [API](API.md)。GUI 已接入快照与聊天幂等键；待处理卡片从真实水位恢复，截断时不将省略请求视为已处理。提问经专用回答接口续接，与普通聊天排队分离。最新接线未运行验收。
+- 会话产品快照接口在同一 Core Repository 锁内取得消息、任务、待审批、待回答问题与事件水位。它不是 checkpoint，也不覆盖所有活动增量；接口与截断语义见 [API](API.md)。GUI 已接入快照与聊天幂等键；待处理卡片从真实水位恢复，截断时不将省略请求视为已处理。提问经专用回答接口续接，与普通聊天排队分离。正常 HTTP/WS 的历史/快照终态一致与真实 GUI 刷新已通过定向验收，快照并发、截断及投影异常全矩阵仍待覆盖。
 
 `/tool <name> <json-object>` 是产品命令语法，不再选另一套执行器：公开 `awrap_model_call` 将显式请求返回为原生 AIMessage 工具调用，随后仍经过同一 HITL、PermissionPolicy、ToolNode 与事件投影。工具结果通过同一模型节点返回给用户，不调用 LLM 决定或改写命令；这类命令也跳过摘要模型调用。`bash` 仅映射为 `exec_command` 兼容名，不扩大权限。当前仍需可初始化的模型配置以创建既有 agent 图。
 
@@ -87,11 +87,11 @@ flowchart TD
 - 原生工具结构定义由 Pydantic/LangChain 表达。产品参数检查复用 `jsonschema`，保留现有错误 DTO、参数清理和显式属性默认值处理；引用解析不得联网或读外部文件。
 - 权限策略仍使用既有风险等级、规范化参数摘要值、审批版本、作用域、过期时间和审计。提示词、技能或模型声称“已获授权”没有效力。权威规则见 [工具权限](../agent-capabilities/security/tool-permission.md)。
 - 2026-10-11 改为确定性的执行边界与人工审批，不增加审核 Agent。旧 `full_access` 保持兼容受限模式；新 `danger_full_access` 才取消工作区沙箱和逐项权限审批。越界文件、命令网络/沙箱升级走同一 HITL；Runtime 在实际执行前把策略结果的 `sandbox_mode / allow_network` 写入该调用的私有上下文，工具参数不能直接决定权限。
-- `once / task / session` 使用既有审批记录与有限期窄范围，不新建授权服务。每次工具执行重新查询当前策略和回执；取消、拒绝、审批版本/hash、checkpoint 恢复沿用现有路径，子 Agent 不继承父任务完全访问或授权回执。本批尚未运行恢复/撤销/模式切换回归。
+- `once / task / session` 使用既有审批记录与有限期窄范围，不新建授权服务。每次工具执行重新查询当前策略和回执；取消、拒绝、审批版本/hash、checkpoint 恢复沿用现有路径，子 Agent 不继承父任务完全访问或授权回执。拒绝后继续及文件审批重启恢复已通过；窄授权撤销/过期和运行中模式切换全矩阵不在该通过范围。
 - 子 Agent 读工具各自持有本次准入的权限副本；并行刷新不改变已开始读操作的上下文。同批其他工具进入审批不等于用户取消，已准入的只读子任务可以完成；显式取消仍随父任务传播并等待清理。子任务回传仅使用最终答案，前导 `<think>` 不混入父任务的工具结果或 UI 摘要。
 - HITL 保留原始完整调用批次，UI 一次展示一项审批，收齐允许或驳回决定后才恢复。驳回只将对应操作记为 `denied`，不取消任务、不放行或关闭其他审批。原生 `reject` 的 ToolMessage 把拒绝与理由返回模型，模型继续处理允许部分，无法完成时说明限制。拒绝信息要求不得重试或换工具绕过，但没有额外的跨工具语义识别器。批准记录不证明已执行，已发生副作用也不会回滚。
 - 新聊天与批准后的审批续接共用 Python API 的凭证同步，Core 重启后先从既有密钥存储补齐内存凭证。消费批准前检查模型可初始化，并等待前一个 interrupt 根任务退出。驳回也等待旧根退出，并尽力恢复模型凭证，但不为拒绝操作启动 MCP；密钥链或模型不可用不能阻止保存拒绝。后续初始化/执行失败发布 `task.failed`，不伪装为取消或成功。凭证不进入 checkpoint/审批。决定与恢复启动间仍存在崩溃窗口，不声称通用 exactly-once。
-- 2026-10-12 调整：拒绝与停止分开；HITL 和工具边界 interrupt 均按原生 interrupt ID 恢复。显式停止仍取消并等待根任务，不恢复已取消回合。此轮仅静态检查，未运行软件测试或重启恢复验收。
+- 拒绝与停止分开；HITL 和工具边界 interrupt 均按原生 interrupt ID 恢复。显式停止仍取消并等待根任务，不恢复已取消回合。2026-10-15 已补真实 Core 的拒绝写入后读取并完成、模型流取消、文件审批重启及两个崩溃点验收；完整覆盖与限制见 [当前验收状态](../project/Roadmap.md#当前验收状态)。
 - 中断任务的显式恢复沿用相同凭证同步：`POST /tasks/:taskID/resume → ResumeTask → AgentCore.resume_task → LangGraphRuntime.recover → checkpoint`。首版只开放文件读写保留历史，校验 owner、任务版本、最新回合、未归档、无活跃根和未完成检查点；不自动重放所有 interrupted 任务。恢复共用原有会话锁、根任务与取消清理，不新增恢复状态机。审批审计仍在 Repository，运行续接只看 LangGraph；接口边界见 [API](API.md)。
 - “允许”还须确认 checkpoint 正在原生审批 interrupt 中，且所选审批的工具 ID/名称属于该批调用；没有检查点或仅剩最终状态时不消费审批版本。消费决定前，按当前工作区规范化 checkpoint 参数，与审批保存的 hash 和风险等级核对，不以可变的 tool_calls 参数投影代替授权证据。“拒绝”不增加这些恢复前置条件。
 - 执行前再次通过 PermissionPolicy 和已有审批审计校验：需要批准的调用必须找到当前任务/工具调用对应的已消费记录，参数 hash、名称、风险一致才传入 approved；已通过 HITL 不等于无条件授权。直接恢复到 ToolNode 也经过此检查，不新建审批状态机。已有审批的调用即使当前模式放宽仍须匹配原审批。跨任务/工作区或不同工具复用产品 Tool Call ID 明确失败，不覆盖其他调用的投影与审批；尚未实现 Provider 非唯一 ID 的产品命名空间转换。
@@ -114,7 +114,7 @@ flowchart TD
 
 生效配置单独存入 `extensions.applied_config`，Core 重启优先加载；这只是产品配置，不与 checkpoint 双向同步。恢复原 MCP 连接使用它并复用当前 Skill、健康连接及其工具目录，允许待审批/待回答但仍要求无活动运行，不应用新编辑。缺凭证或启动失败按服务器报告，不撤销其他服务器的恢复结果。复用连接的内存凭证快照从 client 实际启动环境保留，显式应用也与该环境比较，不把并发读到的新密钥误记为已生效。Python API 批准 MCP 工具前可先补密钥链凭证并恢复连接，只检查目标服务及确切工具，目标失败不消费决定；LangGraph HITL 和 Repository hash/version/策略验证不变，不新增续接状态机或副作用恢复能力。
 
-应用任务由 Core 持有到清理结束，调用方断线不提前释放准入锁；shutdown 等待它结束再关闭共享资源。模型 HTTP 客户端、Browser、Repository 与订阅不更换。导入与磁盘 Skill 复用解析器，目录扫描移至标准库工作线程并加协作式预算，详见 [技能扫描边界](../agent-capabilities/skills/skill-lifecycle.md#3-安全与资源)。更新目录会自然改变下一次模型请求的工具/Skill 前缀，不承诺沿用此前 KV cache；不实现插件生命周期或自动热更新。本次扩展管理及生命周期修补尚未运行验收。
+应用任务由 Core 持有到清理结束，调用方断线不提前释放准入锁；shutdown 等待它结束再关闭共享资源。模型 HTTP 客户端、Browser、Repository 与订阅不更换。导入与磁盘 Skill 复用解析器，目录扫描移至标准库工作线程并加协作式预算，详见 [技能扫描边界](../agent-capabilities/skills/skill-lifecycle.md#3-安全与资源)。更新目录会自然改变下一次模型请求的工具/Skill 前缀，不承诺沿用此前 KV cache；不实现插件生命周期或自动热更新。配置保存/应用、失败回退、Skill 读取和无密钥 Core 重启已有真实进程验收；并发/凭证/扫描故障分支见 [当前验收状态](../project/Roadmap.md#当前验收状态)。
 
 2026-10-13 补漏：显式应用仍要求所有启用 MCP 准备成功；恢复连接允许部分成功，健康连接不再因其他服务失败而被断开。新聊天允许部分恢复；文件任务恢复、回答提问和原生工具批准跳过 MCP 准备，不启动或等待无关服务。checkpoint 与后续工具准入校验保留；MCP 批准要求目标可用，拒绝审批不受 MCP 准备步骤影响。不消费未准备好的 MCP 审批、不暗中应用待生效编辑。
 
@@ -122,7 +122,7 @@ flowchart TD
 
 - 取消时的 Chromium 清理异常不会转换为普通工具失败后继续运行：保留 `CancelledError` 语义，并通过已有 `tool.failed` 投影 `TOOL_CLEANUP_PENDING` 安全提示。关闭等待最多 10 秒；页面在发起关闭前退出可调用目录，只有公开 `close` 事件确认后才释放 context/profile。重试 `close()` 的无操作返回不当作关闭确认。未确认资源保留到周期回收或 Core 关闭，不能声称远端动作已经停止，也不能自动重试原操作；Core 重启不会重放页面动作。
 - Browser 使用官方 Playwright：默认临时上下文；`open(profile="名称", visible=true)` 经审批打开独立登录窗口，用户在窗口中登录，不要求在对话中交密码。具名配置复用 `launch_persistent_context`，目录在 `~/.maigokite/browser-profiles`，按工作区和名称隔离，POSIX 目录权限 0700。它不是密钥链，也不导入日常 Chrome 配置；同一配置只允许一个活动会话。`close` 关闭窗口但保留登录态；当前没有配置目录删除 GUI。
-- Core 的既有配置支持 `browser.max_sessions`（默认 4，1–16）与 `browser.idle_timeout_seconds`（默认 1800，60–86400）。启动中的会话也占用名额，超限明确拒绝；每分钟检查无工具操作的空闲会话，持锁/启动中的页面不回收，具名登录数据不删除。同一页面使用标准 asyncio 锁串行操作；排队取消不关闭页面，持锁操作取消或整体 90 秒超时才关闭自己的 context。关闭失败保留资源所有权供后续回收/Core 关闭处理。下载最终路径校验不意外丢失显式完全访问边界。这些是 Playwright 资源管理，不是新 Browser 协议；尚未实际运行本批浏览器验收。
+- Core 的既有配置支持 `browser.max_sessions`（默认 4，1–16）与 `browser.idle_timeout_seconds`（默认 1800，60–86400）。启动中的会话也占用名额，超限明确拒绝；每分钟检查无工具操作的空闲会话，持锁/启动中的页面不回收，具名登录数据不删除。同一页面使用标准 asyncio 锁串行操作；排队取消不关闭页面，持锁操作取消或整体 90 秒超时才关闭自己的 context。关闭失败保留资源所有权供后续回收/Core 关闭处理。下载最终路径校验不意外丢失显式完全访问边界。这些是 Playwright 资源管理，不是新 Browser 协议。真实 Chromium 的 profile Cookie、上传/下载/不覆盖/截图和持锁取消已通过；超时/关闭失败、容量/空闲回收全矩阵和真实账号不在该通过范围。
 - 活动 session_id 绑定工作区、会话和实际根路径，其他会话不能借 ID 操作。Core 重启后 session_id 失效，需重新 open 同一 profile；浏览器审批仍按临时运行状态处理，不自动重放下载/上传或旧页面点击。
 - 页面操作除 Python 超时外，也捕获 Playwright 独立的 TimeoutError；持锁调用先关闭自己的 context，再返回 `BROWSER_ACTION_TIMEOUT`。关闭未确认仍保留原清理待确认路径，排队取消不关闭他人的页面。下载的 cancel/delete 清理另限时 10 秒；超时或关闭页面不能证明网站侧操作未发生，不自动重试。
 - `upload(selector,path,url)` 使用 `set_input_files`；`download(selector,path,url)` 使用 `expect_download/save_as`，下载到明确的新文件名，不覆盖既有文件。url 必须取自当前快照；批准后页面 URL 改变则拒绝执行，重新检查与审批。上传/下载均经过审批和工作区/路径白名单约束，浏览器配置目录不可作为传输路径。单文件接收上限 50 MiB、下载操作超时 60 秒；下载大小在完成暂存后检查，不是下载期间的磁盘配额保证。关闭上下文负责回收 Playwright 临时下载。
@@ -201,7 +201,7 @@ Ollama/OpenAI-compatible 不借用云端环境密钥。OpenAI/compatible、Ollam
 
 固定指令与按名称排序的本地技能目录，结合持久聊天历史、完整工具回合和实际工具结构定义。技能正文通过 `skill read` 按需加载，不每轮重建系统提示词。
 
-手工记忆的请求投影已接入上下文 middleware：文件夹与对话开关同时开启时，每次主模型调用重新读取当前目录的条目，在预算内附带到本次请求副本，不写入消息或 checkpoint。此路径尚未验收；自动记忆提取、知识库和向量嵌入检索未接入。
+手工记忆的请求投影已接入上下文 middleware：文件夹与对话开关同时开启时，每次主模型调用重新读取当前目录的条目，在预算内附带到本次请求副本，不写入消息或 checkpoint。双开关、遗忘和 checkpoint 分离已通过真实 Core 定向验收；自动记忆提取、知识库和向量嵌入检索未接入。
 
 `python/agent/prompts/` 的遗留模板/解析器未接入当前聊天协议。记忆选择、续接与关闭的边界见 [记忆](../agent-capabilities/memory/memory-system.md)，长期记忆与上下文压缩各有独立职责。
 
@@ -258,7 +258,7 @@ Ollama/OpenAI-compatible 不借用云端环境密钥。OpenAI/compatible、Ollam
 - 准入冻结 Schema，审批/提问恢复使用同一契约；恢复最终 checkpoint 与产品投影之间的崩溃窗口时不调用图、不重放工具，只校验并补存结果。仍需继续执行的中断任务沿用文件读写恢复门限；新字段不扩大 MCP/浏览器重放能力。
 - 本批仅提供任务输入/结果契约，不增加工作流调度器、步骤自动串联、前端模式开关或新状态机。沿用现有调用预算、HITL、根 Task 取消和客户端所有权；真实 Provider 支持度及恢复/取消行为未在本批运行验收。
 
-### 会话级子 Agent（多模型源码接入，修复后待验收）
+### 会话级子 Agent（指定模型与独立对话已定向验收）
 
 复用 [LangChain subagent-as-tool](https://docs.langchain.com/oss/python/langchain/multi-agent/subagents) 与 [LangGraph per-invocation 子图](https://docs.langchain.com/oss/python/langgraph/use-subgraphs)：`delegate → create_agent.ainvoke`，不另建 SubAgentManager、子任务状态机或 continuation。
 
@@ -276,15 +276,15 @@ Ollama/OpenAI-compatible 不借用云端环境密钥。OpenAI/compatible、Ollam
 - `subagent.*` 进入同一任务的活动区，started/progress/completed 记录实际模型 ID、名称、提供方和任务标签，queued 只记录请求的模型 ID；子 Agent 流式正文不进入主回复，`model.usage` 以 `purpose=subagent` 计入总消耗，不覆盖主上下文指示器。子图上下文仍使用既有输入预算，不保证总 token/费用上限。
 - 本次不扩大 `ResumeTask` 的文件读写白名单：含 delegate 的中断任务暂不能从公共恢复接口重跑。检查点存在不等于跨进程子 Agent 恢复已经验收。
 
-此前定向测试发现 `delegate` 的 `ToolRuntime` 注入参数被 StructuredTool 的参数转换丢弃。2026-10-14 修复在转换前用标准库 `get_type_hints` 解析两个工具回调的延迟注解，保留显式 Pydantic 参数校验与 SDK 注入，不将 runtime 暴露给模型。上述多模型及 2026-10-15 边界修补未重新运行测试、类型检查、应用构建或真实模型请求，不把修复源码计作验收通过。
+此前定向测试发现 `delegate` 的 `ToolRuntime` 注入参数被 StructuredTool 的参数转换丢弃。2026-10-14 修复在转换前用标准库 `get_type_hints` 解析两个工具回调的延迟注解，保留显式 Pydantic 参数校验与 SDK 注入，不将 runtime 暴露给模型。2026-10-15 已补真实 Core 的指定子模型、实际文件工具回合与主/子回复隔离，以及真实 Web 的独立页签/刷新和默认额度保存；自然语言选模、取消/撤销/共享预算边界与子图跨进程恢复仍需各自验收。
 
 参考 [DSH 模型选择与独立/继承上下文委派](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/subagent/tool-subagent/README.md) 的交互边界，不复制其 Cordis/插件/子生命周期框架。当前仍是等待子图结果的工具调用，不是后台启动并返回 ID；后台委派、后续发消息、子 Agent Fork、worktree 和写入型子 Agent 均未交付。
 
-### 独立聊天分岔（源码接入，未验收）
+### 独立聊天分岔（API 主路径已定向验收）
 
 会话 API 创建新的产品会话并复制某条助手回复之前的可见 user/assistant 历史。源会话必须空闲，复制上限 500 条/2 MiB，超限拒绝；请求幂等与复制在同一产品事务内完成。分岔不调用模型，也不复制任务、审批、工具结果、事件、队列或 checkpoint；普通下一轮仍进入唯一 LangGraph Runtime，首次从现有产品历史导入入口读取消息并追加“文件共享、未回滚、审批不继承”的边界说明。首次模型调用后仍由原生 checkpoint 维护执行状态，不新增 Runtime continuation。完全访问/旧自动模式降为工作区权限，须用户重新选择才提升。
 
-这是对话上下文分岔，不是执行 time travel、工具重放、Git worktree 或文件快照。GUI 在已保存助手回复下方的「⋯ → 从此处分叉新对话」传入所选消息 ID，侧栏会话管理不再承载分叉入口。数据库增量与 API 见 [数据库](Database.md) 和 [API](API.md#32-会话与消息)；尚未运行本批迁移、幂等并发或 GUI 验收。
+这是对话上下文分岔，不是执行 time travel、工具重放、Git worktree 或文件快照。GUI 在已保存助手回复下方的「⋯ → 从此处分叉新对话」传入所选消息 ID，侧栏会话管理不再承载分叉入口。API 已验收可见消息独立 ID、不复制任务、记忆默认关闭；图片增量另验了附件引用复制。旧库迁移、幂等并发及 GUI 分叉点击仍未覆盖，见 [数据库](Database.md)、[API](API.md#32-会话与消息) 与 [当前验收状态](../project/Roadmap.md#当前验收状态)。
 
 持久确定性流程先评估现有检查点的组合，不另建工作流平台。缓存预热、复杂插件生命周期、版本化提示词/对照评测与自动重规划均非当前交付；只有实测需求和收益后才考虑。
 
@@ -297,7 +297,7 @@ Ollama/OpenAI-compatible 不借用云端环境密钥。OpenAI/compatible、Ollam
 | 人工审批 / HITL | PermissionPolicy、Approval API/Repository、LangGraph HumanInTheLoopMiddleware | 保留风险/参数 hash/version/审计；补齐新路径多审批和重启语义，不恢复第二套 HITLCoordinator |
 | 状态恢复 / Recovery | LangGraph checkpoint、resume_approval/recover、Core 中断任务对账 | 恢复与投影一致性、副作用重放和浏览器/MCP 易失状态仍有缺口；复用检查点并按工具明确可恢复边界，不增加通用 rollback/retry 状态机 |
 | 个人工作流 | Skill 可读取声明步骤，当前不是持久执行图 | 保留流程复用目标；需要确定性分支/暂停/恢复时组合 LangGraph 图与现有审批，不把空 WorkflowEngine 计作实现 |
-| 子 Agent | 已接单层只读 delegate、会话额度、并行限制与摘要回传，尚未验收 | 权限/预算/取消/跨进程回归；扩大能力前先证明当前边界，不增加私有调度框架 |
+| 子 Agent | 单层只读 delegate、指定模型/文件回合、独立对话与刷新已有定向回执 | 权限撤销/共享预算/取消/跨进程边界仍需覆盖；不增加私有调度框架 |
 
 第四批已删除旧主循环、TaskManager、ExecutionEngine、聊天 Provider 包装与旧续接读写代码。现有库的 continuation_json 列与历史数据仅保留兼容，不用于执行。空壳清理和旧链删除不提升 Workflow/SubAgent 的完成度。
 

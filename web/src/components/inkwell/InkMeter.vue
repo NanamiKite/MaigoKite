@@ -23,13 +23,27 @@ const label = computed(() =>
 const counts = computed(() => {
   const input = props.context.usedTokens
   const window = props.context.windowTokens
-  const used = input === null ? '—' : `${props.context.measurement === 'estimate' ? '~ ' : ''}${input.toLocaleString()}`
-  return window ? t('{0} / {1} Token', [used, window.toLocaleString()]) : t('{0} Token · 窗口未知', [used])
+  const used =
+    input === null
+      ? '—'
+      : `${props.context.measurement === 'estimate' ? '~ ' : ''}${input.toLocaleString()}`
+  return window
+    ? t('{0} / {1} Token', [used, window.toLocaleString()])
+    : t('{0} Token · 窗口未知', [used])
 })
 const fill = computed(() =>
   percent.value === null ? null : Math.min(100, Math.max(0, percent.value)),
 )
 const count = (value: number | null) => (value === null ? t('未提供') : value.toLocaleString())
+const configuredOutputLimit = computed(() => {
+  const limit = props.configuredOutputTokens
+  const reserved = props.context.outputReservedTokens
+  return limit != null && reserved != null && limit !== reserved ? limit : null
+})
+const inputExceedsBudget = computed(() => {
+  const { inputTokens, inputBudgetTokens } = props.context
+  return inputTokens != null && inputBudgetTokens != null && inputTokens > inputBudgetTokens
+})
 const capacityReasons: Record<string, string> = {
   checking: '正在读取模型窗口',
   unknown: '尚无模型窗口数据',
@@ -56,18 +70,26 @@ const reason = computed(() => {
 const title = computed(() =>
   [
     counts.value,
-    props.context.usedTokens === null ? t('尚无本次请求用量')
-      : t('上下文已用 {0}{1}', [label.value, props.context.measurement === 'estimate' ? t('（估算）') : '']),
+    props.context.usedTokens === null
+      ? t('尚无本次请求用量')
+      : t('上下文已用 {0}{1}', [
+          label.value,
+          props.context.measurement === 'estimate' ? t('（估算）') : '',
+        ]),
     reason.value,
-  ].filter(Boolean).join(' · '),
+  ]
+    .filter(Boolean)
+    .join(' · '),
 )
-const measurementLabel = computed(() => t(
-  props.context.measurement === 'estimate'
-    ? '输入估算'
-    : props.context.measurement === 'provider'
-      ? '服务端计数'
-      : '计数来源未提供',
-))
+const measurementLabel = computed(() =>
+  t(
+    props.context.measurement === 'estimate'
+      ? '输入估算'
+      : props.context.measurement === 'provider'
+        ? '服务端计数'
+        : '计数来源未提供',
+  ),
+)
 </script>
 <template>
   <StatPopover
@@ -98,16 +120,27 @@ const measurementLabel = computed(() => t(
         />
       </svg>
       <!-- Unknown capacity has no ratio or empty ring; keep the available count. -->
-      <IconSymbol v-else name="cube" :size="14" />
+      <IconSymbol
+        v-else
+        name="cube"
+        :size="14"
+      />
       <span>{{ counts }}</span>
-      <span v-if="percent !== null" class="capacity-source">{{ label }}</span>
+      <span
+        v-if="percent !== null"
+        class="capacity-source"
+      >
+        {{ label }}
+      </span>
     </template>
     <dl class="stat-rows">
       <div>
         <dt>
           {{ $t('已用上下文{0}', [context.measurement === 'estimate' ? $t('（估算）') : '']) }}
         </dt>
-        <dd>{{ context.usedTokens === null ? $t('未提供') : `${count(context.usedTokens)} Token` }}</dd>
+        <dd>
+          {{ context.usedTokens === null ? $t('未提供') : `${count(context.usedTokens)} Token` }}
+        </dd>
       </div>
       <div>
         <dt>{{ $t('模型窗口') }}</dt>
@@ -119,7 +152,10 @@ const measurementLabel = computed(() => t(
       </div>
       <div v-if="context.inputBudgetTokens != null">
         <dt>{{ $t('可用输入预算') }}</dt>
-        <dd>{{ context.inputTokens == null ? '—' : count(context.inputTokens) }} / {{ count(context.inputBudgetTokens) }} Token</dd>
+        <dd>
+          {{ context.inputTokens == null ? '—' : count(context.inputTokens) }} /
+          {{ count(context.inputBudgetTokens) }} Token
+        </dd>
       </div>
       <div v-if="context.compactionTriggerTokens != null">
         <dt>{{ $t('自动压缩阈值') }}</dt>
@@ -129,9 +165,9 @@ const measurementLabel = computed(() => t(
         <dt>{{ $t('输出预留') }}</dt>
         <dd>{{ count(context.outputReservedTokens) }} Token</dd>
       </div>
-      <div v-if="configuredOutputTokens != null && context.outputReservedTokens != null && configuredOutputTokens !== context.outputReservedTokens">
+      <div v-if="configuredOutputLimit !== null">
         <dt>{{ $t('配置输出上限') }}</dt>
-        <dd>{{ count(configuredOutputTokens) }} Token</dd>
+        <dd>{{ count(configuredOutputLimit) }} Token</dd>
       </div>
       <div v-if="context.safetyMarginTokens != null">
         <dt>{{ $t('安全余量') }}</dt>
@@ -142,14 +178,35 @@ const measurementLabel = computed(() => t(
         <dd>{{ measurementLabel }}</dd>
       </div>
     </dl>
-    <p v-if="reason" class="stat-note">{{ reason }}</p>
     <p
-      v-if="context.inputTokens != null && context.inputBudgetTokens != null && context.inputTokens > context.inputBudgetTokens"
+      v-if="reason"
       class="stat-note"
-    >{{ $t('本次输入已超过可用预算。') }}</p>
-    <p v-if="context.capacityStatus !== 'checking' && context.windowTokens === null" class="stat-note">
-      <button type="button" class="capacity-retry" @click="$emit('refresh')">{{ $t('重试') }}</button>
-      <router-link class="capacity-retry" to="/settings?tab=models">{{ $t('填写窗口容量') }}</router-link>
+    >
+      {{ reason }}
+    </p>
+    <p
+      v-if="inputExceedsBudget"
+      class="stat-note"
+    >
+      {{ $t('本次输入已超过可用预算。') }}
+    </p>
+    <p
+      v-if="context.capacityStatus !== 'checking' && context.windowTokens === null"
+      class="stat-note"
+    >
+      <button
+        type="button"
+        class="capacity-retry"
+        @click="$emit('refresh')"
+      >
+        {{ $t('重试') }}
+      </button>
+      <router-link
+        class="capacity-retry"
+        to="/settings?tab=models"
+      >
+        {{ $t('填写窗口容量') }}
+      </router-link>
     </p>
     <div
       v-if="percent !== null"

@@ -95,8 +95,20 @@ onScopeDispose(() => {
     @create="begin"
     @open-folder="openFolder"
   />
-  <p v-if="error && !kind" class="file-action-status failed" role="alert">{{ error }}</p>
-  <p v-if="saved" class="file-action-status" role="status">{{ saved }}</p>
+  <p
+    v-if="error && !kind"
+    class="file-action-status failed"
+    role="alert"
+  >
+    {{ error }}
+  </p>
+  <p
+    v-if="saved"
+    class="file-action-status"
+    role="status"
+  >
+    {{ saved }}
+  </p>
   <dialog
     ref="dialog"
     class="file-create-dialog"
@@ -105,23 +117,40 @@ onScopeDispose(() => {
   >
     <form @submit.prevent="create">
       <header>
-        <IconSymbol :name="kind === 'directory' ? 'folder' : 'file'" :size="18" />
+        <IconSymbol
+          :name="kind === 'directory' ? 'folder' : 'file'"
+          :size="18"
+        />
         <h3>{{ kind === 'directory' ? $t('新建文件夹') : $t('新建空文件') }}</h3>
       </header>
-      <p class="create-location">{{ $t('创建位置：{0}', [location]) }}</p>
-      <label
-        >{{ $t('名称')
-        }}<input
+      <p class="create-location">
+        {{ $t('创建位置：{0}', [location]) }}
+      </p>
+      <label>
+        {{ $t('名称') }}
+        <input
           v-model="name"
           autofocus
           required
           maxlength="255"
           :disabled="busy"
           autocomplete="off"
-      /></label>
-      <p v-if="error" class="failed" role="alert">{{ error }}</p>
+        />
+      </label>
+      <p
+        v-if="error"
+        class="failed"
+        role="alert"
+      >
+        {{ error }}
+      </p>
       <footer>
-        <button type="button" class="secondary-button" :disabled="busy" @click="kind = null">
+        <button
+          type="button"
+          class="secondary-button"
+          :disabled="busy"
+          @click="kind = null"
+        >
           {{ $t('取消') }}
         </button>
         <button

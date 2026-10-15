@@ -9,7 +9,10 @@ const turn = computed(() => (run.turns[props.sessionId] || []).slice(-1)[0])
 </script>
 
 <template>
-  <div v-if="turn?.compaction?.status === 'failed'" class="composer-alert">
+  <div
+    v-if="turn?.compaction?.status === 'failed'"
+    class="composer-alert"
+  >
     <CompactionStatus
       :compaction="turn.compaction"
       :turn-status="turn.status"

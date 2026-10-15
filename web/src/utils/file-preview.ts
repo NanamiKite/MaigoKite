@@ -28,6 +28,9 @@ export function renderSVGFile(source: string): string | null {
   const serializer = new XMLSerializer()
   const clean = DOMPurify.sanitize(serializer.serializeToString(root), {
     USE_PROFILES: { svg: true, svgFilters: true },
+    // The SVG profile excludes use. Allow it only in this isolated image path;
+    // the pass below restricts both href and xlink:href to local fragments.
+    ADD_TAGS: ['use'],
     FORBID_TAGS: [
       'script',
       'foreignObject',
@@ -50,11 +53,11 @@ export function renderSVGFile(source: string): string | null {
     for (const attribute of [...element.attributes]) {
       if (attribute.localName !== 'href') continue
       const value = attribute.value.trim()
-      if (
-        !value.startsWith('#') &&
-        !/^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+=*$/.test(value)
-      )
-        element.removeAttributeNode(attribute)
+      const localReference = /^#\S+$/.test(value)
+      const embeddedImage =
+        element.localName === 'image' &&
+        /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+=*$/.test(value)
+      if (!localReference && !embeddedImage) element.removeAttributeNode(attribute)
     }
   }
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(serializer.serializeToString(svg))

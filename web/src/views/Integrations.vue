@@ -175,7 +175,9 @@ async function saveCredential(removeValue = false) {
     if (removeValue) await api.deleteCredential(reference)
     else await api.saveCredential(reference, credentialValue.value)
     credentialValue.value = ''
-    notice.value = t('凭证已更新。请结束任务并处理审批后，点击“应用并检查连接”使更改生效；“恢复已有连接”不会轮换健康连接的凭证。')
+    notice.value = t(
+      '凭证已更新。请结束任务并处理审批后，点击“应用并检查连接”使更改生效；“恢复已有连接”不会轮换健康连接的凭证。',
+    )
   })
 }
 const directorySkills = computed(
@@ -234,8 +236,11 @@ function closeCredentials() {
 async function clearCredential() {
   if (!editable.value) return
   const reference = `${credentialServer.value}.${credentialName.value}`
-  if (await confirmAction(t('清除凭证后，使用它的服务将无法连接。继续？')) &&
-    editable.value && reference === `${credentialServer.value}.${credentialName.value}`)
+  if (
+    (await confirmAction(t('清除凭证后，使用它的服务将无法连接。继续？'))) &&
+    editable.value &&
+    reference === `${credentialServer.value}.${credentialName.value}`
+  )
     void scoped('credential', () => saveCredential(true))
 }
 async function scoped(name: string, action: () => void | Promise<unknown>) {
@@ -272,7 +277,9 @@ watch([server, skill, credentialServer], async () => {
       v-if="busy && !snapshot"
       class="page-loading"
     >
-      <InkLoader /><InkLoader /><InkLoader />
+      <InkLoader />
+      <InkLoader />
+      <InkLoader />
     </div>
     <section
       v-if="error && !feedbackTarget"
@@ -292,19 +299,24 @@ watch([server, skill, credentialServer], async () => {
       <div class="extension-runtime">
         <Pulse
           :state="snapshot.reloading ? 'acting' : snapshot.runtime_ready ? 'idle' : 'offline'"
-        /><span>{{
-          snapshot.reloading
-            ? $t('正在应用扩展')
-            : snapshot.runtime_ready
-              ? $t('连接已就绪')
-              : $t('连接未就绪')
-        }}</span><button
+        />
+        <span>
+          {{
+            snapshot.reloading
+              ? $t('正在应用扩展')
+              : snapshot.runtime_ready
+                ? $t('连接已就绪')
+                : $t('连接未就绪')
+          }}
+        </span>
+        <button
           class="primary-button"
           :disabled="!editable"
           @click="scoped('runtime', apply)"
         >
           {{ $t('应用并检查连接') }}
-        </button><button
+        </button>
+        <button
           v-if="snapshot.active_config"
           class="secondary-button"
           :disabled="!editable"
@@ -333,8 +345,8 @@ watch([server, skill, credentialServer], async () => {
         class="extension-error"
         role="alert"
       >
-        {{ snapshot.extension_error
-        }}<button
+        {{ snapshot.extension_error }}
+        <button
           class="secondary-button"
           :disabled="busy"
           @click="refresh"
@@ -365,7 +377,8 @@ watch([server, skill, credentialServer], async () => {
           @click="tab = 'mcp'"
         >
           MCP
-        </button><button
+        </button>
+        <button
           :aria-pressed="tab === 'skills'"
           @click="tab = 'skills'"
         >
@@ -383,56 +396,74 @@ watch([server, skill, credentialServer], async () => {
             {{ $t('添加 MCP') }}
           </button>
         </header>
-        <p class="page-copy">{{ $t('添加的程序会在本机运行，请只使用可信来源。') }}</p>
+        <p class="page-copy">
+          {{ $t('添加的程序会在本机运行，请只使用可信来源。') }}
+        </p>
         <form
           v-if="server"
           class="extension-editor"
           @submit.prevent="scoped(server.namespace, saveServer)"
         >
           <fieldset :disabled="!editable">
-            <label>{{ $t('名称标识')
-            }}<input
-              v-model="server.namespace"
-              required
-              pattern="[a-z][a-z0-9_-]{0,47}"
-              :disabled="editingServer"
-              placeholder="my-tools"
-            ></label>
-            <label>{{ $t('可执行程序')
-            }}<input
-              v-model="server.command"
-              required
-              placeholder="uvx / npx / python"
-            ></label>
-            <label>{{ $t('启动参数，每行一个') }}<textarea
-              v-model="argumentsText"
-              rows="3"
-            />
+            <label>
+              {{ $t('名称标识') }}
+              <input
+                v-model="server.namespace"
+                required
+                pattern="[a-z][a-z0-9_-]{0,47}"
+                :disabled="editingServer"
+                placeholder="my-tools"
+              />
             </label>
-            <label>{{ $t('工作目录（留空使用默认工作区）') }}<input v-model="server.cwd"></label>
-            <label>{{ $t('继承的环境变量名，每行一个') }}<textarea
-              v-model="inheritedEnv"
-              rows="2"
-            />
+            <label>
+              {{ $t('可执行程序') }}
+              <input
+                v-model="server.command"
+                required
+                placeholder="uvx / npx / python"
+              />
             </label>
-            <label>{{ $t('凭证环境变量名，每行一个')
-            }}<textarea
-              v-model="credentialNames"
-              rows="2"
-              placeholder="API_KEY"
-            />
+            <label>
+              {{ $t('启动参数，每行一个') }}
+              <textarea
+                v-model="argumentsText"
+                rows="3"
+              />
             </label>
-            <label class="check"><input
-              v-model="server.enabled"
-              type="checkbox"
-            >{{ $t('启用') }}</label>
+            <label>
+              {{ $t('工作目录（留空使用默认工作区）') }}
+              <input v-model="server.cwd" />
+            </label>
+            <label>
+              {{ $t('继承的环境变量名，每行一个') }}
+              <textarea
+                v-model="inheritedEnv"
+                rows="2"
+              />
+            </label>
+            <label>
+              {{ $t('凭证环境变量名，每行一个') }}
+              <textarea
+                v-model="credentialNames"
+                rows="2"
+                placeholder="API_KEY"
+              />
+            </label>
+            <label class="check">
+              <input
+                v-model="server.enabled"
+                type="checkbox"
+              />
+              {{ $t('启用') }}
+            </label>
             <div class="page-actions">
               <button
                 class="primary-button"
                 type="submit"
               >
                 {{ $t('保存配置') }}
-              </button><button
+              </button>
+              <button
                 class="secondary-button"
                 type="button"
                 @click="server = null"
@@ -453,7 +484,8 @@ watch([server, skill, credentialServer], async () => {
           v-if="!snapshot.config.mcp_servers.length"
           class="page-state"
         >
-          <Pulse state="offline" /><strong>{{ $t('还没有连接外部工具') }}</strong>
+          <Pulse state="offline" />
+          <strong>{{ $t('还没有连接外部工具') }}</strong>
           <p>{{ $t('添加可信的本地服务，工具会在连接成功后可用。') }}</p>
           <button
             class="secondary-button"
@@ -477,10 +509,13 @@ watch([server, skill, credentialServer], async () => {
             class="extension-item"
           >
             <header>
-              <Pulse :state="pulse(item.namespace)" /><strong>{{ item.namespace }}</strong><span>{{ state(item.namespace) }}</span>
+              <Pulse :state="pulse(item.namespace)" />
+              <strong>{{ item.namespace }}</strong>
+              <span>{{ state(item.namespace) }}</span>
             </header>
             <p class="page-copy">
-              <code>{{ item.command }}</code> ·
+              <code>{{ item.command }}</code>
+              ·
               {{ item.enabled ? $t('配置：启用') : $t('配置：停用') }}
             </p>
             <p
@@ -502,27 +537,31 @@ watch([server, skill, credentialServer], async () => {
                 @click="editServer(item)"
               >
                 {{ $t('编辑') }}
-              </button><button
+              </button>
+              <button
                 class="secondary-button"
                 :disabled="!editable"
                 @click="scoped(item.namespace, () => toggleServer(item.namespace))"
               >
                 {{ item.enabled ? $t('停用') : $t('启用') }}
-              </button><button
+              </button>
+              <button
                 v-if="item.secret_env.length"
                 class="secondary-button"
                 :disabled="!editable"
                 @click="openCredentials(item.namespace, item.secret_env)"
               >
                 {{ $t('配置凭证') }}
-              </button><button
+              </button>
+              <button
                 v-if="pulse(item.namespace) === 'error' || pulse(item.namespace) === 'offline'"
                 class="secondary-button"
                 :disabled="!editable"
                 @click="scoped(item.namespace, apply)"
               >
                 {{ $t('重新检查连接') }}
-              </button><button
+              </button>
+              <button
                 class="danger-button"
                 :disabled="!editable"
                 @click="removed = { kind: 'mcp', name: item.namespace }"
@@ -560,15 +599,22 @@ watch([server, skill, credentialServer], async () => {
         >
           <fieldset :disabled="!editable">
             <h3>{{ $t('配置凭证') }} · {{ credentialServer }}</h3>
-            <label>{{ $t('环境变量名')
-            }}<InkSelect v-model="credentialName" :disabled="!editable"
-              :options="selectedCredentialNames.map(name => ({ value: name, label: name }))" /></label>
-            <label>{{ $t('新的凭证值')
-            }}<SecretField
-              v-model="credentialValue"
-              :label="$t('新的凭证值')"
-              :disabled="!editable"
-            /></label>
+            <label>
+              {{ $t('环境变量名') }}
+              <InkSelect
+                v-model="credentialName"
+                :disabled="!editable"
+                :options="selectedCredentialNames.map((name) => ({ value: name, label: name }))"
+              />
+            </label>
+            <label>
+              {{ $t('新的凭证值') }}
+              <SecretField
+                v-model="credentialValue"
+                :label="$t('新的凭证值')"
+                :disabled="!editable"
+              />
+            </label>
             <div class="page-actions">
               <button
                 class="primary-button"
@@ -576,14 +622,16 @@ watch([server, skill, credentialServer], async () => {
                 :disabled="!credentialValue || !credentialName"
               >
                 {{ $t('保存凭证') }}
-              </button><button
+              </button>
+              <button
                 class="danger-button"
                 type="button"
                 :disabled="!credentialName"
                 @click="clearCredential"
               >
                 {{ $t('清除凭证') }}
-              </button><button
+              </button>
+              <button
                 class="secondary-button"
                 type="button"
                 @click="closeCredentials"
@@ -618,7 +666,8 @@ watch([server, skill, credentialServer], async () => {
               @click="editSkill()"
             >
               {{ $t('添加或导入技能') }}
-            </button><button
+            </button>
+            <button
               class="secondary-button"
               :disabled="!editable"
               @click="directories = snapshot.config.skill_directories.join('\n')"
@@ -633,17 +682,21 @@ watch([server, skill, credentialServer], async () => {
           @submit.prevent="scoped('directories', saveDirectories)"
         >
           <fieldset :disabled="!editable">
-            <label>{{ $t('技能目录，每行一个') }}<textarea
-              v-model="directories"
-              rows="3"
-            /></label>
+            <label>
+              {{ $t('技能目录，每行一个') }}
+              <textarea
+                v-model="directories"
+                rows="3"
+              />
+            </label>
             <div class="page-actions">
               <button
                 type="submit"
                 class="primary-button"
               >
                 {{ $t('保存配置') }}
-              </button><button
+              </button>
+              <button
                 type="button"
                 class="secondary-button"
                 @click="directories = null"
@@ -673,37 +726,47 @@ watch([server, skill, credentialServer], async () => {
           @submit.prevent="scoped(skill.name, saveSkill)"
         >
           <fieldset :disabled="!editable">
-            <label>{{ $t('名称标识（与 SKILL.md 的 name 一致）')
-            }}<input
-              v-model="skill.name"
-              required
-              :disabled="editingSkill"
-              pattern="[a-z0-9][a-z0-9._-]{0,63}"
-            ></label>
-            <label>{{ $t('导入文件')
-            }}<input
-              type="file"
-              accept=".md,text/markdown,text/plain"
-              @change="importSkill"
-            ></label>
-            <label>SKILL.md<textarea
-              v-model="skill.content"
-              rows="12"
-              required
-              spellcheck="false"
-            />
+            <label>
+              {{ $t('名称标识（与 SKILL.md 的 name 一致）') }}
+              <input
+                v-model="skill.name"
+                required
+                :disabled="editingSkill"
+                pattern="[a-z0-9][a-z0-9._-]{0,63}"
+              />
             </label>
-            <label class="check"><input
-              v-model="skill.enabled"
-              type="checkbox"
-            >{{ $t('启用') }}</label>
+            <label>
+              {{ $t('导入文件') }}
+              <input
+                type="file"
+                accept=".md,text/markdown,text/plain"
+                @change="importSkill"
+              />
+            </label>
+            <label>
+              SKILL.md
+              <textarea
+                v-model="skill.content"
+                rows="12"
+                required
+                spellcheck="false"
+              />
+            </label>
+            <label class="check">
+              <input
+                v-model="skill.enabled"
+                type="checkbox"
+              />
+              {{ $t('启用') }}
+            </label>
             <div class="page-actions">
               <button
                 type="submit"
                 class="primary-button"
               >
                 {{ $t('保存技能') }}
-              </button><button
+              </button>
+              <button
                 type="button"
                 class="secondary-button"
                 @click="skill = null"
@@ -738,14 +801,18 @@ watch([server, skill, credentialServer], async () => {
                   ? 'idle'
                   : 'offline'
               "
-            /><strong>{{ item.name }}</strong><span>{{
-              snapshot.skills.some(
-                (row) =>
-                  row.name === item.name && row.source_path.startsWith('managed:') && row.enabled,
-              )
-                ? $t('已加载')
-                : $t('未加载或已停用')
-            }}</span>
+            />
+            <strong>{{ item.name }}</strong>
+            <span>
+              {{
+                snapshot.skills.some(
+                  (row) =>
+                    row.name === item.name && row.source_path.startsWith('managed:') && row.enabled,
+                )
+                  ? $t('已加载')
+                  : $t('未加载或已停用')
+              }}
+            </span>
           </header>
           <div class="page-actions">
             <button
@@ -754,13 +821,15 @@ watch([server, skill, credentialServer], async () => {
               @click="editSkill(item)"
             >
               {{ $t('查看与编辑') }}
-            </button><button
+            </button>
+            <button
               class="secondary-button"
               :disabled="!editable"
               @click="scoped(item.name, () => toggleSkill(item.name, true))"
             >
               {{ item.enabled ? $t('停用') : $t('启用') }}
-            </button><button
+            </button>
+            <button
               class="danger-button"
               :disabled="!editable"
               @click="removed = { kind: 'skill', name: item.name }"
@@ -799,7 +868,8 @@ watch([server, skill, credentialServer], async () => {
           class="extension-item"
         >
           <header>
-            <Pulse :state="item.enabled ? 'idle' : 'offline'" /><strong>{{ item.name }}</strong>
+            <Pulse :state="item.enabled ? 'idle' : 'offline'" />
+            <strong>{{ item.name }}</strong>
           </header>
           <p>{{ item.description }}</p>
           <p class="extension-tools">
@@ -870,9 +940,7 @@ watch([server, skill, credentialServer], async () => {
           {{ $t('移除扩展') }}
         </h2>
         <p>
-          {{
-            $t('移除扩展 {0}？应用更改后停用，原文件和已保存的凭证会保留。', [removed.name])
-          }}
+          {{ $t('移除扩展 {0}？应用更改后停用，原文件和已保存的凭证会保留。', [removed.name]) }}
         </p>
         <div class="page-actions">
           <button
@@ -880,7 +948,8 @@ watch([server, skill, credentialServer], async () => {
             @click="removed = null"
           >
             {{ $t('取消') }}
-          </button><button
+          </button>
+          <button
             class="danger-button"
             :disabled="!editable"
             @click="remove"

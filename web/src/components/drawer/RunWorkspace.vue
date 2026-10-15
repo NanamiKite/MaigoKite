@@ -117,7 +117,11 @@ defineExpose({ open })
           :title="tab.label"
           @click="select(tab.key)"
         >
-          <IconSymbol name="subagents" :size="13" /><span>{{ tab.label }}</span>
+          <IconSymbol
+            name="subagents"
+            :size="13"
+          />
+          <span>{{ tab.label }}</span>
         </button>
         <button
           type="button"
@@ -125,7 +129,10 @@ defineExpose({ open })
           :aria-label="$t('关闭子 Agent 页签：{0}', [tab.label])"
           @click="close(tab.key)"
         >
-          <IconSymbol name="close" :size="12" />
+          <IconSymbol
+            name="close"
+            :size="12"
+          />
         </button>
       </div>
     </nav>
@@ -154,7 +161,12 @@ defineExpose({ open })
         :turn="current.turn"
         :child="current.child"
       />
-      <p v-else class="empty-copy">{{ $t('这次运行的记录已不可用。') }}</p>
+      <p
+        v-else
+        class="empty-copy"
+      >
+        {{ $t('这次运行的记录已不可用。') }}
+      </p>
     </div>
   </div>
 </template>

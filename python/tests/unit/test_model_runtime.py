@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import httpx
 import pytest
 from agent.config_manager import ConfigManager
 from agent.errors import public_error
@@ -19,6 +20,30 @@ class RecordingProvider(FakeModel):
 
     def __init__(self, **kwargs):
         super().__init__(options=kwargs)
+
+
+@pytest.fixture(autouse=True)
+async def isolated_metadata_transport(monkeypatch):
+    # These cases test profile/credential ownership, not availability of the
+    # public catalog. Keep real metadata fallback, but control its HTTP boundary.
+    def unavailable(request):
+        assert str(request.url) == "https://models.dev/api.json"
+        assert "authorization" not in request.headers
+        return httpx.Response(503, json={"error": "test catalog unavailable"})
+
+    owners = []
+    async with httpx.AsyncClient(transport=httpx.MockTransport(unavailable)) as client:
+        def metadata(runtime):
+            if runtime not in owners:
+                owners.append(runtime)
+            return client
+
+        monkeypatch.setattr(ChatModelRuntime, "_metadata_http_client", metadata)
+        try:
+            yield
+        finally:
+            for runtime in owners:
+                await runtime.close()
 
 
 def test_public_error_does_not_infer_provider_quota_from_http_429():

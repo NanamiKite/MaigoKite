@@ -29,10 +29,22 @@
 | `scripts/acceptance` | 关闭清理、MCP 取消复用、事件分页及运行时收尾门禁；由 `scripts/run_tests.sh` 默认纳入 |
 | `scripts/acceptance/test_personal_agent.py` | 真实 Core 子进程与 TCP HTTP/WS：聊天工具循环、拒绝后继续、停止、搜索、子模型、扩展重启、记忆/分岔和进程输入 |
 | `scripts/acceptance/gui_personal_agent.py` | 显式运行的真实 Web/Chromium 验收；不由默认后端 CI 收集，缺少构建或真实浏览器时不得记为通过 |
+| `scripts/acceptance/test_media_features.py` | 图片输入与生成的真实 Core/API/SDK 协议验收，含审批、配置变化、取消、Core 崩溃和计划投影；不使用付费模型 |
+| `python/tests/unit/test_media.py` | 图片地址/文件边界、派发意图持久化、磁盘写入中重复取消；测试替身与真实资源的边界在用例内说明 |
+| `scripts/acceptance/gui_media_features.py` / `web/src/tests/media-preview.test.ts` | 真实图片 GUI 与预览安全/兼容性；保留 SVG 本地符号回归断言，并以真实像素验证符号渲染，结果见 Roadmap |
+| `python/tests/unit/test_model_catalog.py` | 公共模型目录读取中断后的离线回退；真实目录对象配受控 HTTP 响应流，分别覆盖 HTTPX 读取异常和原生 TLS 异常，不依赖公网 |
 
 ### 功能验收入口
 
-安装锁定的 `dev` 检查依赖后，可单独运行后端产品验收及进程恢复；此命令不包含真实付费模型验收：
+安装锁定的 `dev` 检查依赖后，可运行完整后端测试及产品验收；显式排除真实付费模型入口：
+
+```bash
+PYTHONPATH=python uv run --no-sync python -m pytest \
+  python/tests scripts/acceptance \
+  --ignore=python/tests/spike/test_runtime_spike_live.py -vv --tb=short
+```
+
+只运行后端产品验收及进程恢复：
 
 ```bash
 PYTHONPATH=python uv run --no-sync python -m pytest \
@@ -46,12 +58,17 @@ Web/浏览器验收须先构建 `VITE_MOCK=0` 的真实 UI，再显式运行；`
 # 在项目根目录执行；构建脚本读取 web/ 中的依赖。
 (cd web && VITE_MOCK=0 npm run build:web)
 PYTHONPATH=python MAIGOKITE_ACCEPTANCE_WEB_DIR="$PWD/web/dist" \
-  uv run --no-sync python -m pytest scripts/acceptance/gui_personal_agent.py -vv --tb=short
+  uv run --no-sync python -m pytest scripts/acceptance/gui_personal_agent.py \
+    scripts/acceptance/gui_media_features.py -vv --tb=short
 ```
+
+只验新增图片功能可运行 `PYTHONPATH=python uv run --no-sync python -m pytest scripts/acceptance/test_media_features.py python/tests/unit/test_media.py -vv --tb=short`；前端全量入口为 `cd web && npm run test:run -- --no-cache --maxWorkers=2 --minWorkers=1`。已知失败应原样报告并保留断言，不用跳过或修改净化预期清零。当前结果唯一来源为 [当前验收状态](../project/Roadmap.md#当前验收状态)。
 
 PowerShell 可先设置 `$env:PYTHONPATH = "python"`，再运行同样的 `uv run --no-sync python -m pytest ...` 后端命令；这不代表 Windows 原生验收已通过。GUI 用例的当前运行证据为 Linux，不能外推为 Electron 安装包验收。
 
 新增产品验收只替代模型 HTTP/SSE 输出，Core、LangGraph、PermissionPolicy、Repository、工具、MCP 与 GUI 保持真实；沿用现有进程恢复测试的启动入口。子 Core 使用独立工作区/SQLite/checkpoint，剥离继承的模型/Tracing 密钥。真实浏览器测试访问公开测试页面，Cookie 为自建 canary，不包含真实登录；命令 stdin/stop 使用测试自己启动的进程及显式完全访问，不视为 OS 沙箱隔离验收。
+
+模型配置/凭证单测在本模块的元数据 HTTP 边界固定公共目录响应，避免假模型触发额外公网依赖；不替换目录解析或回退业务逻辑。独立 `test_model_catalog.py` 保留原生 TLS 错误的真实失败，不能用模块夹具把它一并屏蔽。2026-10-16 首轮曾实际访问公共 `models.dev` 并暴露该缺陷，不是付费模型调用；最终回归结果和仍开放的失败只在 Roadmap 记录。
 
 完整批次 HITL 必须验证全部决定齐备前无写入，旧预期“首项批准立即写第一个文件”不再适用。多项文件批准与部分批准后重启已有定向记录，但不覆盖后续驳回语义调整；两者的验证范围须分开，不能删除失败测试后宣称通过。
 

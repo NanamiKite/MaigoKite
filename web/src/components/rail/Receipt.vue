@@ -117,20 +117,27 @@ function toggleSummary() {
             :aria-controls="detailsId"
             @click="toggle(fact.id)"
           >
-            <IconSymbol :name="fact.icon" :size="13" />
-            <span>{{ $t(fact.label) }}</span
-            ><strong>{{ fact.count }}</strong>
+            <IconSymbol
+              :name="fact.icon"
+              :size="13"
+            />
+            <span>{{ $t(fact.label) }}</span>
+            <strong>{{ fact.count }}</strong>
             <template v-if="fact.id === 'files' && (summary.added || summary.removed)">
               <small class="diff-added">+{{ summary.added }}</small>
               <small class="diff-removed">−{{ summary.removed }}</small>
             </template>
-            <IconSymbol name="chevron" :size="11" class="fact-chevron" />
+            <IconSymbol
+              name="chevron"
+              :size="11"
+              class="fact-chevron"
+            />
           </button>
         </div>
         <ReceiptDetails
           v-if="selected"
-          :key="selected"
           :id="detailsId"
+          :key="selected"
           :turn="turn"
           :category="selected"
           :files="files"

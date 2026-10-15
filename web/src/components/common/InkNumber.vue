@@ -17,13 +17,33 @@ function step(direction: -1 | 1) {
 </script>
 
 <template>
-  <span ref="control" class="ink-number">
+  <span
+    ref="control"
+    class="ink-number"
+  >
     <slot />
-    <button type="button" class="ink-number-decrease" :disabled="disabled" :aria-label="$t('减少数值')" @click="step(-1)">
-      <IconSymbol name="minimize" :size="14" />
+    <button
+      type="button"
+      class="ink-number-decrease"
+      :disabled="disabled"
+      :aria-label="$t('减少数值')"
+      @click="step(-1)"
+    >
+      <IconSymbol
+        name="minimize"
+        :size="14"
+      />
     </button>
-    <button type="button" :disabled="disabled" :aria-label="$t('增加数值')" @click="step(1)">
-      <IconSymbol name="plus" :size="14" />
+    <button
+      type="button"
+      :disabled="disabled"
+      :aria-label="$t('增加数值')"
+      @click="step(1)"
+    >
+      <IconSymbol
+        name="plus"
+        :size="14"
+      />
     </button>
   </span>
 </template>

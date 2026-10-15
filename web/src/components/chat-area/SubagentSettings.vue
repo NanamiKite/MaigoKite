@@ -21,7 +21,11 @@ const props = withDefaults(
 const emit = defineEmits<{
   change: [value: { calls: number; concurrent: number; modelIds?: string[] }]
 }>()
-const draft = ref<SubagentSettings>({ calls: props.calls, concurrent: props.concurrent, modelIds: [...props.modelIds] })
+const draft = ref<SubagentSettings>({
+  calls: props.calls,
+  concurrent: props.concurrent,
+  modelIds: [...props.modelIds],
+})
 const summary = computed(() =>
   t('子 Agent · {0}', [
     props.calls ? t('每次任务 {0} 个 / 并行 {1}', [props.calls, props.concurrent]) : t('关闭'),
@@ -30,7 +34,11 @@ const summary = computed(() =>
 watch(
   () => [props.calls, props.concurrent, JSON.stringify(props.modelIds)],
   () => {
-    draft.value = { calls: props.calls, concurrent: props.concurrent, modelIds: [...props.modelIds] }
+    draft.value = {
+      calls: props.calls,
+      concurrent: props.concurrent,
+      modelIds: [...props.modelIds],
+    }
   },
 )
 const valid = computed(() => validSubagentSettings(draft.value))
@@ -55,14 +63,20 @@ function apply() {
       <span
         class="subagent-settings__trigger"
         :class="{ enabled: props.calls > 0 }"
-      ><IconSymbol
-        name="subagents"
-        :size="20"
-      /></span>
+      >
+        <IconSymbol
+          name="subagents"
+          :size="20"
+        />
+      </span>
     </template>
     <div class="subagent-settings__body">
-      <SubagentFields v-model="draft" :disabled="disabled || saving" :model-options="modelOptions"
-        :model-selection-supported="modelSelectionSupported" />
+      <SubagentFields
+        v-model="draft"
+        :disabled="disabled || saving"
+        :model-options="modelOptions"
+        :model-selection-supported="modelSelectionSupported"
+      />
       <button
         type="button"
         class="secondary-button"

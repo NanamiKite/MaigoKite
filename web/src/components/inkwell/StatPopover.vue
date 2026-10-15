@@ -10,7 +10,7 @@ const props = withDefaults(
     placement?: 'above' | 'below'
     toolbar?: boolean
   }>(),
-  { placement: 'above', toolbar: false },
+  { title: '', placement: 'above', toolbar: false },
 )
 const trigger = ref<HTMLButtonElement | null>(null),
   panel = ref<HTMLDialogElement | null>(null)

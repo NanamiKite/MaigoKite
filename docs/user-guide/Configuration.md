@@ -131,7 +131,7 @@ Python 后端和命令子进程的管道输出显式使用 UTF-8；这不改变 
 
 文件工具和工作区 API 不接受 `C:foo`、`\foo`、`file.txt:stream`、设备名称或尾随点/空格等含糊路径；请使用工作区相对路径，或文件工具支持的完整绝对路径（例如 `C:\项目\说明.txt`）。这不会把 PowerShell 脚本当成可静态分析的文件参数。
 
-本轮仅静态检查，尚未完成 Windows 实机验收。待验证：5.1/7 的中文输出与中文/空格路径、管道和错误退出码、UTF-8/BOM 文件差异、审批拒绝与恢复、中文 stdin、超时及 GUI 停止子进程树。Linux 原有 direct 行为也需回归；未执行项不视为通过。
+尚未完成 Windows 实机验收。待验证：5.1/7 的中文输出与中文/空格路径、管道和错误退出码、UTF-8/BOM 文件差异、审批拒绝与恢复、中文 stdin、超时及 GUI 停止子进程树。Linux direct 的真实进程中文 stdin、EOF、停止及退出后拒绝输入已通过定向验收，不能外推为 PowerShell 或 Windows 子进程树通过。
 
 编码约定依据：[微软编码说明](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_character_encoding?view=powershell-7.5)、[EncodedCommand 参数](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_powershell_exe?view=powershell-5.1#-encodedcommand)、[taskkill](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/taskkill)。
 
@@ -272,7 +272,7 @@ Tavily 后优先使用 Tavily。Google Programmable Search 需要 API 密钥和�
 - `工作区（workspace，推荐）`：当前工作区内读取、编辑和真实沙箱内的普通命令自动执行；越界、联网与敏感操作询问。
 - `完全访问（danger_full_access）`：显式取消工作区沙箱与逐项审批，命令以当前操作系统用户权限执行；不启用原本禁用的工具。
 
-旧 `full_access / auto` 保留为 `workspace_auto` 的受限行为，不会因升级而获得完全访问。部署显式禁用项仍有效。界面已接入新模式、风险确认和授权范围选择，但新增链路尚未完成运行验收；旧页面的“完全访问”不能视为新模式已启用。完整矩阵见 [工具权限](../agent-capabilities/security/tool-permission.md)，验证范围见 [交付路线与状态](../project/Roadmap.md)。
+旧 `full_access / auto` 保留为 `workspace_auto` 的受限行为，不会因升级而获得完全访问。部署显式禁用项仍有效。界面已接入新模式、风险确认和授权范围选择；拒绝后继续、文件审批重启和显式完全访问下的测试进程/生图已有定向回执，窄授权撤销/过期、模式变更与旧库升级仍需专项验收。旧页面的“完全访问”不能视为新模式已启用。完整矩阵见 [工具权限](../agent-capabilities/security/tool-permission.md)，验证范围见 [交付路线与状态](../project/Roadmap.md#当前验收状态)。
 
 设置页只修改新对话默认档位，聊天输入框可覆盖当前对话档位。需要确认时，审批记录包含规范化参数、资源范围、风险等级和有效期；默认只批准一次。支持复用的操作可选择当前任务/会话范围，最长 8 小时且可撤销；L5 不提供复用。L1–L5 是服务端内部风险模型，不要求用户逐工具配置。没有独立审核 Agent。
 
@@ -352,7 +352,7 @@ Core 重启后，MCP 内存凭证需要重新注入。可点击“恢复已有�
 
 ## 10. 记忆（阶段 2）
 
-“用户记忆”页面支持按工作区文件夹手动添加、查询、修改和遗忘长期信息，写操作进入审计日志。要让当前对话使用这些信息，需同时开启该页面的文件夹开关和聊天栏的对话开关，二者均默认关闭；旧的未归属记忆不会自动使用。功能源码已接入，当前批次尚未运行验收。
+“用户记忆”页面支持按工作区文件夹手动添加、查询、修改和遗忘长期信息，写操作进入审计日志。要让当前对话使用这些信息，需同时开启该页面的文件夹开关和聊天栏的对话开关，二者均默认关闭；旧的未归属记忆不会自动使用。双开关、遗忘后下次请求省略、请求/checkpoint 分离及分岔默认关闭已通过真实 Core 定向验收；多目录、修改/续接和 GUI 等剩余范围见 [当前验收状态](../project/Roadmap.md#当前验收状态)。
 
 每次主模型调用前重新读取开关和有效条目，仅在本次请求中附带给已配置的当前模型，不把参考区写死进聊天历史或 checkpoint。预算不足时部分或全部省略，自动提取与语义检索尚未实现；此功能不扫描其他聊天或文件，也不增加服务。
 
@@ -378,7 +378,7 @@ Core 重启后，MCP 内存凭证需要重新注入。可点击“恢复已有�
 
 ## 12. 看图、生图与文件预览
 
-源码已接入以下入口，尚未运行真实模型或界面验收：
+以下入口已完成本机协议与真实 Web/Chromium 定向验收；不是付费模型 LIVE PASS。**SVG 本地 `<use href="#…">` 符号预览缺图已于 2026-10-16 经单测与实际渲染复验关闭，外部引用仍被移除。** 通过/失败及未覆盖范围见 [当前验收状态](../project/Roadmap.md#当前验收状态)。
 
 - **看图**：聊天输入区「添加图片」，选择 PNG/JPEG/WebP/GIF 后发送给当前聊天模型。每条最多 4 张、共 16 MiB；模型必须支持图片输入，不能仅凭“OpenAI-compatible”认定支持。上传文件保存在当前工作区的 `chat-images/`；移除附件只取消发送，不删除已上传文件。图片消息暂不支持当前任务执行中的引导/排队。
 - **生图**：「设置 → 工具 → 图片生成」填写实际 API 根地址、模型 ID 和密钥并启用。Images 模式用于 OpenAI Images 兼容接口；Responses 模式填写支持 `image_generation` 工具的对话模型 ID。可以使用与聊天相同的服务，但不会自动借用聊天密钥或仅凭名字猜协议。尺寸和返回格式可留给服务决定，不强制一份内置模型参数表。

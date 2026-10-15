@@ -200,6 +200,14 @@ HTTP 请求模型在 `python/agent/api/contracts.py`，FastAPI 提供 `/openapi.
 - 固定业务记录复用已有 TypedDict、dataclass 或 Pydantic 契约，动态 JSON 使用已有 JSON 类型。不得用 `Any`、无依据的 `cast`、`type: ignore` 或 `noqa` 掩盖本可修复的类型/格式错误。确有上游类型缺陷的例外，须说明证据、范围及移除条件。
 - 注释说明代码做什么、为何需要该边界或限制；不以“薄封装”“不是另一套 Runtime”等声明代替实际设计约束。
 
+### 前端编码约束
+
+- 以 `web/.eslintrc.cjs`、`web/.prettierrc` 为准。属性换行、缩进和引号交给现有格式化工具，不能靠降低规则级别消除诊断。
+- 在 `web` 目录运行 `npm run lint` 只读检查全部前端，要求零错误、零警告；对指定手写源码也可运行 `npm run lint:check -- <文件路径...>`，格式另用 `npm run format:check -- <文件路径...>`。需要修改时显式运行 `npm run lint:fix -- <文件路径...>` 或 `npm exec -- prettier --write <文件路径...>`，不要用全目录写入覆盖无关改动。
+- CI 全量 lint 使用 `--max-warnings=0`，不能用“文件未改动”豁免存量警告；另外对 PR/push 改动的 `src`、`scripts` 下 JS/TS/Vue 手写文件执行零警告与格式检查，手动触发时检查最近一次提交。生成的 `src/api/generated` 由契约生成器维护，不手动格式化。这是静态门禁，不会在本地自动执行测试。
+- ESLint 与 Prettier 同时通过才算格式收尾；复杂模板表达式产生规则冲突时，提取有业务含义的计算值，不关闭缩进规则。`v-html` 仅允许在已核对的 DOMPurify 净化边界处声明局部例外，说明净化函数并立即恢复规则，不全局关闭安全提醒。
+- 固定 API 响应复用生成的传输类型与校验器，开发 Mock 同样遵守；用 `satisfies` 检查固定响应，不能通过类型断言或放宽校验绕过缺失字段。
+
 ### 改动收尾
 
 - 逐项核对本次 diff 的导入、行长、变量类型与调用方契约，并检查取消、异常和资源所有权是否因修改而改变。格式修正不夹带权限策略或执行逻辑变更。

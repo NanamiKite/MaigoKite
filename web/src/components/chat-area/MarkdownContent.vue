@@ -16,10 +16,13 @@ watch(
       timer = undefined
       displayed.value = props.content
     } else if (!timer)
-      timer = setTimeout(() => {
-        timer = undefined
-        displayed.value = props.content
-      }, Math.min(400, 100 + Math.floor(props.content.length / 8000) * 50))
+      timer = setTimeout(
+        () => {
+          timer = undefined
+          displayed.value = props.content
+        },
+        Math.min(400, 100 + Math.floor(props.content.length / 8000) * 50),
+      )
   },
 )
 // Longer streams parse less often; transient prefixes must not evict finished
@@ -35,12 +38,14 @@ onBeforeUnmount(() => {
       v-for="(block, index) in blocks"
       :key="index"
     >
-      <!-- Sanitized prose; fences render as literal Vue text, never raw HTML. -->
+      <!-- assistantMarkdownBlocks sanitizes prose with DOMPurify; code fences render as Vue text. -->
+      <!-- eslint-disable vue/no-v-html -->
       <div
         v-if="block.kind === 'html'"
         class="markdown-prose"
         v-html="block.html"
       />
+      <!-- eslint-enable vue/no-v-html -->
       <CodeBlock
         v-else
         :content="block.content"

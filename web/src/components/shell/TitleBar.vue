@@ -63,20 +63,22 @@ function toggleDrawer() {
       role="status"
       aria-live="polite"
       aria-atomic="true"
-    >{{
-      $t(
-        (
-          {
-            idle: '静息',
-            thinking: '思考',
-            acting: '行动',
-            waiting: '等你处理',
-            error: '出错',
-            offline: '离线',
-          } as const
-        )[state],
-      )
-    }}</span>
+    >
+      {{
+        $t(
+          (
+            {
+              idle: '静息',
+              thinking: '思考',
+              acting: '行动',
+              waiting: '等你处理',
+              error: '出错',
+              offline: '离线',
+            } as const
+          )[state],
+        )
+      }}
+    </span>
     <SessionTitle
       :title="title"
       :serif="route.name === 'Chat'"
@@ -89,8 +91,8 @@ function toggleDrawer() {
     >
       <!-- Chat owns session settings; this stable target only places its controls. -->
       <div
-        id="chat-session-actions"
         v-show="route.name === 'Chat'"
+        id="chat-session-actions"
         class="chat-session-actions"
       />
       <button
@@ -122,7 +124,9 @@ function toggleDrawer() {
           v-if="otherPending"
           class="pending-count"
           :aria-label="$t('{0} 项等你处理', [otherPending])"
-        >{{ otherPending }}</span>
+        >
+          {{ otherPending }}
+        </span>
       </button>
     </div>
   </header>

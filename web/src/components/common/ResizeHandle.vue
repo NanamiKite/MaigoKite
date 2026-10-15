@@ -14,7 +14,17 @@ const props = withDefaults(
     label?: string
     hint?: string
   }>(),
-  { side: 'left', orientation: 'vertical' },
+  {
+    side: 'left',
+    orientation: 'vertical',
+    // Omitted dimensions are derived from the orientation, panel and viewport below.
+    modelValue: undefined,
+    minimum: undefined,
+    maximum: undefined,
+    defaultValue: undefined,
+    label: '',
+    hint: '',
+  },
 )
 const emit = defineEmits<{
   dragging: [active: boolean]
@@ -24,6 +34,13 @@ const emit = defineEmits<{
 const layout = useLayoutStore()
 const { isDragging: widthDragging, startDrag, stopDrag } = useLayout()
 const horizontal = computed(() => props.orientation === 'horizontal')
+const defaultLabel = computed(() =>
+  horizontal.value
+    ? '调整文件树与预览的高度'
+    : props.side === 'left'
+      ? '调整侧栏宽度'
+      : '调整抽屉宽度',
+)
 const heightDragging = ref(false)
 const isDragging = computed(() => widthDragging.value || heightDragging.value)
 const minimum = computed(() =>
@@ -38,9 +55,13 @@ const maximum = computed(() =>
   ),
 )
 const value = computed(() =>
-  clamp(horizontal.value
-    ? (props.modelValue ?? minimum.value)
-    : props.side === 'left' ? layout.sidebarWidth : layout.fileExplorerWidth),
+  clamp(
+    horizontal.value
+      ? (props.modelValue ?? minimum.value)
+      : props.side === 'left'
+        ? layout.sidebarWidth
+        : layout.fileExplorerWidth,
+  ),
 )
 let captured: HTMLElement | null = null,
   capturedId = -1
@@ -85,11 +106,16 @@ function begin(event: MouseEvent | PointerEvent) {
   endEvent = capturedId < 0 ? 'mouseup' : 'pointerup'
   // Document listeners keep resizing alive if native pointer capture is lost.
   if (capturedId >= 0) {
-    try { target.setPointerCapture(capturedId) } catch { /* Document listeners still track movement. */ }
+    try {
+      target.setPointerCapture(capturedId)
+    } catch {
+      /* Document listeners still track movement. */
+    }
   }
   if (horizontal.value) {
     startY = event.clientY
-    heightPanel = target.previousElementSibling instanceof HTMLElement ? target.previousElementSibling : null
+    heightPanel =
+      target.previousElementSibling instanceof HTMLElement ? target.previousElementSibling : null
     // Start from the visible split, including flex/layout constraints.
     startHeight = dragValue = clamp(heightPanel?.getBoundingClientRect().height ?? value.value)
     heightDragging.value = true
@@ -102,8 +128,14 @@ function begin(event: MouseEvent | PointerEvent) {
     return
   }
   const actual = target.parentElement?.getBoundingClientRect().width ?? value.value
-  startDrag(props.side, event.clientX, actual, maximum.value,
-    capturedId < 0 ? undefined : capturedId, target.parentElement ?? undefined)
+  startDrag(
+    props.side,
+    event.clientX,
+    actual,
+    maximum.value,
+    capturedId < 0 ? undefined : capturedId,
+    target.parentElement ?? undefined,
+  )
 }
 function applyHeight(y: number) {
   dragValue = clamp(startHeight + y - startY)
@@ -144,7 +176,8 @@ function visibilityChanged() {
 }
 function finishPointer(event: MouseEvent | PointerEvent) {
   if (!matches(event)) return
-  if (heightDragging.value && (event.type === 'pointerup' || event.type === 'mouseup')) applyHeight(event.clientY)
+  if (heightDragging.value && (event.type === 'pointerup' || event.type === 'mouseup'))
+    applyHeight(event.clientY)
   finish()
 }
 function lostCapture(event: PointerEvent) {
@@ -172,7 +205,8 @@ function onKey(event: KeyboardEvent) {
       ? minimum.value
       : event.key === 'End'
         ? maximum.value
-        : value.value + direction * layoutPixels(event.shiftKey ? '--resize-step-fast' : '--resize-step')
+        : value.value +
+          direction * layoutPixels(event.shiftKey ? '--resize-step-fast' : '--resize-step')
   const adjusted = clamp(next)
   if (horizontal.value) {
     emit('update:modelValue', adjusted)
@@ -183,11 +217,15 @@ function onKey(event: KeyboardEvent) {
   else layout.setFileExplorerWidth(adjusted)
   layout.persistLayout()
 }
-watch(isDragging, (active) => {
-  feedback(active)
-  emit('dragging', active)
-  if (!active) release()
-}, { flush: 'sync' })
+watch(
+  isDragging,
+  (active) => {
+    feedback(active)
+    emit('dragging', active)
+    if (!active) release()
+  },
+  { flush: 'sync' },
+)
 onDeactivated(finish)
 onUnmounted(finish)
 </script>
@@ -198,11 +236,13 @@ onUnmounted(finish)
     role="separator"
     tabindex="0"
     :aria-orientation="orientation"
-    :aria-label="label || (horizontal ? $t('调整文件树与预览的高度') : side === 'left' ? $t('调整侧栏宽度') : $t('调整抽屉宽度'))"
+    :aria-label="label || $t(defaultLabel)"
     :aria-valuemin="minimum"
     :aria-valuemax="maximum"
     :aria-valuenow="Math.round(value)"
-    :title="hint || (horizontal ? $t('拖动调整文件树和预览；双击还原') : $t('拖动调整宽度；双击还原'))"
+    :title="
+      hint || (horizontal ? $t('拖动调整文件树和预览；双击还原') : $t('拖动调整宽度；双击还原'))
+    "
     @pointerdown="begin"
     @mousedown="begin"
     @lostpointercapture="lostCapture"

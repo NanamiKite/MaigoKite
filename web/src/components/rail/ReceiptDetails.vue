@@ -100,8 +100,14 @@ function openFile(path: string | null) {
 <template>
   <div class="receipt-details">
     <template v-if="category === 'files'">
-      <ul v-if="files.length" class="receipt-file-list">
-        <li v-for="file in files" :key="file.path">
+      <ul
+        v-if="files.length"
+        class="receipt-file-list"
+      >
+        <li
+          v-for="file in files"
+          :key="file.path"
+        >
           <button
             type="button"
             :disabled="!file.relative || !folderAvailable"
@@ -114,12 +120,21 @@ function openFile(path: string | null) {
             "
             @click="openFile(file.relative)"
           >
-            <IconSymbol name="file" :size="14" /><span>{{ file.path }}</span
-            ><IconSymbol name="chevron" :size="12" />
+            <IconSymbol
+              name="file"
+              :size="14"
+            />
+            <span>{{ file.path }}</span>
+            <IconSymbol
+              name="chevron"
+              :size="12"
+            />
           </button>
         </li>
       </ul>
-      <p v-else>{{ $t('这条记录未保存文件明细。') }}</p>
+      <p v-else>
+        {{ $t('这条记录未保存文件明细。') }}
+      </p>
     </template>
     <template v-else-if="category === 'commands'">
       <details
@@ -129,24 +144,42 @@ function openFile(path: string | null) {
         @toggle="toggle(step.id, $event)"
       >
         <summary>
-          <IconSymbol name="terminal" :size="14" /><code>{{
-            commandText(step) || $t('命令内容未保存在这条记录中')
-          }}</code
-          ><span v-if="step.status === 'failed'" class="failed-fact">{{ $t('失败') }}</span>
-          <IconSymbol name="chevron" :size="12" class="entry-chevron" />
+          <IconSymbol
+            name="terminal"
+            :size="14"
+          />
+          <code>{{ commandText(step) || $t('命令内容未保存在这条记录中') }}</code>
+          <span
+            v-if="step.status === 'failed'"
+            class="failed-fact"
+          >
+            {{ $t('失败') }}
+          </span>
+          <IconSymbol
+            name="chevron"
+            :size="12"
+            class="entry-chevron"
+          />
         </summary>
         <template v-if="opened.has(step.id)">
           <RailNodeDetail :steps="[step]" />
-          <p v-if="!step.output">{{ $t('这条命令没有输出。') }}</p>
+          <p v-if="!step.output">
+            {{ $t('这条命令没有输出。') }}
+          </p>
         </template>
       </details>
-      <p v-if="!commands.length">{{ $t('这条记录未保存命令明细。') }}</p>
+      <p v-if="!commands.length">
+        {{ $t('这条记录未保存命令明细。') }}
+      </p>
     </template>
     <template v-else-if="category === 'approvals'">
       <InkLoader v-if="approvalLoading" />
-      <p v-if="approvalError" role="alert">
-        {{ approvalError
-        }}<button
+      <p
+        v-if="approvalError"
+        role="alert"
+      >
+        {{ approvalError }}
+        <button
           type="button"
           class="text-button"
           :disabled="approvalLoading"
@@ -161,7 +194,9 @@ function openFile(path: string | null) {
         :item="item"
         :record="records.get(item.id)"
       />
-      <p v-if="approvalPartial">{{ $t('部分历史明细未完整返回，已显示可读取的记录。') }}</p>
+      <p v-if="approvalPartial">
+        {{ $t('部分历史明细未完整返回，已显示可读取的记录。') }}
+      </p>
       <p v-if="!awaitItems.length && !approvalLoading && !approvalError">
         {{ $t('这条记录未保存审批明细。') }}
       </p>
@@ -174,13 +209,31 @@ function openFile(path: string | null) {
         @toggle="toggle(step.id, $event)"
       >
         <summary>
-          <IconSymbol name="alert" :size="14" /><span>{{ commandText(step) || step.title }}</span>
-          <IconSymbol name="chevron" :size="12" class="entry-chevron" />
+          <IconSymbol
+            name="alert"
+            :size="14"
+          />
+          <span>{{ commandText(step) || step.title }}</span>
+          <IconSymbol
+            name="chevron"
+            :size="12"
+            class="entry-chevron"
+          />
         </summary>
-        <RailNodeDetail v-if="opened.has(step.id)" :steps="[step]" />
+        <RailNodeDetail
+          v-if="opened.has(step.id)"
+          :steps="[step]"
+        />
       </details>
-      <p v-if="turn.error" class="failed-fact">{{ turn.error }}</p>
-      <p v-if="!failures.length && !turn.error">{{ $t('这条记录未保存失败明细。') }}</p>
+      <p
+        v-if="turn.error"
+        class="failed-fact"
+      >
+        {{ turn.error }}
+      </p>
+      <p v-if="!failures.length && !turn.error">
+        {{ $t('这条记录未保存失败明细。') }}
+      </p>
     </template>
   </div>
 </template>

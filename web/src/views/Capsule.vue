@@ -63,7 +63,8 @@ function drop(event: DragEvent) {
     @dragover.prevent
     @drop.prevent="drop"
   >
-    <Pulse :state="error ? 'error' : sending ? 'thinking' : 'idle'" /><input
+    <Pulse :state="error ? 'error' : sending ? 'thinking' : 'idle'" />
+    <input
       ref="input"
       v-model="text"
       :placeholder="error || $t('输入消息…')"
@@ -71,13 +72,30 @@ function drop(event: DragEvent) {
       :aria-label="$t('速记内容')"
       :title="error"
       @keydown="keydown"
-    ><div
-      class="capsule-destinations" role="group"
+    />
+    <div
+      class="capsule-destinations"
+      role="group"
       :aria-label="$t('速记发送目标')"
     >
-      <button type="button" :disabled="sending" :aria-pressed="destination === 'recent'" @click="destination = 'recent'">{{ $t('最近会话') }}</button>
-      <button type="button" :disabled="sending" :aria-pressed="destination === 'new'" @click="destination = 'new'">{{ $t('新会话') }}</button>
-    </div><button
+      <button
+        type="button"
+        :disabled="sending"
+        :aria-pressed="destination === 'recent'"
+        @click="destination = 'recent'"
+      >
+        {{ $t('最近会话') }}
+      </button>
+      <button
+        type="button"
+        :disabled="sending"
+        :aria-pressed="destination === 'new'"
+        @click="destination = 'new'"
+      >
+        {{ $t('新会话') }}
+      </button>
+    </div>
+    <button
       class="icon-button"
       :disabled="!text.trim() || sending"
       :aria-label="$t('发送')"
@@ -87,12 +105,13 @@ function drop(event: DragEvent) {
         name="arrow-up"
         :size="18"
       />
-    </button><span
+    </button>
+    <span
       class="sr-only"
       :role="error ? 'alert' : 'status'"
-    >{{
-      error || (sending ? $t('正在发送…') : '')
-    }}</span>
+    >
+      {{ error || (sending ? $t('正在发送…') : '') }}
+    </span>
   </form>
 </template>
 <style scoped lang="scss">
@@ -144,7 +163,10 @@ button {
   background: var(--transparent);
   -webkit-app-region: no-drag;
 }
-.capsule-destinations button[aria-pressed='true'] { background: var(--accent-selected); color: var(--accent); }
+.capsule-destinations button[aria-pressed='true'] {
+  background: var(--accent-selected);
+  color: var(--accent);
+}
 @media (prefers-reduced-motion: reduce) {
   .capsule {
     animation: paper-fade var(--motion-reduced) var(--ease-out) both !important;

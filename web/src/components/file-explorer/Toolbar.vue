@@ -6,9 +6,13 @@ const emit = defineEmits<{ refresh: []; create: [type: 'file' | 'directory']; 'o
 
 <template>
   <div class="toolbar">
-    <span :title="location"
-      ><IconSymbol name="folder" :size="14" />{{ location || $t('工作区文件') }}</span
-    >
+    <span :title="location">
+      <IconSymbol
+        name="folder"
+        :size="14"
+      />
+      {{ location || $t('工作区文件') }}
+    </span>
     <div class="toolbar-actions">
       <button
         class="icon-button"
@@ -18,7 +22,10 @@ const emit = defineEmits<{ refresh: []; create: [type: 'file' | 'directory']; 'o
         :title="$t('新建空文件')"
         @click="emit('create', 'file')"
       >
-        <IconSymbol name="file-plus" :size="15" />
+        <IconSymbol
+          name="file-plus"
+          :size="15"
+        />
       </button>
       <button
         class="icon-button"
@@ -28,7 +35,10 @@ const emit = defineEmits<{ refresh: []; create: [type: 'file' | 'directory']; 'o
         :title="$t('新建文件夹')"
         @click="emit('create', 'directory')"
       >
-        <IconSymbol name="folder-plus" :size="15" />
+        <IconSymbol
+          name="folder-plus"
+          :size="15"
+        />
       </button>
       <button
         class="icon-button"
@@ -39,7 +49,10 @@ const emit = defineEmits<{ refresh: []; create: [type: 'file' | 'directory']; 'o
         :title="$t('在文件资源管理器中打开文件夹')"
         @click="emit('open-folder')"
       >
-        <IconSymbol name="folder-open" :size="15" />
+        <IconSymbol
+          name="folder-open"
+          :size="15"
+        />
       </button>
       <button
         class="icon-button"
@@ -50,7 +63,10 @@ const emit = defineEmits<{ refresh: []; create: [type: 'file' | 'directory']; 'o
         :title="$t('刷新文件')"
         @click="emit('refresh')"
       >
-        <IconSymbol name="refresh" :size="15" />
+        <IconSymbol
+          name="refresh"
+          :size="15"
+        />
       </button>
     </div>
   </div>

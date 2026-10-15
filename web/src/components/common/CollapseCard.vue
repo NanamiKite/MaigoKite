@@ -3,7 +3,12 @@ import { ref, watch } from 'vue'
 import IconSymbol from './IconSymbol.vue'
 
 const props = withDefaults(
-  defineProps<{ title: string; defaultExpanded?: boolean; icon?: string; variant?: 'default' | 'settings' }>(),
+  defineProps<{
+    title: string
+    defaultExpanded?: boolean
+    icon?: string
+    variant?: 'default' | 'settings'
+  }>(),
   {
     defaultExpanded: false,
     icon: 'activity',
@@ -11,7 +16,7 @@ const props = withDefaults(
   },
 )
 const isExpanded = ref(props.defaultExpanded)
-const bodyId = `collapse-${Array.from(crypto.getRandomValues(new Uint32Array(2)), value => value.toString(16)).join('-')}`
+const bodyId = `collapse-${Array.from(crypto.getRandomValues(new Uint32Array(2)), (value) => value.toString(16)).join('-')}`
 watch(
   () => props.defaultExpanded,
   (value) => {
@@ -21,7 +26,10 @@ watch(
 </script>
 
 <template>
-  <section class="collapse-card" :data-variant="variant">
+  <section
+    class="collapse-card"
+    :data-variant="variant"
+  >
     <button
       class="card-header"
       type="button"
@@ -29,12 +37,19 @@ watch(
       :aria-controls="variant === 'settings' || isExpanded ? bodyId : undefined"
       @click="isExpanded = !isExpanded"
     >
-      <span class="title-icon"><IconSymbol
-        :name="icon"
-        :size="15"
-      /></span>
+      <span class="title-icon">
+        <IconSymbol
+          :name="icon"
+          :size="15"
+        />
+      </span>
       <span class="card-title">{{ title }}</span>
-      <span v-if="$slots.summary" class="card-summary"><slot name="summary" /></span>
+      <span
+        v-if="$slots.summary"
+        class="card-summary"
+      >
+        <slot name="summary" />
+      </span>
       <IconSymbol
         name="chevron"
         :size="14"
@@ -102,7 +117,10 @@ watch(
   padding: var(--size-10) var(--measure-13px) var(--measure-13px);
   border-top: var(--hairline) solid var(--rule);
 }
-.card-title { min-width: 0; overflow-wrap: anywhere; }
+.card-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .card-summary {
   display: inline-flex;
   align-items: center;
@@ -113,7 +131,9 @@ watch(
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.card-summary + .chevron { margin-inline-start: 0; }
+.card-summary + .chevron {
+  margin-inline-start: 0;
+}
 .collapse-card[data-variant='settings'] {
   width: 100%;
   margin: 0;
@@ -129,11 +149,19 @@ watch(
     font-size: var(--text-sm);
     border-radius: var(--radius-sm);
   }
-  > .card-header > .title-icon { background: var(--transparent); }
-  > .card-header > .card-summary { color: var(--ink-2); }
-  > .card-body { padding: var(--space-5); }
+  > .card-header > .title-icon {
+    background: var(--transparent);
+  }
+  > .card-header > .card-summary {
+    color: var(--ink-2);
+  }
+  > .card-body {
+    padding: var(--space-5);
+  }
 }
 @media (prefers-reduced-motion: reduce) {
-  .chevron { transition: none; }
+  .chevron {
+    transition: none;
+  }
 }
 </style>

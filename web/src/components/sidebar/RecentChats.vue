@@ -19,16 +19,38 @@ const session = useSessionStore(),
   router = useRouter()
 const error = ref('')
 const inbox = useInboxStore()
-const blockedIds = computed(() => new Set(inbox.items.filter(item =>
-  !item.closed && !item.verdict && item.answer === undefined).map(item => item.sessionId)))
+const blockedIds = computed(
+  () =>
+    new Set(
+      inbox.items
+        .filter((item) => !item.closed && !item.verdict && item.answer === undefined)
+        .map((item) => item.sessionId),
+    ),
+)
 function dateGroups(items: Conversation[]) {
-  const today = new Date(); today.setHours(0, 0, 0, 0)
-  const week = new Date(today); week.setDate(week.getDate() - (week.getDay() + 6) % 7)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const week = new Date(today)
+  week.setDate(week.getDate() - ((week.getDay() + 6) % 7))
   return [
-    { id: 'today', label: '今天', items: items.filter(item => Date.parse(item.updated_at) >= +today) },
-    { id: 'week', label: '本周', items: items.filter(item => Date.parse(item.updated_at) < +today && Date.parse(item.updated_at) >= +week) },
-    { id: 'older', label: '更早', items: items.filter(item => !(Date.parse(item.updated_at) >= +week)) },
-  ].filter(group => group.items.length)
+    {
+      id: 'today',
+      label: '今天',
+      items: items.filter((item) => Date.parse(item.updated_at) >= +today),
+    },
+    {
+      id: 'week',
+      label: '本周',
+      items: items.filter(
+        (item) => Date.parse(item.updated_at) < +today && Date.parse(item.updated_at) >= +week,
+      ),
+    },
+    {
+      id: 'older',
+      label: '更早',
+      items: items.filter((item) => !(Date.parse(item.updated_at) >= +week)),
+    },
+  ].filter((group) => group.items.length)
 }
 const showAll = ref<Record<string, boolean>>({})
 const searching = computed(() => !!props.query.trim())
@@ -66,7 +88,8 @@ const groups = computed(() => {
               (item, index) =>
                 index < 5 ||
                 item.id === session.activeSessionId ||
-                session.runningTaskIds[item.id]?.length || blockedIds.value.has(item.id),
+                session.runningTaskIds[item.id]?.length ||
+                blockedIds.value.has(item.id),
             )
       return {
         ...folder,
@@ -110,14 +133,29 @@ async function selectGroup(id: string) {
 </script>
 <template>
   <div class="recent-chats">
-    <p v-if="session.isLoading && !session.sessions.length" class="empty-copy">
+    <p
+      v-if="session.isLoading && !session.sessions.length"
+      class="empty-copy"
+    >
       {{ $t('正在读取会话…') }}
     </p>
-    <p v-if="session.error || error" class="empty-copy" role="alert">
-      {{ session.error || error
-      }}<button class="secondary-button" @click="session.loadSessions">{{ $t('重新连接') }}</button>
+    <p
+      v-if="session.error || error"
+      class="empty-copy"
+      role="alert"
+    >
+      {{ session.error || error }}
+      <button
+        class="secondary-button"
+        @click="session.loadSessions"
+      >
+        {{ $t('重新连接') }}
+      </button>
     </p>
-    <p v-if="!groups.length && !session.isLoading" class="empty-copy">
+    <p
+      v-if="!groups.length && !session.isLoading"
+      class="empty-copy"
+    >
       {{ searching ? $t('没有找到相关工作区或对话') : $t('还没有归档对话') }}
     </p>
     <section
@@ -157,8 +195,12 @@ async function selectGroup(id: string) {
           :title="group.root_path || group.label"
           @click="selectGroup(group.id)"
         >
-          <IconSymbol name="folder" :size="16" /><span>{{ group.label }}</span
-          ><small>{{ group.sessions.length }}</small>
+          <IconSymbol
+            name="folder"
+            :size="16"
+          />
+          <span>{{ group.label }}</span>
+          <small>{{ group.sessions.length }}</small>
         </button>
         <button
           class="workspace-new"
@@ -167,21 +209,43 @@ async function selectGroup(id: string) {
           :title="$t('在「{0}」中新建对话', [group.label])"
           @click="emit('create', group.id)"
         >
-          <IconSymbol name="plus" :size="16" />
+          <IconSymbol
+            name="plus"
+            :size="16"
+          />
         </button>
-        <WorkspaceDeleteButton v-if="group.id" :folder="group" :disabled="creating" />
+        <WorkspaceDeleteButton
+          v-if="group.id"
+          :folder="group"
+          :disabled="creating"
+        />
       </header>
       <div
         v-if="workspace.isExpanded(group.id) || searching"
         :id="'workspace-sessions-' + (group.id || 'default')"
         class="workspace-sessions"
       >
-        <p v-if="!group.sessions.length" class="empty-copy workspace-empty">
+        <p
+          v-if="!group.sessions.length"
+          class="empty-copy workspace-empty"
+        >
           {{ session.showArchived ? $t('这个工作区还没有归档对话。') : $t('还没有对话') }}
         </p>
-        <section v-for="date in group.dates" :key="date.id" class="session-date-group">
-          <h3 class="session-date-label">{{ $t(date.label) }}</h3>
-          <SessionItem v-for="item in date.items" :key="item.id" :item="item" :collapsed="false" @select="emit('select')" />
+        <section
+          v-for="date in group.dates"
+          :key="date.id"
+          class="session-date-group"
+        >
+          <h3 class="session-date-label">
+            {{ $t(date.label) }}
+          </h3>
+          <SessionItem
+            v-for="item in date.items"
+            :key="item.id"
+            :item="item"
+            :collapsed="false"
+            @select="emit('select')"
+          />
         </section>
         <button
           v-if="group.hidden && !searching"

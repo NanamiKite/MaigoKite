@@ -6,12 +6,23 @@ defineProps<{
   id?: string
 }>()
 
-const hovered = ref(false), focused = ref(false), dismissed = ref(false)
+const hovered = ref(false),
+  focused = ref(false),
+  dismissed = ref(false)
 const isVisible = computed(() => !dismissed.value && (hovered.value || focused.value))
-function enter() { hovered.value = true; dismissed.value = false }
-function focus() { focused.value = true; dismissed.value = false }
+function enter() {
+  hovered.value = true
+  dismissed.value = false
+}
+function focus() {
+  focused.value = true
+  dismissed.value = false
+}
 function blur(event: FocusEvent) {
-  if (!(event.relatedTarget instanceof Node) || !(event.currentTarget as HTMLElement).contains(event.relatedTarget))
+  if (
+    !(event.relatedTarget instanceof Node) ||
+    !(event.currentTarget as HTMLElement).contains(event.relatedTarget)
+  )
     focused.value = false
 }
 </script>
@@ -27,11 +38,13 @@ function blur(event: FocusEvent) {
   >
     <slot />
     <span
-      :id="id"
       v-show="isVisible"
+      :id="id"
       class="tooltip"
       role="tooltip"
-    >{{ content }}</span>
+    >
+      {{ content }}
+    </span>
   </span>
 </template>
 

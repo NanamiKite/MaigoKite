@@ -214,22 +214,47 @@ onUnmounted(cleanup)
 </script>
 <template>
   <section class="jobs-tab">
-    <RunWorkspace ref="pages" :session-id="session.activeSessionId || ''" :turns="turns">
+    <RunWorkspace
+      ref="pages"
+      :session-id="session.activeSessionId || ''"
+      :turns="turns"
+    >
       <header>
-        <strong>{{ $t('运行') }}</strong
-        ><button class="icon-button" :title="$t('刷新运行状态')" @click="load">
-          <IconSymbol name="refresh" :size="16" />
+        <strong>{{ $t('运行') }}</strong>
+        <button
+          class="icon-button"
+          :title="$t('刷新运行状态')"
+          @click="load"
+        >
+          <IconSymbol
+            name="refresh"
+            :size="16"
+          />
         </button>
       </header>
-      <p v-if="error || actionError" class="empty-copy" role="alert">
-        {{ actionError || error
-        }}<button class="text-button" @click="load">
+      <p
+        v-if="error || actionError"
+        class="empty-copy"
+        role="alert"
+      >
+        {{ actionError || error }}
+        <button
+          class="text-button"
+          @click="load"
+        >
           {{ $t('刷新运行状态') }}
         </button>
       </p>
       <InkLoader v-else-if="loading && !tasks.length" />
-      <div v-else-if="!activeTasks.length" class="runtime-empty">
-        <IconSymbol name="activity" :size="24" /><strong>{{ $t('现在没有运行中的任务') }}</strong>
+      <div
+        v-else-if="!activeTasks.length"
+        class="runtime-empty"
+      >
+        <IconSymbol
+          name="activity"
+          :size="24"
+        />
+        <strong>{{ $t('现在没有运行中的任务') }}</strong>
         <p>{{ $t('开始对话后，当前操作和等待原因会显示在这里。') }}</p>
       </div>
       <RunEntry
@@ -245,10 +270,13 @@ onUnmounted(cleanup)
         @locate="locateTask(task)"
         @open-subagent="openSubagent"
       />
-      <article v-for="job in jobs" :key="job.id">
-        <span class="section-label"
-          >{{ $t('命令进程') }} · {{ $t(job.live ? '运行中' : '已结束') }}</span
-        >
+      <article
+        v-for="job in jobs"
+        :key="job.id"
+      >
+        <span class="section-label">
+          {{ $t('命令进程') }} · {{ $t(job.live ? '运行中' : '已结束') }}
+        </span>
         <strong>{{ job.command }}</strong>
         <pre v-if="job.log_tail">{{ job.log_tail.split('\n').slice(-200).join('\n') }}</pre>
         <p v-else-if="job.live && !job.live_logs_available">
@@ -267,8 +295,12 @@ onUnmounted(cleanup)
             autocomplete="off"
             :disabled="sendingInput.has(job.id)"
             maxlength="4095"
+          />
+          <button
+            class="secondary-button"
+            :disabled="sendingInput.has(job.id)"
+            type="submit"
           >
-          <button class="secondary-button" :disabled="sendingInput.has(job.id)" type="submit">
             {{ $t('发送输入') }}
           </button>
           <button
@@ -289,11 +321,17 @@ onUnmounted(cleanup)
         >
           {{ $t(stoppingJobs.has(job.id) ? '请求停止中…' : '停止此进程') }}
         </button>
-        <p v-if="job.live" class="empty-copy">
+        <p
+          v-if="job.live"
+          class="empty-copy"
+        >
           {{ $t('停止进程会返回工具结果；若要结束整轮执行，请停止上方任务。') }}
         </p>
       </article>
-      <div v-if="history.length" class="runtime-history">
+      <div
+        v-if="history.length"
+        class="runtime-history"
+      >
         <span class="section-label">{{ $t('历史运行') }}</span>
         <RunEntry
           v-for="task in history.slice(0, historyLimit)"

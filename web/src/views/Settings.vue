@@ -52,7 +52,9 @@ async function locate(field: SettingsField) {
   ;(control || target).focus({ preventScroll: true })
 }
 function panelReady() {
-  const field = settingsFields.find((item) => item.id === route.query.field && item.tab === active.value.id)
+  const field = settingsFields.find(
+    (item) => item.id === route.query.field && item.tab === active.value.id,
+  )
   if (field) void locate(field)
 }
 async function load() {
@@ -106,8 +108,8 @@ watch(
       class="page-error"
       role="alert"
     >
-      {{ loadError
-      }}<button
+      {{ loadError }}
+      <button
         class="secondary-button"
         :disabled="loading"
         @click="load"
@@ -129,7 +131,8 @@ watch(
           <IconSymbol
             :name="tab.icon"
             :size="16"
-          /><span>{{ $t(tab.label) }}</span>
+          />
+          <span>{{ $t(tab.label) }}</span>
         </button>
       </nav>
       <div
@@ -137,7 +140,10 @@ watch(
         class="settings-content"
         :data-highlight="highlighted"
       >
-        <KeepAlive :max="5" exclude="SafetySettingsPanel">
+        <KeepAlive
+          :max="5"
+          exclude="SafetySettingsPanel"
+        >
           <component
             :is="active.component"
             :key="active.id"

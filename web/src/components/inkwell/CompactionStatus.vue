@@ -5,18 +5,35 @@ import type { ContextCompaction, Turn } from '@/api/events'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import Pulse from '@/components/shell/Pulse.vue'
 
-const props = withDefaults(defineProps<{
-  compaction: ContextCompaction
-  turnStatus: Turn['status']
-  compact?: boolean
-  announce?: boolean
-}>(), { compact: false, announce: false })
+const props = withDefaults(
+  defineProps<{
+    compaction: ContextCompaction
+    turnStatus: Turn['status']
+    compact?: boolean
+    announce?: boolean
+  }>(),
+  { compact: false, announce: false },
+)
 // A terminal task without a completion receipt is not successful compaction.
-const interrupted = computed(() => props.compaction.status === 'running' && props.turnStatus !== 'running')
+const interrupted = computed(
+  () => props.compaction.status === 'running' && props.turnStatus !== 'running',
+)
 const running = computed(() => props.compaction.status === 'running' && !interrupted.value)
-const labels = { running: '正在压缩上下文', completed: '上下文已压缩', failed: '上下文压缩失败', skipped: '未进行压缩' }
-const label = computed(() => t(interrupted.value ? '压缩结果未确认'
-  : props.compaction.reason === 'fixed_overhead_exceeded' ? '模型输入预算不足' : labels[props.compaction.status]))
+const labels = {
+  running: '正在压缩上下文',
+  completed: '上下文已压缩',
+  failed: '上下文压缩失败',
+  skipped: '未进行压缩',
+}
+const label = computed(() =>
+  t(
+    interrupted.value
+      ? '压缩结果未确认'
+      : props.compaction.reason === 'fixed_overhead_exceeded'
+        ? '模型输入预算不足'
+        : labels[props.compaction.status],
+  ),
+)
 const detail = computed(() => {
   if (interrupted.value) return t('无法确认上下文是否已压缩。')
   if (props.compaction.status === 'failed')
@@ -29,9 +46,12 @@ const detail = computed(() => {
 })
 const counts = computed(() => {
   const { beforeTokens, afterTokens, measurement } = props.compaction
-  if (props.compaction.status !== 'completed' || beforeTokens === null || afterTokens === null) return ''
+  if (props.compaction.status !== 'completed' || beforeTokens === null || afterTokens === null)
+    return ''
   return t('上下文 {0} → {1} Token{2}', [
-    beforeTokens.toLocaleString(), afterTokens.toLocaleString(), measurement === 'estimate' ? t('（估算）') : '',
+    beforeTokens.toLocaleString(),
+    afterTokens.toLocaleString(),
+    measurement === 'estimate' ? t('（估算）') : '',
   ])
 })
 </script>
@@ -44,12 +64,22 @@ const counts = computed(() => {
     :aria-atomic="announce ? true : undefined"
   >
     <div class="compaction-heading">
-      <Pulse v-if="running" state="acting" aria-hidden="true" />
-      <IconSymbol v-else :name="compaction.status === 'completed' ? 'check' : 'alert'" :size="14" />
+      <Pulse
+        v-if="running"
+        state="acting"
+        aria-hidden="true"
+      />
+      <IconSymbol
+        v-else
+        :name="compaction.status === 'completed' ? 'check' : 'alert'"
+        :size="14"
+      />
       <strong>{{ label }}</strong>
       <span v-if="counts">{{ counts }}</span>
     </div>
-    <p v-if="detail">{{ detail }}</p>
+    <p v-if="detail">
+      {{ detail }}
+    </p>
   </section>
 </template>
 <style scoped lang="scss">

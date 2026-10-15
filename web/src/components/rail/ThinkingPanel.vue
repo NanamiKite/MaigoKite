@@ -32,8 +32,7 @@ function toggle() {
   expanded.value = !expanded.value
 }
 function syncExpanded(event: Event) {
-  if (event.currentTarget instanceof HTMLDetailsElement)
-    expanded.value = event.currentTarget.open
+  if (event.currentTarget instanceof HTMLDetailsElement) expanded.value = event.currentTarget.open
 }
 </script>
 
@@ -54,7 +53,9 @@ function syncExpanded(event: Event) {
         class="thinking-status"
         role="status"
         aria-live="polite"
-      >{{ label }}</span>
+      >
+        {{ label }}
+      </span>
       <span class="thinking-action">{{ $t(expanded ? '收起' : '展开') }}</span>
       <IconSymbol
         name="chevron"
@@ -74,7 +75,9 @@ function syncExpanded(event: Event) {
         :content="text"
         :is-streaming="running"
       />
-      <p v-else>{{ $t('正在思考…') }}</p>
+      <p v-else>
+        {{ $t('正在思考…') }}
+      </p>
     </div>
   </details>
 </template>

@@ -10,9 +10,7 @@ const run = useRunStore(),
 const turn = computed(() => run.turns[session.activeSessionId || '']?.slice(-1)[0])
 const items = computed(() => turn.value?.plan || [])
 // Count each step's reported status, not the task/tool completion state.
-const completed = computed(
-  () => items.value.filter((item) => item.status === 'completed').length,
-)
+const completed = computed(() => items.value.filter((item) => item.status === 'completed').length)
 const progress = computed(() => (items.value.length ? completed.value / items.value.length : 0))
 const statusLabels: Record<PlanItem['status'], string> = {
   pending: '未开始',
@@ -22,7 +20,11 @@ const statusLabels: Record<PlanItem['status'], string> = {
 </script>
 <template>
   <section class="plan-tab">
-    <p v-if="turn?.planError" class="empty-copy" role="alert">
+    <p
+      v-if="turn?.planError"
+      class="empty-copy"
+      role="alert"
+    >
       {{ turn.planError }}
       <button
         type="button"
@@ -33,12 +35,24 @@ const statusLabels: Record<PlanItem['status'], string> = {
       </button>
     </p>
     <InkLoader v-else-if="turn?.planLoading && !items.length" />
-    <div v-else-if="!items.length" class="plan-empty">
-      <IconSymbol name="check" :size="24" /><strong>{{ $t('还没有执行计划。') }}</strong>
+    <div
+      v-else-if="!items.length"
+      class="plan-empty"
+    >
+      <IconSymbol
+        name="check"
+        :size="24"
+      />
+      <strong>{{ $t('还没有执行计划。') }}</strong>
       <p>{{ $t('任务需要分步进行时，Agent 的计划会显示在这里。') }}</p>
     </div>
     <template v-else>
-      <p class="plan-count" role="status" aria-live="polite" aria-atomic="true">
+      <p
+        class="plan-count"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
         {{ $t('已完成 {0} / {1} 步', [completed, items.length]) }}
       </p>
       <div
@@ -52,7 +66,10 @@ const statusLabels: Record<PlanItem['status'], string> = {
       >
         <i :style="{ transform: `scaleX(${progress})` }" />
       </div>
-      <ol class="plan-steps" role="list">
+      <ol
+        class="plan-steps"
+        role="list"
+      >
         <li
           v-for="(item, index) in items"
           :key="`${turn?.id}:${index}`"
@@ -60,9 +77,21 @@ const statusLabels: Record<PlanItem['status'], string> = {
           :class="item.status"
           :aria-current="item.status === 'in_progress' ? 'step' : undefined"
         >
-          <svg class="plan-marker" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <circle cx="12" cy="12" r="9" />
-            <path v-if="item.status === 'completed'" d="m7.5 12 3 3 6-6" />
+          <svg
+            class="plan-marker"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+          >
+            <circle
+              cx="12"
+              cy="12"
+              r="9"
+            />
+            <path
+              v-if="item.status === 'completed'"
+              d="m7.5 12 3 3 6-6"
+            />
             <circle
               v-else-if="item.status === 'in_progress'"
               class="plan-dot"

@@ -4,6 +4,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
 import { useMentions } from '@/composables/useMentions'
+import { useComposerKeyboard } from '@/composables/useComposerKeyboard'
 import type { Mention } from '@/components/inkwell/MentionMenu.vue'
 import type { SlashCommand } from '@/components/inkwell/SlashMenu.vue'
 import {
@@ -68,7 +69,7 @@ function chooseMode(value: 'ask' | 'plan' | 'auto') {
   mode.value = value
   emit('permission-mode-change', value === 'auto' ? 'workspace' : 'read_only')
 }
-async function send(later = false) {
+async function send(later = props.isSending) {
   const content = inputValue.value.trim()
   if (!content || !props.modelOptions.length || busy.value) return
   if (props.isSending && !later && guideDisabled.value) {
@@ -142,31 +143,16 @@ function command(item: SlashCommand) {
   else if (item.id === 'stop') emit('cancel')
   else ui.openDrawer(item.id as 'files' | 'changes' | 'plan')
 }
-function handleKeydown(event: KeyboardEvent) {
-  if (event.isComposing || event.keyCode === 229 || event.defaultPrevented) return
-  if (event.key === 'Escape' && toolbar.value?.closeMenu()) {
-    event.preventDefault()
-    event.stopPropagation()
-    return
-  }
-  if (event.key === 'Escape' && !ui.drawerOpen && !ui.commandOpen && !ui.shortcutsOpen) {
-    event.stopPropagation()
-    emit('cancel')
-    return
-  }
-  if (event.key === 'ArrowUp' && !inputValue.value) {
-    event.preventDefault()
-    inputValue.value = props.lastMessage
-    return
-  }
-  if (
-    event.key === 'Enter' && !event.shiftKey &&
-    (event.altKey || event.ctrlKey || event.metaKey || ui.appearance.enterBehavior !== 'newline')
-  ) {
-    event.preventDefault()
-    void send(event.altKey)
-  }
-}
+const handleKeydown = useComposerKeyboard({
+  draft: inputValue,
+  context: () => [props.sessionId, props.modelId, mode.value, props.isSending],
+  lastMessage: () => props.lastMessage,
+  canSend: () => Boolean(inputValue.value.trim() && props.modelOptions.length && !busy.value),
+  isSending: () => props.isSending,
+  closeMenu: () => toolbar.value?.closeMenu() || false,
+  send,
+  cancel: () => emit('cancel'),
+})
 </script>
 <template>
   <div
@@ -195,7 +181,7 @@ function handleKeydown(event: KeyboardEvent) {
         :mention-query="mentions.query.value"
         :loading="mentions.loading.value"
         :commands="slashItems"
-        :placeholder="waiting ? $t('等你确认后继续…') : $t('问问 ') + assistantName + '…'"
+        :placeholder="isSending ? $t('写下一条消息…') : waiting ? $t('等你确认后继续…') : $t('问问 ') + assistantName + '…'"
         :disabled="!modelOptions.length"
         @mention="chooseMention"
         @command="command"
@@ -225,13 +211,6 @@ function handleKeydown(event: KeyboardEvent) {
       role="alert"
     >
       {{ submitError }}
-    </p>
-    <p
-      v-else-if="isSending && guideReason"
-      class="composer-notice"
-      role="status"
-    >
-      {{ guideReason }}
     </p>
     <p
       v-if="showGuideHelp"

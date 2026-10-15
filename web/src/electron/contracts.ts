@@ -11,6 +11,8 @@ export function appearanceValue(value: unknown): value is Appearance {
     typeof p.texture === 'boolean' &&
     (p.language === undefined || ['zh-CN', 'en', 'system'].includes(String(p.language))) &&
     (p.showContextUsage === undefined || typeof p.showContextUsage === 'boolean') &&
+    (p.enterBehavior === undefined || p.enterBehavior === 'send' || p.enterBehavior === 'newline') &&
+    (p.confirmEnterSend === undefined || typeof p.confirmEnterSend === 'boolean') &&
     string(p.greetingName, 32) &&
     string(p.avatar, 4) &&
     Array.from(p.avatar).length === 1 &&

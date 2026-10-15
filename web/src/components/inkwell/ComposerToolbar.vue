@@ -35,9 +35,8 @@ const menuOpen = ref(false),
   menu = ref<HTMLElement | null>(null)
 const session = useSessionStore()
 const ui = useUIStore()
-const modifier = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'
 const sendShortcut = computed(() =>
-  ui.appearance.enterBehavior === 'newline' ? `${modifier} + Enter` : 'Enter',
+  ui.appearance.enterBehavior === 'send' ? 'Enter' : 'Alt+S',
 )
 const confirmFullAccess = ref(false)
 watch(() => [props.sessionId, props.permissionMode], () => { confirmFullAccess.value = false })
@@ -70,7 +69,7 @@ async function toggleMenu() {
     menu.value?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
   }
 }
-function send(later = false) {
+function send(later = props.isSending) {
   menuOpen.value = false
   emit('send', later)
 }
@@ -177,10 +176,11 @@ defineExpose({ closeMenu })
     </button>
     <button
       class="send-button"
-      :disabled="busy || !hasDraft || !modelOptions.length || (isSending && guideDisabled)"
+      :disabled="busy || !hasDraft || !modelOptions.length"
       :aria-busy="busy || undefined"
-      :aria-label="busy ? $t('正在发送消息') : isSending ? $t('立即发送') : $t('发送消息')"
-      :title="isSending ? props.guideReason : undefined"
+      :aria-label="busy ? $t('正在发送消息') : isSending ? $t('加入队列') : $t('发送消息')"
+      :title="isSending ? $t('加入队列（{0}）', [sendShortcut]) : sendShortcut"
+      :aria-keyshortcuts="sendShortcut"
       @click="send()"
     >
       <Pulse
@@ -188,7 +188,7 @@ defineExpose({ closeMenu })
         state="acting"
       /><IconSymbol
         v-else
-        name="send"
+        :name="isSending ? 'clock' : 'send'"
         :size="15"
       />
     </button>
@@ -217,16 +217,17 @@ defineExpose({ closeMenu })
         class="send-options-menu"
       >
         <button
-          :disabled="guideDisabled || !hasDraft"
-          @click="send()"
-        >
-          {{ $t('立即发送') }}<small>{{ sendShortcut }}</small>
-        </button>
-        <button
-          :disabled="!hasDraft"
+          :disabled="busy || !hasDraft"
           @click="send(true)"
         >
-          {{ $t('加入队列') }}<small>Alt + Enter</small>
+          {{ $t('加入队列') }}<small>{{ sendShortcut }}</small>
+        </button>
+        <button
+          :disabled="busy || guideDisabled || !hasDraft"
+          :title="guideReason || undefined"
+          @click="send(false)"
+        >
+          {{ $t('立即发送') }}
         </button>
       </div>
     </div>

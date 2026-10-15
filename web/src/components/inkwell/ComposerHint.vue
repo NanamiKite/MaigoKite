@@ -7,8 +7,7 @@ import { onBeforeUnmount, ref } from 'vue'
 import { useUIStore } from '@/stores/ui'
 const ui = useUIStore()
 const visible = ref(false)
-const modifier = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'
-const key = import.meta.env.VITE_MOCK === '1' ? 'maigokite.enter-hint-demo' : 'maigokite.enter-hint'
+const key = import.meta.env.VITE_MOCK === '1' ? 'maigokite.send-hint-v2-demo' : 'maigokite.send-hint-v2'
 let timer: ReturnType<typeof setTimeout> | undefined
 function show() {
   if (shownThisLaunch) return
@@ -36,9 +35,9 @@ defineExpose({ show })
       role="status"
       aria-live="polite"
     >
-      {{ ui.appearance.enterBehavior === 'newline'
-        ? $t('Enter 换行 · {0} + Enter 发送', [modifier])
-        : $t('Enter 发送 · Shift + Enter 换行') }}
+      {{ ui.appearance.enterBehavior === 'send'
+        ? $t('Enter 发送 · Shift + Enter 换行')
+        : $t('Alt+S 发送 · Enter 换行') }}
     </p>
   </Transition>
 </template>

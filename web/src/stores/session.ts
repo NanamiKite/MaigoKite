@@ -494,6 +494,18 @@ export const useSessionStore = defineStore('session', () => {
     const item = queuedMessages.value[id]?.find((entry) => entry.id === entryId)
     if (item && content.trim()) item.content = content.trim()
   }
+  function reorderQueued(id: string, entryId: string, targetId: string, position: 'before' | 'after') {
+    const queue = queuedMessages.value[id]
+    if (!queue || entryId === targetId) return
+    const from = queue.findIndex(item => item.id === entryId)
+    const target = queue.findIndex(item => item.id === targetId)
+    if (from < 0 || target < 0) return
+    const to = target + (position === 'after' ? 1 : 0) - (from < target ? 1 : 0)
+    if (from === to) return
+    const item = queue[from]
+    queue.splice(from, 1)
+    queue.splice(to, 0, item)
+  }
   async function guideQueued(id: string, entryId: string) {
     const item = queuedMessages.value[id]?.find((entry) => entry.id === entryId)
     if (!item) return
@@ -1008,6 +1020,7 @@ export const useSessionStore = defineStore('session', () => {
     confirmInputSubmission,
     queueMessage,
     editQueued,
+    reorderQueued,
     guideQueued,
     refreshTaskDetails,
     resendInput,

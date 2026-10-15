@@ -18,12 +18,12 @@ onBeforeUnmount(() => { settleConfirmation(false) })
       <template v-if="confirmation">
         <header>
           <IconSymbol :name="confirmation.danger ? 'alert' : 'info'" :size="20" :class="{ danger: confirmation.danger }" />
-          <h2 id="ink-confirm-title">{{ confirmation.danger ? $t('确认操作') : $t('有未保存的修改') }}</h2>
+          <h2 id="ink-confirm-title">{{ confirmation.title || (confirmation.danger ? $t('确认操作') : $t('有未保存的修改')) }}</h2>
         </header>
         <p id="ink-confirm-message">{{ confirmation.message }}</p>
         <footer>
           <button type="button" class="secondary-button" autofocus @click="settleConfirmation(false)">{{ $t('取消') }}</button>
-          <button type="button" :class="confirmation.danger ? 'danger-button' : 'primary-button'" @click="settleConfirmation(true)">{{ $t('确认') }}</button>
+          <button type="button" :class="confirmation.danger ? 'danger-button' : 'primary-button'" @click="settleConfirmation(true)">{{ confirmation.confirmLabel || $t('确认') }}</button>
         </footer>
       </template>
     </dialog>

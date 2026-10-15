@@ -58,6 +58,7 @@ const paths: Record<string, string> = {
   'folder-open': 'M3.5 16V6.5A1.5 1.5 0 0 1 5 5h5l2 2h7A1.5 1.5 0 0 1 20.5 8.5V10M3.5 18l3-8H22l-3 8H3.5Z',
   refresh: 'M20 7v5h-5M4 17v-5h5M18.4 9A7 7 0 0 0 6.2 6.4L4 9m16 6-2.2 2.6A7 7 0 0 1 5.6 15',
   more: 'M5 12h.01M12 12h.01M19 12h.01',
+  grip: 'M9 5h.01M15 5h.01M9 12h.01M15 12h.01M9 19h.01M15 19h.01',
   send: 'm21 3-7.2 18-3.1-7.7L3 10.2 21 3Zm-10.3 10.3L21 3',
   stop: 'M7 7h10v10H7z',
   plus: 'M12 5v14M5 12h14',

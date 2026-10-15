@@ -40,17 +40,25 @@ function close() {
   ui.commandOpen = ui.shortcutsOpen = false
 }
 const mod = /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl'
-const shortcuts = [
+const shortcuts = computed(() => [
   [mod + '+K', '万能面板'],
   [mod + '+N', '新页'],
   [mod + '+B', '侧栏'],
   [mod + '+.', '抽屉'],
   [mod + '+J', '等你处理'],
   [mod + '+/', '快捷键表'],
+  ['Alt+S', session.isSending ? '加入队列' : '发送消息'],
+  [mod + '+Enter', session.isSending ? '加入队列' : '发送消息'],
+  ['Enter', ui.appearance.enterBehavior === 'send'
+    ? ui.appearance.confirmEnterSend
+      ? session.isSending ? '确认加入队列' : '确认发送'
+      : session.isSending ? '加入队列' : '发送消息'
+    : '换行'],
+  ['Shift+Enter', '换行'],
   ['[ / ]', '跳转墨线节点'],
   ['Y / N', '允许 / 驳回'],
   ['Esc', '中断 / 关闭浮层'],
-]
+])
 const order: Group[] = ['session', 'navigation', 'action', 'settings']
 const groupLabels: Record<Group, string> = {
   session: '会话',

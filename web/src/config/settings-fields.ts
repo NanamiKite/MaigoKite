@@ -17,8 +17,8 @@ export const settingsFields: SettingsField[] = [
   {
     id: 'enter-behavior',
     tab: 'general',
-    label: 'Enter 键行为',
-    keywords: 'enter keyboard input send newline 回车 发送消息 换行',
+    label: '发送快捷键',
+    keywords: 'alt s enter keyboard input send newline confirm 回车 发送消息 换行 二次确认',
   },
   {
     id: 'context-usage',

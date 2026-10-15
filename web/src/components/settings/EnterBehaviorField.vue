@@ -1,26 +1,31 @@
 <script setup lang="ts">
-import { useUIStore, type EnterBehavior } from '@/stores/ui'
+import { useUIStore } from '@/stores/ui'
 import InkSelect from '@/components/common/InkSelect.vue'
 const ui = useUIStore()
-const modifier = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'
 function change(event: Event) {
-  ui.setAppearance({ enterBehavior: (event.target as HTMLSelectElement).value as EnterBehavior })
+  const value = (event.target as HTMLSelectElement).value
+  if (value === 'send' || value === 'newline') ui.setAppearance({ enterBehavior: value })
 }
 </script>
 <template>
   <div data-settings-field="enter-behavior">
     <label class="setting-row">
-      <span>{{ $t('Enter 键行为') }}</span>
+      <span>{{ $t('发送快捷键') }}</span>
       <InkSelect
-        :value="ui.appearance.enterBehavior || 'send'"
-        :options="[{ value: 'send', label: $t('发送消息') }, { value: 'newline', label: $t('换行') }]"
+        :value="ui.appearance.enterBehavior || 'newline'"
+        :options="[{ value: 'newline', label: $t('Alt+S 发送') }, { value: 'send', label: $t('Enter 发送') }]"
         @change="change"
       />
     </label>
     <p class="panel-copy">
-      {{ ui.appearance.enterBehavior === 'newline'
-        ? $t('使用发送按钮或 {0} + Enter 发送。', [modifier])
-        : $t('Shift + Enter 换行；{0} + Enter 也可发送。', [modifier]) }}
+      {{ ui.appearance.enterBehavior === 'send'
+        ? $t('Shift+Enter 换行，Alt+S 也可发送。')
+        : $t('Enter 换行，Alt+S 发送。') }}
     </p>
+    <label v-if="ui.appearance.enterBehavior === 'send'" class="setting-row">
+      <span>{{ $t('Enter 发送前二次确认') }}</span>
+      <input type="checkbox" :checked="ui.appearance.confirmEnterSend === true"
+        @change="ui.setAppearance({ confirmEnterSend: ($event.target as HTMLInputElement).checked })">
+    </label>
   </div>
 </template>

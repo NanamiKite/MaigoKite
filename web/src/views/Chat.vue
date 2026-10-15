@@ -256,7 +256,7 @@ async function send(content: string, intent: 'send' | 'guide' | 'later' = 'send'
       resume()
       return
     }
-    if (id && intent === 'later') {
+    if (id && (intent === 'later' || (intent === 'send' && session.runningTaskIds[id]?.length))) {
       session.queueMessage(id, content)
       return
     }
@@ -287,6 +287,9 @@ async function send(content: string, intent: 'send' | 'guide' | 'later' = 'send'
   } finally {
     sending.value = false
   }
+}
+async function sendQueuedNow(id: string) {
+  await session.guideQueued(sessionId.value, id)
 }
 async function restore() {
   if (restoring.value) return
@@ -685,9 +688,10 @@ watch(
         :paused="Boolean(session.queuedPaused[sessionId])"
         :guide-reason="guideReason"
         :can-continue="!session.isSending && !submission && !session.activeSession?.archived"
-        :guide="(id) => session.guideQueued(sessionId, id)"
+        :guide="sendQueuedNow"
         @edit="(id, content) => session.editQueued(sessionId, id, content)"
         @remove="session.removeQueued(sessionId, $event)"
+        @reorder="(id, target, position) => session.reorderQueued(sessionId, id, target, position)"
         @continue="session.resumeQueued(sessionId)"
       />
       <div

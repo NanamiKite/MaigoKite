@@ -32,6 +32,7 @@ dependencies = [
     "anyio>=4,<5",
     "keyring>=25,<26",
     "httpx>=0.27.0",
+    "openai>=2.46,<3",
     # Model discovery pins validated IPs while keeping TLS host verification through proxies.
     "aiohttp>=3.14.2,<4",
     # Python 3.14 annotations and typed record/schema validation.

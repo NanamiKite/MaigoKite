@@ -5,5 +5,7 @@
   "tabWidth": 2,
   "trailingComma": "all",
   "arrowParens": "always",
+  "singleAttributePerLine": true,
+  "htmlWhitespaceSensitivity": "ignore",
   "endOfLine": "lf"
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { FileTreeNode } from '@/composables/useFileTree'
 import type { WorkspaceFileContent } from '@/api/client'
 import IconSymbol from '@/components/common/IconSymbol.vue'
@@ -7,6 +7,7 @@ import CodeBlock from '@/components/common/CodeBlock.vue'
 import InkLoader from '@/components/common/InkLoader.vue'
 import { desktopEffects } from '@/composables/useElectron'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { renderHTMLFile, renderMarkdownFile, renderSVGFile } from '@/utils/file-preview'
 
 const props = defineProps<{
   node: FileTreeNode
@@ -19,10 +20,63 @@ const isElectron = Boolean(desktopEffects),
   error = ref(''),
   opening = ref(false)
 const workspace = useWorkspaceStore()
+const mode = ref<'source' | 'preview'>('preview')
+const modes = [
+  { id: 'source', label: '源码', icon: 'file' },
+  { id: 'preview', label: '预览', icon: 'eye' },
+] as const
+const imageError = ref(false)
+watch(
+  () => props.content,
+  () => {
+    imageError.value = false
+  },
+)
+const kind = computed(() => {
+  if (/\.svg$/i.test(props.node.name) || props.content?.mime_type === 'image/svg+xml') return 'svg'
+  if (props.content?.mime_type?.startsWith('image/')) return 'image'
+  if (/\.(md|markdown)$/i.test(props.node.name)) return 'markdown'
+  if (/\.html?$/i.test(props.node.name)) return 'html'
+  return 'text'
+})
+const canRender = computed(() => ['markdown', 'html', 'svg'].includes(kind.value))
+const svgPreview = computed(() => {
+  if (
+    kind.value !== 'svg' ||
+    mode.value !== 'preview' ||
+    !props.content ||
+    props.content.binary ||
+    props.content.truncated
+  )
+    return null
+  return renderSVGFile(props.content.content)
+})
+const rendered = computed(() => {
+  if (mode.value !== 'preview' || !props.content || props.content.binary) return ''
+  if (kind.value === 'markdown') return renderMarkdownFile(props.content.content)
+  if (kind.value === 'html') return renderHTMLFile(props.content.content)
+  return ''
+})
+function navigateMode(event: KeyboardEvent) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const index = modes.findIndex((item) => item.id === mode.value)
+  const next =
+    event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? modes.length - 1
+        : (index + (event.key === 'ArrowRight' ? 1 : -1) + modes.length) % modes.length
+  mode.value = modes[next].id
+  if (event.currentTarget instanceof HTMLElement)
+    event.currentTarget.querySelectorAll<HTMLButtonElement>('button')[next]?.focus()
+}
 watch(
   () => [props.node.path, workspace.selectedId],
   () => {
     error.value = ''
+    imageError.value = false
+    mode.value = 'preview'
   },
 )
 async function openFile() {
@@ -44,12 +98,15 @@ async function openFile() {
 <template>
   <section class="file-preview">
     <header>
-      <span><IconSymbol
-        :name="node.type === 'directory' ? 'folder' : 'file'"
-        :size="16"
-      /></span>
+      <span>
+        <IconSymbol
+          :name="node.type === 'directory' ? 'folder' : 'file'"
+          :size="16"
+        />
+      </span>
       <div>
-        <strong>{{ node.name }}</strong><small>{{ node.type === 'directory' ? $t('文件夹') : $t('只读预览') }}</small>
+        <strong>{{ node.name }}</strong>
+        <small>{{ node.type === 'directory' ? $t('文件夹') : $t('只读预览') }}</small>
       </div>
       <button
         class="icon-button preview-close"
@@ -84,7 +141,8 @@ async function openFile() {
       <template v-if="node.size != null">
         <dt>{{ $t('大小') }}</dt>
         <dd>{{ node.size }} bytes</dd>
-      </template><template v-if="node.modified_at">
+      </template>
+      <template v-if="node.modified_at">
         <dt>{{ $t('修改') }}</dt>
         <dd>{{ new Date(node.modified_at).toLocaleString($i18n.locale) }}</dd>
       </template>
@@ -106,25 +164,170 @@ async function openFile() {
           {{ $t('重试') }}
         </button>
       </p>
+      <template v-else-if="kind === 'image'">
+        <p v-if="content?.truncated">
+          {{ $t('图片超过预览大小限制，请在本机打开。') }}
+        </p>
+        <p
+          v-else-if="imageError"
+          role="alert"
+        >
+          {{ $t('图片无法解码，请检查文件是否完整。') }}
+        </p>
+        <img
+          v-else-if="content?.data_url"
+          class="image-preview"
+          :src="content.data_url"
+          :alt="node.name"
+          @error="imageError = true"
+        />
+      </template>
       <p v-else-if="content?.binary">
         {{ $t('二进制文件无法预览') }}
       </p>
       <p v-else-if="content && !content.content">
         {{ $t('文件没有文本内容。') }}
       </p>
-      <CodeBlock
-        v-else-if="content"
-        :key="node.path"
-        :content="content.content"
-        :title="node.name"
-        layout="document"
-      />
-      <small v-if="content?.truncated">{{ $t('文件较大，仅显示前 512 KiB。') }}</small>
+      <template v-else-if="content">
+        <div
+          v-if="canRender"
+          class="preview-modes"
+          role="group"
+          :aria-label="$t('文件显示方式')"
+          @keydown="navigateMode"
+        >
+          <button
+            v-for="option in modes"
+            :key="option.id"
+            type="button"
+            :aria-pressed="mode === option.id"
+            @click="mode = option.id"
+          >
+            <IconSymbol
+              :name="option.icon"
+              :size="14"
+            />
+            {{ $t(option.label) }}
+          </button>
+        </div>
+        <template v-if="kind === 'svg' && mode === 'preview'">
+          <p
+            v-if="content.truncated"
+            role="status"
+          >
+            {{ $t('文件过大，无法预览。请切换到源码查看。') }}
+          </p>
+          <p
+            v-else-if="!svgPreview || imageError"
+            role="status"
+          >
+            {{ $t('无法预览此 SVG，请查看源码。') }}
+          </p>
+          <div
+            v-else
+            class="svg-preview"
+          >
+            <img
+              :key="svgPreview"
+              class="image-preview"
+              :src="svgPreview"
+              :alt="node.name"
+              @error="imageError = true"
+            />
+          </div>
+        </template>
+        <div
+          v-else-if="kind === 'markdown' && mode === 'preview'"
+          class="markdown-content"
+        >
+          <!-- eslint-disable vue/no-v-html -- renderMarkdownFile sanitizes HTML with DOMPurify before insertion. -->
+          <div
+            class="markdown-prose"
+            v-html="rendered"
+          />
+          <!-- eslint-enable vue/no-v-html -->
+        </div>
+        <template v-else-if="kind === 'html' && mode === 'preview'">
+          <iframe
+            :key="node.path"
+            :srcdoc="rendered"
+            sandbox=""
+            referrerpolicy="no-referrer"
+            :title="node.name"
+          />
+        </template>
+        <CodeBlock
+          v-else
+          :key="node.path"
+          :content="content.content"
+          :title="node.name"
+          layout="document"
+        />
+      </template>
+      <small v-if="content?.truncated && kind !== 'image'">
+        {{ $t('文件较大，仅显示前 512 KiB。') }}
+      </small>
     </div>
   </section>
 </template>
 
 <style scoped lang="scss">
+@use '@/styles/markdown-content';
+@use '@/styles/mixins' as mixins;
+
+.image-preview {
+  max-width: 100%;
+  max-height: 65vh;
+  object-fit: contain;
+}
+.preview-modes {
+  display: flex;
+  flex: none;
+  gap: var(--space-1);
+  border-bottom: var(--hairline) solid var(--rule);
+  button {
+    @include mixins.interactive-row;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--size-6);
+    min-height: var(--control-row-height);
+    padding: var(--space-2) var(--space-4);
+    border: 0;
+    border-bottom: var(--focus-width) solid var(--transparent);
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    background: var(--transparent);
+    color: var(--ink-2);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    &[aria-pressed='true'] {
+      border-bottom-color: var(--accent);
+      background: var(--accent-selected);
+      color: var(--accent);
+      font-weight: var(--weight-semibold);
+    }
+  }
+}
+.svg-preview {
+  display: grid;
+  flex: none;
+  min-height: var(--explorer-preview-min-height);
+  place-items: center;
+  padding: var(--space-4);
+  border: var(--hairline) solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  .image-preview {
+    display: block;
+  }
+}
+iframe {
+  width: 100%;
+  min-height: 360px;
+  flex: 1;
+  border: 1px solid var(--ink-4);
+  background: white;
+}
 .file-preview {
   display: flex;
   flex-direction: column;

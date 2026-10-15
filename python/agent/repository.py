@@ -254,6 +254,9 @@ class SQLiteRepository:
               ON user_memories(workspace_id, subject_user_id, updated_at DESC);
             """
         )
+        message_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(messages)").fetchall()}
+        if "attachments_json" not in message_columns:
+            connection.execute("ALTER TABLE messages ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'")
         conversation_columns = {
             str(row[1]) for row in connection.execute("PRAGMA table_info(conversations)").fetchall()
         }
@@ -442,7 +445,8 @@ class SQLiteRepository:
                     # Bound copies and reject instead of silently truncating the
                     # user's history. Runtime imports this same 500-message bound.
                     history = db.execute(
-                        """SELECT role,content,created_at FROM messages WHERE conversation_id=? AND rowid<=?
+                        """SELECT role,content,created_at,attachments_json FROM messages
+                           WHERE conversation_id=? AND rowid<=?
                            AND role IN ('user','assistant') ORDER BY rowid LIMIT 501""",
                         (conversation_id, pivot["rowid"]),
                     ).fetchall()
@@ -478,8 +482,10 @@ class SQLiteRepository:
                         ),
                     )
                     db.executemany(
-                        "INSERT INTO messages(id,conversation_id,role,content,created_at) VALUES(?,?,?,?,?)",
-                        [(f"msg_{uuid.uuid4().hex}", branch_id, row["role"], row["content"], row["created_at"])
+                        "INSERT INTO messages(id,conversation_id,role,content,created_at,attachments_json) "
+                        "VALUES(?,?,?,?,?,?)",
+                        [(f"msg_{uuid.uuid4().hex}", branch_id, row["role"], row["content"], row["created_at"],
+                          row["attachments_json"])
                          for row in history],
                     )
         return await self.get_conversation(workspace_id, branch_id)
@@ -791,19 +797,56 @@ class SQLiteRepository:
 
     async def save_workspace_setting(self, workspace_id: str, key: str, value: Any) -> None:
         async with self._lock:
-            if key in {"permissions.policy", "tools.selection", "extensions.applied_config"}:
-                previous = self._db().execute(
-                    "SELECT value_json FROM workspace_settings WHERE workspace_id=? AND key=?", (workspace_id, key),
-                ).fetchone()
-                if previous is None or json.loads(previous[0]) != value:
-                    self._revoke_authorizations(workspace_id)
-            self._db().execute(
-                """INSERT INTO workspace_settings VALUES(?,?,?,?)
-                   ON CONFLICT(workspace_id,key)
-                   DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at""",
-                (workspace_id, key, json.dumps(value, ensure_ascii=False), _now()),
-            )
-            self._db().commit()
+            with self._db():
+                self._save_workspace_setting(workspace_id, key, value)
+
+    def _save_workspace_setting(self, workspace_id: str, key: str, value: Any) -> None:
+        """Write under the caller's lock and transaction so coupled settings commit together."""
+        if key in {"permissions.policy", "tools.selection", "extensions.applied_config"}:
+            previous = self._db().execute(
+                "SELECT value_json FROM workspace_settings WHERE workspace_id=? AND key=?", (workspace_id, key),
+            ).fetchone()
+            if previous is None or json.loads(previous[0]) != value:
+                self._revoke_authorizations(workspace_id)
+        self._db().execute(
+            """INSERT INTO workspace_settings VALUES(?,?,?,?)
+               ON CONFLICT(workspace_id,key)
+               DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at""",
+            (workspace_id, key, json.dumps(value, ensure_ascii=False), _now()),
+        )
+
+    def _update_tool_selection(self, workspace_id: str, enabled: Mapping[str, bool]) -> None:
+        row = self._db().execute(
+            "SELECT value_json FROM workspace_settings WHERE workspace_id=? AND key='tools.selection'",
+            (workspace_id,),
+        ).fetchone()
+        stored = json.loads(row[0]) if row is not None else {}
+        overrides = JSON_OBJECT.validate_python(stored) if isinstance(stored, dict) else {}
+        overrides.update(enabled)
+        self._save_workspace_setting(workspace_id, "tools.selection", overrides)
+
+    async def update_tool_selection(self, workspace_id: str, enabled: Mapping[str, bool]) -> None:
+        """Merge preferences under the write lock, retaining concurrent edits to other tools."""
+        async with self._lock:
+            with self._db():
+                self._update_tool_selection(workspace_id, enabled)
+
+    async def save_image_settings(
+        self, workspace_id: str, value: JSONObject, *, tool_enabled: bool | None, actor: str,
+    ) -> None:
+        """Commit image settings, tool visibility, grant revocation and audit as one change."""
+        async with self._lock:
+            with self._db() as db:
+                self._save_workspace_setting(workspace_id, "models.image_generation", value)
+                if tool_enabled is not None:
+                    self._update_tool_selection(workspace_id, {"image_generate": tool_enabled})
+                db.execute(
+                    "INSERT INTO audit_events VALUES(?,?,?,?,?,?,?,?)",
+                    (
+                        f"audit_{uuid.uuid4().hex}", workspace_id, actor, "image.settings.saved",
+                        "image_generation", "success", "{}", _now(),
+                    ),
+                )
 
     async def get_workspace_setting(self, workspace_id: str, key: str) -> Any | None:
         async with self._lock:
@@ -838,6 +881,24 @@ class SQLiteRepository:
                 ),
             )
             self._db().commit()
+
+    async def claim_image_request(self, workspace_id: str, actor: str, tool_call_id: str) -> bool:
+        """Commit dispatch intent before a billable request so checkpoint replay cannot send it twice.
+
+        A crash after this commit leaves the remote outcome unknown. Refusing
+        the same call is deliberate: retry requires a new, explicitly approved
+        tool call, not an assumption that cancellation prevented billing.
+        """
+        async with self._lock:
+            cursor = self._db().execute(
+                "INSERT OR IGNORE INTO audit_events VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    f"image_request_{tool_call_id}", workspace_id, actor,
+                    "image_generation.dispatch_intent", tool_call_id, "outcome_unknown", "{}", _now(),
+                ),
+            )
+            self._db().commit()
+        return cursor.rowcount == 1
 
     async def list_audit_events(self, workspace_id: str, limit: int = 100) -> list[dict[str, Any]]:
         limit = min(max(limit, 1), 500)
@@ -894,7 +955,7 @@ class SQLiteRepository:
 
     async def start_chat_turn(
         self, task_id: str, workspace_id: str, conversation_id: str, prompt: str, request_hash: str = "",
-        *, model_call_limit: int = 8, output_schema: JSONObject | None = None,
+        *, model_call_limit: int = 8, output_schema: JSONObject | None = None, attachments_json: str = "[]",
     ) -> None:
         """Atomically admit one turn and append its user message (not an execution checkpoint).
 
@@ -951,8 +1012,9 @@ class SQLiteRepository:
                     ),
                 )
                 db.execute(
-                    "INSERT INTO messages(id,conversation_id,role,content,created_at) VALUES(?,?,?,?,?)",
-                    (f"msg_{uuid.uuid4().hex}", conversation_id, "user", prompt, now),
+                    "INSERT INTO messages(id,conversation_id,role,content,created_at,attachments_json) "
+                    "VALUES(?,?,?,?,?,?)",
+                    (f"msg_{uuid.uuid4().hex}", conversation_id, "user", prompt, now, attachments_json),
                 )
                 db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, conversation_id))
 

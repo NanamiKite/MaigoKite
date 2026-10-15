@@ -17,6 +17,8 @@ import ComposerFooter from '@/components/inkwell/ComposerFooter.vue'
 import ComposerAlert from '@/components/inkwell/ComposerAlert.vue'
 import ComposerDraft from '@/components/inkwell/ComposerDraft.vue'
 import ComposerHint from '@/components/inkwell/ComposerHint.vue'
+import ImageAttachments from '@/components/inkwell/ImageAttachments.vue'
+import type { ImageReference } from '@/api/images'
 const props = withDefaults(defineProps<ComposerProps>(), composerDefaults)
 const emit = defineEmits<ComposerEmits>()
 const toolbar = ref<InstanceType<typeof ComposerToolbar> | null>(null),
@@ -27,7 +29,9 @@ const inputValue = ref(''),
   textarea = ref<InstanceType<typeof ComposerDraft> | null>(null)
 const submitting = ref(false),
   submitError = ref('')
-const busy = computed(() => props.isSubmitting || submitting.value)
+const images = ref<ImageReference[]>([]),
+  uploading = ref(false)
+const busy = computed(() => props.isSubmitting || submitting.value || uploading.value)
 const guideDisabled = computed(() => Boolean(props.waiting || props.guideReason))
 const showGuideHelp = ref(false)
 let draftRevision = 0
@@ -63,6 +67,8 @@ watch(
   () => props.sessionId,
   () => {
     inputValue.value = ''
+    images.value = []
+    uploading.value = false
   },
 )
 function chooseMode(value: 'ask' | 'plan' | 'auto') {
@@ -70,8 +76,12 @@ function chooseMode(value: 'ask' | 'plan' | 'auto') {
   emit('permission-mode-change', value === 'auto' ? 'workspace' : 'read_only')
 }
 async function send(later = props.isSending) {
-  const content = inputValue.value.trim()
+  const content = inputValue.value.trim() || (images.value.length ? t('请描述这些图片。') : '')
   if (!content || !props.modelOptions.length || busy.value) return
+  if (images.value.length && props.isSending) {
+    submitError.value = t('请等待当前任务结束后再发送图片。')
+    return
+  }
   if (props.isSending && !later && guideDisabled.value) {
     submitError.value = props.guideReason || t('请先处理审批或回答问题；也可以在驳回时附上理由。')
     return
@@ -104,10 +114,16 @@ async function send(later = props.isSending) {
     }
   }
   try {
-    await props.submit(payload, intent)
+    await props.submit(
+      payload,
+      intent,
+      images.value.map((image) => ({ ...image })),
+    )
     sent.value++
-    if (props.sessionId === id && inputValue.value === draft && draftRevision === revision)
+    if (props.sessionId === id && inputValue.value === draft && draftRevision === revision) {
       inputValue.value = ''
+      images.value = []
+    }
   } catch (reason) {
     if (props.sessionId === id)
       submitError.value = reason instanceof Error ? reason.message : String(reason)
@@ -147,7 +163,10 @@ const handleKeydown = useComposerKeyboard({
   draft: inputValue,
   context: () => [props.sessionId, props.modelId, mode.value, props.isSending],
   lastMessage: () => props.lastMessage,
-  canSend: () => Boolean(inputValue.value.trim() && props.modelOptions.length && !busy.value),
+  canSend: () =>
+    Boolean(
+      (inputValue.value.trim() || images.value.length) && props.modelOptions.length && !busy.value,
+    ),
   isSending: () => props.isSending,
   closeMenu: () => toolbar.value?.closeMenu() || false,
   send,
@@ -181,7 +200,13 @@ const handleKeydown = useComposerKeyboard({
         :mention-query="mentions.query.value"
         :loading="mentions.loading.value"
         :commands="slashItems"
-        :placeholder="isSending ? $t('写下一条消息…') : waiting ? $t('等你确认后继续…') : $t('问问 ') + assistantName + '…'"
+        :placeholder="
+          isSending
+            ? $t('写下一条消息…')
+            : waiting
+              ? $t('等你确认后继续…')
+              : $t('问问 ') + assistantName + '…'
+        "
         :disabled="!modelOptions.length"
         @mention="chooseMention"
         @command="command"
@@ -189,12 +214,18 @@ const handleKeydown = useComposerKeyboard({
         @keydown="handleKeydown"
       />
       <ComposerHint ref="hint" />
+      <ImageAttachments
+        :key="sessionId"
+        v-model="images"
+        :disabled="busy || isSending || !props.submit"
+        @busy="uploading = $event"
+      />
       <ComposerToolbar
         ref="toolbar"
         v-bind="props"
         :mode="mode"
         :busy="busy"
-        :has-draft="Boolean(inputValue.trim())"
+        :has-draft="Boolean(inputValue.trim() || images.length)"
         :guide-disabled="guideDisabled"
         @reference="reference"
         @mode="chooseMode"
@@ -217,11 +248,7 @@ const handleKeydown = useComposerKeyboard({
       class="composer-notice"
       role="status"
     >
-      {{
-        $t(
-          '补充会让下一步操作暂停并重新考虑，已执行的操作不会撤回。',
-        )
-      }}
+      {{ $t('补充会让下一步操作暂停并重新考虑，已执行的操作不会撤回。') }}
       <button
         class="text-button"
         @click="showGuideHelp = false"

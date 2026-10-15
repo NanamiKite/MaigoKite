@@ -39,6 +39,8 @@ def location(workspace: str, reference: str) -> tuple[str, str]:
     elif reference == "safety.decision_model":
         # A separate workspace credential, never a main-model fallback.
         kind, account = "safety", "decision_model"
+    elif re.fullmatch(r"image-generation\.[a-f0-9]{64}", reference):
+        kind, account = "image-generation", reference.removeprefix("image-generation.")
     elif re.fullmatch(r"model-profile\.model_[A-Za-z0-9_-]{1,80}", reference):
         kind, account = "model-profile", reference.removeprefix("model-profile.")
     elif re.fullmatch(r"mcp\.[a-z][a-z0-9_-]{0,47}\.[A-Za-z_][A-Za-z0-9_]{0,127}", reference):

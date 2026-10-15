@@ -9,11 +9,13 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 from fastapi import APIRouter, Depends, Query, Response
+from pydantic import BaseModel, Field, StrictBool
 
 from agent.api import contracts as dto
 from agent.api.sessions import owner
 from agent.errors import public_error
 from agent.models.discovery import discover_models
+from agent.models.image_generation import IMAGE_SETTING_KEY, ImageSettings
 from agent.models.native_model import normalize_base_url
 from agent.safety import SAFETY_CREDENTIAL_REFERENCE, SAFETY_FORMATS, SAFETY_JEV_LAYOUTS
 
@@ -23,12 +25,62 @@ if TYPE_CHECKING:
     from agent.models.runtime import ChatModelSettings
 
 
+class ImageSettingsUpdate(dto.Input):
+    settings: ImageSettings
+    api_key: str = Field(default="", max_length=65536, repr=False)
+    clear_api_key: StrictBool = False
+
+
+class ImageSettingsResponse(BaseModel):
+    settings: ImageSettings
+    credential_configured: bool
+
+
 def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
     router = APIRouter()
     owner_only = [Depends(owner)]
 
     async def audit(workspace: str, action: str, resource: str, result: str = "success") -> None:
         await core.repository.record_audit(workspace, dto.Principal, action, resource, result, {})
+
+    async def image_settings(workspace_id: str) -> ImageSettings:
+        return ImageSettings.model_validate(
+            await core.repository.get_workspace_setting(workspace_id, IMAGE_SETTING_KEY) or {}
+        )
+
+    @router.get("/settings/image-generation", dependencies=owner_only, response_model=ImageSettingsResponse)
+    async def get_image_settings(workspace_id: str) -> ImageSettingsResponse:
+        value = await image_settings(workspace_id)
+        return ImageSettingsResponse(settings=value, credential_configured=value.credential_required)
+
+    @router.put("/settings/image-generation", dependencies=owner_only, response_model=ImageSettingsResponse)
+    async def save_image_settings(workspace_id: str, body: ImageSettingsUpdate) -> ImageSettingsResponse:
+        async with credentials.model_changes:
+            previous = await image_settings(workspace_id)
+            value = body.settings
+            if value.enabled and not value.model:
+                raise dto.APIError(400, "IMAGE_MODEL_REQUIRED", "启用生图前请填写实际模型 ID。")
+            if body.api_key and body.clear_api_key:
+                raise dto.APIError(400, "CREDENTIAL_INVALID", "不能同时保存和移除密钥。")
+            if value.protocol == "responses" and value.response_format:
+                raise dto.APIError(400, "IMAGE_FORMAT_INVALID", "Responses 生图不使用 Images API 的返回格式参数。")
+            catalog = (await core.get_tool_settings(workspace_id))["tools"]
+            configurable = any(item["name"] == "image_generate" and item["configurable"] for item in catalog)
+            if value.enabled and not configurable:
+                raise dto.APIError(409, "IMAGE_TOOL_DISABLED", "启动配置禁止了生图工具，请先调整工具配置并重启。")
+            required = previous.credential_required and previous.base_url == value.base_url
+            if body.clear_api_key:
+                await credentials.delete(workspace_id, value.credential_reference())
+                required = False
+            elif body.api_key:
+                await credentials.save(workspace_id, value.credential_reference(), body.api_key)
+                required = True
+            value = value.model_copy(update={"credential_required": required})
+            await core.repository.save_image_settings(
+                workspace_id, value.model_dump(mode="json"),
+                tool_enabled=value.enabled if configurable else None, actor=dto.Principal,
+            )
+            return ImageSettingsResponse(settings=value, credential_configured=required)
 
     async def model_value(workspace: str, model: ChatModelSettings) -> dict[str, object]:
         configured = False

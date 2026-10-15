@@ -60,7 +60,10 @@ export const useRunStore = defineStore('run', () => {
       })
   }
   function getTurn(
-    sessionId: string, turnId: string, time?: string, collectionsChanged = true,
+    sessionId: string,
+    turnId: string,
+    time?: string,
+    collectionsChanged = true,
   ): Turn {
     const dirty = dirtyTurns.get(sessionId) || new Set<string>()
     dirty.add(turnId)
@@ -90,9 +93,16 @@ export const useRunStore = defineStore('run', () => {
     }
     return turn
   }
-  function markStarted(sessionId: string, turnId: string, userText?: string, time?: string) {
+  function markStarted(
+    sessionId: string,
+    turnId: string,
+    userText?: string,
+    time?: string,
+    attachmentsJSON?: string,
+  ) {
     const turn = getTurn(sessionId, turnId, time)
     turn.userText ||= userText
+    if (attachmentsJSON) turn.attachmentsJSON = attachmentsJSON
     publish()
   }
   function hydrateTask(sessionId: string, task: AgentTask, pendingIds?: Set<string>, sequence = 0) {
@@ -267,8 +277,7 @@ export const useRunStore = defineStore('run', () => {
     metrics.value = next
     dirtyMetrics.delete(id)
     dirtyTurns.delete(id)
-    for (const key of dirtyCollections)
-      if (key.startsWith(`${id}:`)) dirtyCollections.delete(key)
+    for (const key of dirtyCollections) if (key.startsWith(`${id}:`)) dirtyCollections.delete(key)
     for (const key of stateSequences.keys())
       if (key.startsWith(`${id}:`)) stateSequences.delete(key)
     triggerRef(connected)
@@ -616,8 +625,11 @@ export const useRunStore = defineStore('run', () => {
       .flatMap((list) => list.flatMap((t) => t.awaits))
       .filter((a) => !a.verdict && !a.closed)
     // Streaming must not invalidate every sidebar and pending-count selector.
-    return previous && previous.length === next.length &&
-      next.every((item, index) => item === previous[index]) ? previous : next
+    return previous &&
+      previous.length === next.length &&
+      next.every((item, index) => item === previous[index])
+      ? previous
+      : next
   })
   onScopeDispose(() => {
     if (frame) cancelAnimationFrame(frame)

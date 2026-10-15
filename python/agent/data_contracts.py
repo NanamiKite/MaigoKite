@@ -76,6 +76,7 @@ class MessageRecord(TypedDict):
     role: Literal["system", "user", "assistant", "tool"]
     content: str
     created_at: str
+    attachments_json: NotRequired[str]
 
 
 @with_config(ConfigDict(strict=True, allow_inf_nan=False))

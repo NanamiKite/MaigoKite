@@ -1,4 +1,49 @@
 const en: Record<string, string> = {
+  图片生成: 'Image generation',
+  '请描述这些图片。': 'Please describe these images.',
+  配置生图服务: 'Configure image generation',
+  启用图片生成: 'Enable image generation',
+  '根据描述生成图片并保存到工作区。':
+    'Generate images from a description and save them to the workspace.',
+  '生成的图片可在对话中预览，点击打开文件。':
+    'Preview generated images in chat. Click an image to open its file.',
+  调用接口: 'API protocol',
+  '模型 ID': 'Model ID',
+  'API Key': 'API key',
+  '已配置密钥；留空保留。修改服务地址后请重新填写。':
+    'A key is configured. Leave blank to keep it; enter a new key after changing the service URL.',
+  '无密钥的本地服务可留空。': 'Leave blank for a local service that needs no key.',
+  保存时移除密钥: 'Remove the key when saving',
+  可选输出设置: 'Optional output settings',
+  图片尺寸: 'Image size',
+  返回格式: 'Response format',
+  由服务决定: 'Service default',
+  '超时（秒）': 'Timeout (seconds)',
+  '留空使用默认尺寸。': 'Leave blank to use the default size.',
+  '图片生成可能产生费用。': 'Image generation may incur charges.',
+  '图片超过预览大小限制，请在本机打开。': 'This image exceeds the preview limit. Open it locally.',
+  '图片无法解码，请检查文件是否完整。':
+    'Unable to decode the image. Check that the file is complete.',
+  文件显示方式: 'File display mode',
+  源码: 'Source',
+  预览: 'Preview',
+  '文件过大，无法预览。请切换到源码查看。':
+    'This file is too large to preview. Switch to Source to view it.',
+  '无法预览此 SVG，请查看源码。': 'Unable to preview this SVG. View its source instead.',
+  '图片暂时无法预览，请打开文件查看。': 'Preview is unavailable. Open the image file.',
+  打开图片文件: 'Open image file',
+  '正在读取图片…': 'Loading image…',
+  生成的图片: 'Generated images',
+  '请选择 PNG、JPEG、WebP 或 GIF 图片。': 'Choose a PNG, JPEG, WebP or GIF image.',
+  '每条消息最多附带 4 张图片，总计不能超过 16 MiB。':
+    'Attach up to 4 images per message, totaling at most 16 MiB.',
+  图片读取失败: 'Could not read image',
+  '正在添加图片…': 'Adding image…',
+  添加图片: 'Add image',
+  '图片 {0}': 'Image {0}',
+  移除图片: 'Remove image',
+  '请等待当前任务结束后再发送图片。': 'Wait for the current task to finish before sending images.',
+  '包含 {0} 张图片': 'Includes {0} images',
   定位到对话: 'Show in conversation',
   '定位到对话：{0}': 'Show in conversation: {0}',
   '暂时无法定位到对话，请重试。': 'Could not locate this conversation. Please try again.',
@@ -17,17 +62,22 @@ const en: Record<string, string> = {
   '输出较长，仅显示已保存的部分。': 'This output is long. Only the saved portion is shown.',
   未记录结束状态: 'End status not recorded',
   '等待开始…': 'Waiting to start…',
-  '正在执行，回复和操作结果会显示在这里。': 'Running. Replies and operation results will appear here.',
+  '正在执行，回复和操作结果会显示在这里。':
+    'Running. Replies and operation results will appear here.',
   新对话的默认配置: 'Defaults for new chats',
-  '新对话沿用此配置，已有对话不变。': 'New chats use these defaults. Existing chats keep their settings.',
+  '新对话沿用此配置，已有对话不变。':
+    'New chats use these defaults. Existing chats keep their settings.',
   保存默认配置: 'Save defaults',
   关闭默认配置: 'Disable defaults',
   清除模型选择: 'Clear model selection',
   '子 Agent 仅可读取和搜索。': 'Subagents can only read and search.',
   '当前服务不支持子 Agent。': 'This service does not support subagents.',
-  '当前服务不支持子 Agent，请在设置中关闭默认配置后重试。': 'This service does not support subagents. Disable their defaults in Settings and try again.',
-  '当前服务不支持指定子 Agent 模型，请取消模型选择后重试。': 'This service does not support choosing subagent models. Clear the model selection and try again.',
-  '无法保存设置，请检查本地存储是否可用。': 'Could not save settings. Check that local storage is available.',
+  '当前服务不支持子 Agent，请在设置中关闭默认配置后重试。':
+    'This service does not support subagents. Disable their defaults in Settings and try again.',
+  '当前服务不支持指定子 Agent 模型，请取消模型选择后重试。':
+    'This service does not support choosing subagent models. Clear the model selection and try again.',
+  '无法保存设置，请检查本地存储是否可用。':
+    'Could not save settings. Check that local storage is available.',
   '展开或收起 {0} 的模型': 'Expand or collapse models for {0}',
   统计: 'Statistics',
   用量统计: 'Usage statistics',
@@ -72,9 +122,11 @@ const en: Record<string, string> = {
   模型未记录: 'Model not recorded',
   '此服务未提供可查询的额度。': 'This service does not provide a supported allowance endpoint.',
   '请配置此服务的密钥后再查询。': 'Add a key for this service before checking the allowance.',
-  '额度查询被拒绝，请检查此服务的密钥。': 'The allowance request was denied. Check the service key.',
+  '额度查询被拒绝，请检查此服务的密钥。':
+    'The allowance request was denied. Check the service key.',
   '暂时无法查询额度，请稍后重试。': 'The allowance is unavailable right now. Try again later.',
-  '额度查询返回异常，请稍后重试。': 'The service returned an invalid allowance response. Try again later.',
+  '额度查询返回异常，请稍后重试。':
+    'The service returned an invalid allowance response. Try again later.',
   请选择: 'Select an option',
   确认操作: 'Confirm action',
   确认: 'Confirm',
@@ -84,7 +136,8 @@ const en: Record<string, string> = {
   '模型已切换为 {0}': 'Model switched to {0}',
   安全: 'Safety',
   提示词安全审查: 'Prompt safety review',
-  '当前服务不支持安全设置，请更新服务后重试。': 'This service does not support safety settings. Update it and try again.',
+  '当前服务不支持安全设置，请更新服务后重试。':
+    'This service does not support safety settings. Update it and try again.',
   保存安全设置: 'Save safety settings',
   决策模型: 'Decision model',
   '决策模型 ID': 'Decision model ID',
@@ -103,45 +156,60 @@ const en: Record<string, string> = {
   留空使用默认值: 'Leave blank to use the default',
   风险阈值: 'Risk threshold',
   风险阈值说明: 'About the risk threshold',
-  '风险分值高于此值时需要人工确认。': 'Risk scores above this threshold require manual confirmation.',
+  '风险分值高于此值时需要人工确认。':
+    'Risk scores above this threshold require manual confirmation.',
   可信模型: 'Trusted models',
   '可信模型 ID': 'Trusted model ID',
   '列表中的模型将跳过审查。': 'Models in this list skip review.',
   '选择已配置模型，或填写模型 ID': 'Choose a configured model or enter a model ID',
   '未设置可信模型。': 'No trusted models have been added.',
   '已添加 {0} / 32 个模型': '{0} / 32 models added',
-  '启用审查需要填写服务地址和决策模型。': 'Enter a service URL and decision model before enabling review.',
-  '服务地址须为 HTTP 或 HTTPS 地址，不能包含凭证。': 'Use an HTTP or HTTPS service URL without embedded credentials.',
+  '启用审查需要填写服务地址和决策模型。':
+    'Enter a service URL and decision model before enabling review.',
+  '服务地址须为 HTTP 或 HTTPS 地址，不能包含凭证。':
+    'Use an HTTP or HTTPS service URL without embedded credentials.',
   '风险阈值须为 0–100 的整数。': 'The risk threshold must be an integer from 0 to 100.',
-  '可信模型最多 32 个，每个 ID 不超过 100 个字符。': 'Add up to 32 trusted models, with no more than 100 characters per ID.',
+  '可信模型最多 32 个，每个 ID 不超过 100 个字符。':
+    'Add up to 32 trusted models, with no more than 100 characters per ID.',
   '安全设置内容超过长度限制。': 'The safety settings exceed the allowed length.',
   '密钥格式不正确或超过长度限制。': 'The key format is invalid or exceeds the allowed length.',
-  '更换审查服务地址时，请重新填写密钥或移除原凭证。': 'When changing the review service URL, enter a new key or remove the old credential.',
-  '移除审查服务密钥？需要凭证的审查服务将无法连接。': 'Remove the review service key? Review services that require credentials will no longer connect.',
+  '更换审查服务地址时，请重新填写密钥或移除原凭证。':
+    'When changing the review service URL, enter a new key or remove the old credential.',
+  '移除审查服务密钥？需要凭证的审查服务将无法连接。':
+    'Remove the review service key? Review services that require credentials will no longer connect.',
   '重新读取会放弃未保存的安全设置。继续？': 'Reloading discards unsaved safety settings. Continue?',
-  '安全设置尚未保存，离开会丢失修改。继续？': 'Your safety settings are not saved. Leave and discard the changes?',
-  '记忆归属': 'Memory scope',
-  '记忆暂时不能用于对话，仍可查看和编辑。': 'Memories cannot be used in conversations right now, but can still be viewed and edited.',
-  '未归属的旧记忆': 'Unassigned saved notes',
-  '这些记录仅供查看和编辑，不会自动带入任何对话。': 'These notes can be viewed and edited, but are never automatically included in conversations.',
+  '安全设置尚未保存，离开会丢失修改。继续？':
+    'Your safety settings are not saved. Leave and discard the changes?',
+  记忆归属: 'Memory scope',
+  '记忆暂时不能用于对话，仍可查看和编辑。':
+    'Memories cannot be used in conversations right now, but can still be viewed and edited.',
+  未归属的旧记忆: 'Unassigned saved notes',
+  '这些记录仅供查看和编辑，不会自动带入任何对话。':
+    'These notes can be viewed and edited, but are never automatically included in conversations.',
   '本工作区记忆：开启': 'Folder memory: on',
   '本工作区记忆：关闭': 'Folder memory: off',
-  '在对话中也开启记忆后，所选模型会收到本工作区的记忆。': 'When memory is also enabled in a conversation, its selected model receives this workspace’s memories.',
-  '关闭或删除记忆不会清除已有对话内容。': 'Turning memory off or deleting memories does not erase existing conversation content.',
-  '本对话记忆': 'Conversation memory',
+  '在对话中也开启记忆后，所选模型会收到本工作区的记忆。':
+    'When memory is also enabled in a conversation, its selected model receives this workspace’s memories.',
+  '关闭或删除记忆不会清除已有对话内容。':
+    'Turning memory off or deleting memories does not erase existing conversation content.',
+  本对话记忆: 'Conversation memory',
   '本对话记忆：开启': 'Conversation memory: on',
   '本对话记忆：关闭': 'Conversation memory: off',
-  '只有本工作区和本对话都开启时才使用保存的记忆；不会读取其他工作区。': 'Saved notes are used only when both this folder and conversation opt in. Other folders are excluded.',
-  '所选模型会收到这些记忆；关闭只影响后续请求，不会清除历史回复。': 'The selected model receives these notes. Turning memory off affects future requests, not past replies.',
-  '管理工作区记忆': 'Manage folder memories',
+  '只有本工作区和本对话都开启时才使用保存的记忆；不会读取其他工作区。':
+    'Saved notes are used only when both this folder and conversation opt in. Other folders are excluded.',
+  '所选模型会收到这些记忆；关闭只影响后续请求，不会清除历史回复。':
+    'The selected model receives these notes. Turning memory off affects future requests, not past replies.',
+  管理工作区记忆: 'Manage folder memories',
   查看文件内容: 'Preview file contents',
   '文件不在此工作区内，无法预览': 'This file is outside this workspace and cannot be previewed',
   '工作区已不可用，无法预览。': 'This workspace is no longer available for preview.',
-  '参数较长，仅显示前 20,000 个字符。': 'The arguments are long. Showing the first 20,000 characters.',
+  '参数较长，仅显示前 20,000 个字符。':
+    'The arguments are long. Showing the first 20,000 characters.',
   '这条记录未保存文件明细。': 'File details were not saved for this run.',
   '这条记录未保存命令明细。': 'Command details were not saved for this run.',
   '这条记录未保存审批明细。': 'Approval details were not saved for this run.',
-  '部分历史明细未完整返回，已显示可读取的记录。': 'Some historical details are incomplete. Available records are shown.',
+  '部分历史明细未完整返回，已显示可读取的记录。':
+    'Some historical details are incomplete. Available records are shown.',
   '这条记录未保存失败明细。': 'Failure details were not saved for this run.',
   命令内容未保存在这条记录中: 'The command was not saved in this record',
   '这条命令没有输出。': 'This command produced no output.',
@@ -155,15 +223,20 @@ const en: Record<string, string> = {
   创建: 'Create',
   '正在创建…': 'Creating…',
   '已创建 {0}': 'Created {0}',
-  '已有同名文件或文件夹，请换一个名称。': 'A file or folder with this name already exists. Choose another name.',
-  '名称不能包含路径分隔符、保留名称或特殊字符。': 'Names cannot contain path separators, reserved names, or special characters.',
+  '已有同名文件或文件夹，请换一个名称。':
+    'A file or folder with this name already exists. Choose another name.',
+  '名称不能包含路径分隔符、保留名称或特殊字符。':
+    'Names cannot contain path separators, reserved names, or special characters.',
   '创建位置不可用，请刷新文件树。': 'The destination is unavailable. Refresh the file tree.',
   '此位置不是可用的文件夹。': 'This location is not an available folder.',
   '没有权限在此文件夹中创建内容。': 'You do not have permission to create entries in this folder.',
-  '创建失败，请检查文件夹是否存在以及写入权限。': 'Could not create the entry. Check that the folder exists and is writable.',
+  '创建失败，请检查文件夹是否存在以及写入权限。':
+    'Could not create the entry. Check that the folder exists and is writable.',
   '只能在运行应用的本机打开文件夹。': 'Folders can only be opened on the computer running the app.',
-  '无法打开文件资源管理器，请检查桌面环境。': 'Could not open the file manager. Check the desktop environment.',
-  '当前环境不支持创建文件或打开文件夹。': 'This environment does not support creating files or opening folders.',
+  '无法打开文件资源管理器，请检查桌面环境。':
+    'Could not open the file manager. Check the desktop environment.',
+  '当前环境不支持创建文件或打开文件夹。':
+    'This environment does not support creating files or opening folders.',
   应用窗口: 'Application window',
   应用导航: 'Application navigation',
   应用操作: 'Application actions',
@@ -176,14 +249,16 @@ const en: Record<string, string> = {
   '固定命令参数：{0}': 'Exact command arguments: {0}',
   '执行目录：{0}': 'Working directory: {0}',
   '工作区：{0}': 'Workspace: {0}',
-  '批准范围': 'Approval scope',
-  '仅这一次': 'Only this operation',
-  '本任务内同范围操作': 'Same scope in this task',
-  '本会话内同范围操作': 'Same scope in this conversation',
+  批准范围: 'Approval scope',
+  仅这一次: 'Only this operation',
+  本任务内同范围操作: 'Same scope in this task',
+  本会话内同范围操作: 'Same scope in this conversation',
   '仅复用以下范围，不是放行整个工具': 'Reuse only the scope below, not every use of the tool',
-  '授权最长 8 小时，可在对话管理中撤销；权限或工作区变更后失效。': 'Grants last up to 8 hours and can be revoked in conversation management. Permission or workspace changes invalidate them.',
+  '授权最长 8 小时，可在对话管理中撤销；权限或工作区变更后失效。':
+    'Grants last up to 8 hours and can be revoked in conversation management. Permission or workspace changes invalidate them.',
   已允许的操作: 'Allowed operations',
-  '撤销后不再使用这次批准；正在执行的操作不受影响。': 'This approval will no longer be used after revocation. Operations already in progress are unaffected.',
+  '撤销后不再使用这次批准；正在执行的操作不受影响。':
+    'This approval will no longer be used after revocation. Operations already in progress are unaffected.',
   '当前没有已保存的批准。': 'No saved approvals.',
   本次任务的批准: 'Approval for this task',
   此对话的批准: 'Approval for this chat',
@@ -191,20 +266,28 @@ const en: Record<string, string> = {
   '正在撤销…': 'Revoking…',
   撤销批准: 'Revoke approval',
   受限自动: 'Restricted automatic',
-  '完全访问会在本机执行命令、访问工作区外文件和网络，不再逐项审批。是否开启？': 'Full access runs commands on your computer and can access files outside the workspace and the network without per-operation approval. Enable it?',
-  '开启完全访问': 'Enable full access',
-  '工作区内常规操作自动执行；命令在沙箱中运行，联网、工作区外文件与敏感操作可能需要批准。': 'Routine workspace operations run automatically. Commands run in a sandbox; network access, files outside the workspace, and sensitive actions may need approval.',
-  '在本机执行命令，可访问工作区外文件和网络；不再逐项审批。': 'Run commands on your computer and access files outside the workspace and the network without per-operation approval.',
+  '完全访问会在本机执行命令、访问工作区外文件和网络，不再逐项审批。是否开启？':
+    'Full access runs commands on your computer and can access files outside the workspace and the network without per-operation approval. Enable it?',
+  开启完全访问: 'Enable full access',
+  '工作区内常规操作自动执行；命令在沙箱中运行，联网、工作区外文件与敏感操作可能需要批准。':
+    'Routine workspace operations run automatically. Commands run in a sandbox; network access, files outside the workspace, and sensitive actions may need approval.',
+  '在本机执行命令，可访问工作区外文件和网络；不再逐项审批。':
+    'Run commands on your computer and access files outside the workspace and the network without per-operation approval.',
   '请先确认完全访问的风险。': 'Acknowledge the risks of full access first.',
-  '完全访问不会启用被停用的工具，也不会扩大只读子 Agent 的权限。': 'Full access does not enable disabled tools or expand read-only subagent permissions.',
-  '当前使用受限自动模式，可在上方选择新对话的默认权限。': 'Restricted automatic mode is selected. Choose the default permissions for new chats above.',
-  '我理解风险，同意新对话默认使用完全访问。': 'I understand the risks and agree to use full access by default for new chats.',
-  '回复操作': 'Reply actions',
-  '从此处分叉新对话': 'Branch into a new chat from here',
-  '保留到这条回复的对话，原对话不变。文件仍共享，审批授权不继承。': 'Keep the conversation through this reply without changing the original. Files remain shared; approval grants are not inherited.',
+  '完全访问不会启用被停用的工具，也不会扩大只读子 Agent 的权限。':
+    'Full access does not enable disabled tools or expand read-only subagent permissions.',
+  '当前使用受限自动模式，可在上方选择新对话的默认权限。':
+    'Restricted automatic mode is selected. Choose the default permissions for new chats above.',
+  '我理解风险，同意新对话默认使用完全访问。':
+    'I understand the risks and agree to use full access by default for new chats.',
+  回复操作: 'Reply actions',
+  从此处分叉新对话: 'Branch into a new chat from here',
+  '保留到这条回复的对话，原对话不变。文件仍共享，审批授权不继承。':
+    'Keep the conversation through this reply without changing the original. Files remain shared; approval grants are not inherited.',
   '当前任务结束后可分叉。': 'You can branch after the current task ends.',
   '正在创建分岔…': 'Creating branch…',
-  '这是独立分岔，工作区文件仍与原对话共享。': 'This is an independent branch. Workspace files are still shared with the original conversation.',
+  '这是独立分岔，工作区文件仍与原对话共享。':
+    'This is an independent branch. Workspace files are still shared with the original conversation.',
   开启: 'On',
   思考强度: 'Reasoning effort',
   开启思考: 'Enable thinking',
@@ -347,7 +430,8 @@ const en: Record<string, string> = {
   调整变更列表与预览的高度: 'Resize changes list and diff preview',
   '拖动调整宽度；双击还原': 'Drag to resize; double-click to reset',
   '拖动调整文件树和预览；双击还原': 'Drag to resize the tree and preview; double-click to reset',
-  '拖动调整变更列表和预览；双击还原': 'Drag to resize the changes list and preview; double-click to reset',
+  '拖动调整变更列表和预览；双击还原':
+    'Drag to resize the changes list and preview; double-click to reset',
   搜索当前工作区的对话: 'Search chats in this workspace',
   关闭搜索: 'Close search',
   刷新会话: 'Refresh chats',
@@ -418,7 +502,8 @@ const en: Record<string, string> = {
   '窗口容量（可选）': 'Context capacity (optional)',
   自动获取: 'Automatic',
   '{0} 的窗口容量': 'Context capacity for {0}',
-  '容量须为正整数，或留空自动获取。': 'Enter a positive whole number, or leave blank for automatic discovery.',
+  '容量须为正整数，或留空自动获取。':
+    'Enter a positive whole number, or leave blank for automatic discovery.',
   '自动获取优先。服务未提供数据时，可填写每个模型的已知容量；不会修改服务的加载设置。':
     'Capacity is discovered automatically. If unavailable, enter the known capacity for each model; this does not change the server’s load settings.',
   '自动读取服务窗口或模型资料，也可填写每个模型的已知容量；不会修改服务的加载设置。':
@@ -446,7 +531,8 @@ const en: Record<string, string> = {
   没有权限读取窗口数据: 'Access to context window data was denied',
   模型尚未加载: 'The model is not loaded',
   未找到对应模型的窗口数据: 'No context window data was found for this model',
-  '存在多个加载实例，无法确定当前窗口': 'Multiple loaded instances exist; the active window is unknown',
+  '存在多个加载实例，无法确定当前窗口':
+    'Multiple loaded instances exist; the active window is unknown',
   '窗口数据状态：{0}': 'Context window data status: {0}',
   输入估算: 'Estimated input',
   服务端计数: 'Server-reported count',
@@ -796,10 +882,12 @@ const en: Record<string, string> = {
   缓存写入: 'Cache write',
   '缓存命中 {0}': 'Cache hit {0}',
   缓存读取: 'Cache read',
-  '尚无可用的缓存用量，无法计算命中率。': 'No cache usage has been reported yet. The hit rate is unavailable.',
+  '尚无可用的缓存用量，无法计算命中率。':
+    'No cache usage has been reported yet. The hit rate is unavailable.',
   '缓存统计不完整（{0}/{1} 次请求已报告），暂不计算命中率。':
     'Cache usage is incomplete ({0}/{1} requests reported). The hit rate is unavailable.',
-  '缓存用量不一致，无法计算命中率。': 'Reported cache usage is inconsistent. The hit rate is unavailable.',
+  '缓存用量不一致，无法计算命中率。':
+    'Reported cache usage is inconsistent. The hit rate is unavailable.',
   '已报告命中输入 Token': 'Reported cache-hit input tokens',
   '已报告总输入 Token': 'Reported input tokens',
   已报告缓存用量的请求: 'Requests with cache usage',
@@ -1029,15 +1117,19 @@ const en: Record<string, string> = {
     'Connected, but the task status is not yet confirmed. Refresh the chat; do not resend.',
   '应用服务启动失败，请重新打开应用。': 'The application service could not start. Reopen the app.',
   应用服务无法启动: 'The application service could not start',
-  '端口 {0} 已被占用，请先退出已有应用服务。': 'Port {0} is unavailable. Exit the existing application services first.',
-  '指定的 Python 不可用或不是 3.14.x：{0}': 'The configured Python is unavailable or is not 3.14.x: {0}',
+  '端口 {0} 已被占用，请先退出已有应用服务。':
+    'Port {0} is unavailable. Exit the existing application services first.',
+  '指定的 Python 不可用或不是 3.14.x：{0}':
+    'The configured Python is unavailable or is not 3.14.x: {0}',
   '项目环境需要 Python 3.14.x：{0}。请退出应用后使用 uv 重新运行 setup.sh / setup.ps1；没有 uv 时先重命名旧环境目录。':
     'The project environment requires Python 3.14.x: {0}. Exit the app and rerun setup.sh / setup.ps1 with uv; without uv, rename the old environment first.',
   '找不到 Python 3.14.x。请运行 setup.sh / setup.ps1，或设置 MAIGOKITE_PYTHON。':
     'Python 3.14.x not found. Run setup.sh / setup.ps1 or set MAIGOKITE_PYTHON.',
   '{0} 启动失败：{1}': '{0} could not start: {1}',
-  '{0} 已退出（{1}）。请查看终端日志后重新启动。': '{0} exited ({1}). Check the terminal logs before restarting.',
-  '{0} 启动超时（端口 {1}）。请查看终端日志。': '{0} did not become ready in time (port {1}). Check the terminal logs.',
+  '{0} 已退出（{1}）。请查看终端日志后重新启动。':
+    '{0} exited ({1}). Check the terminal logs before restarting.',
+  '{0} 启动超时（端口 {1}）。请查看终端日志。':
+    '{0} did not become ready in time (port {1}). Check the terminal logs.',
   开源模型聚合服务: 'Open-source model aggregator',
   待开始: 'Pending',
   '必须填写完整的 HTTP(S) 地址；通常以 /v1 结尾。':
@@ -1385,11 +1477,13 @@ const en: Record<string, string> = {
   正在应用扩展: 'Applying extensions',
   连接已就绪: 'Connections ready',
   连接未就绪: 'Connections not ready',
-  '重连前请结束任务并处理审批。':
-    'Finish tasks and resolve approvals before reconnecting.',
-  '扩展管理不可用，请检查服务连接。': 'Extension management is unavailable. Check the service connection.',
-  '添加的程序会在本机运行，请只使用可信来源。': 'Programs you add run on your computer. Only use trusted sources.',
-  '此输入仅发给正在运行的命令，可能出现在命令输出中。': 'This input goes only to the running command and may appear in its output.',
+  '重连前请结束任务并处理审批。': 'Finish tasks and resolve approvals before reconnecting.',
+  '扩展管理不可用，请检查服务连接。':
+    'Extension management is unavailable. Check the service connection.',
+  '添加的程序会在本机运行，请只使用可信来源。':
+    'Programs you add run on your computer. Only use trusted sources.',
+  '此输入仅发给正在运行的命令，可能出现在命令输出中。':
+    'This input goes only to the running command and may appear in its output.',
   '添加可信的本地服务，工具会在连接成功后可用。':
     'Add a trusted local service. Its tools become available after connecting.',
   重新检查连接: 'Recheck connections',
@@ -1409,11 +1503,12 @@ const en: Record<string, string> = {
   '选择工作区文件夹，文件会显示在这里。': 'Choose a workspace folder to browse its files.',
   '清除凭证后，使用它的服务将无法连接。继续？':
     'Clearing this credential prevents its service from connecting. Continue?',
-  "立即发送": "Send now",
-  "加入队列": "Queue message",
-  "消息队列": "Message queue",
-  "队列（{0}）": "Queue ({0})",
-  "权限调整从下一个尚未开始的操作生效": "Permission changes apply to the next operation that has not started",
+  立即发送: 'Send now',
+  加入队列: 'Queue message',
+  消息队列: 'Message queue',
+  '队列（{0}）': 'Queue ({0})',
+  权限调整从下一个尚未开始的操作生效:
+    'Permission changes apply to the next operation that has not started',
   添加文件夹: 'Add folder',
   重新选择文件夹: 'Choose another folder',
   '选择一个文件夹作为工作区。': 'Choose a folder to use as a workspace.',
@@ -1428,21 +1523,28 @@ const en: Record<string, string> = {
   筛选文件夹: 'Filter folders',
   没有匹配的文件夹: 'No matching folders',
   '没有子文件夹，可以选择当前文件夹。': 'No subfolders. You can select the current folder.',
-  '目录内容较多，仅显示部分文件夹。可在目录位置中打开目标文件夹。': 'Only some folders are shown in this large directory. Use the location bar to open another folder.',
+  '目录内容较多，仅显示部分文件夹。可在目录位置中打开目标文件夹。':
+    'Only some folders are shown in this large directory. Use the location bar to open another folder.',
   已选文件夹: 'Selected folder',
-  '只能在运行应用的电脑上选择文件夹。': 'Folder selection is only available on the computer running the app.',
+  '只能在运行应用的电脑上选择文件夹。':
+    'Folder selection is only available on the computer running the app.',
   '这个目录位置无效。': 'This folder location is invalid.',
   '文件夹不存在或没有访问权限。': 'The folder does not exist or you do not have access.',
   '无法读取这个文件夹。': 'Could not read this folder.',
   '删除工作区：{0}': 'Delete workspace: {0}',
   '删除工作区？': 'Delete this workspace?',
   '默认工作区不能删除。': 'The default workspace cannot be deleted.',
-  '只从应用中移除，磁盘文件不会删除。对话和消息会保留并移到默认工作区，后续文件操作将使用默认目录。': 'Remove it from the app only; files on disk will not be deleted. Chats and messages are kept in the default workspace. Future file operations will use its directory.',
-  '工作区中有未结束的任务，请完成或停止后再删除。': 'Finish or stop unfinished tasks in this workspace before deleting it.',
-  '工作区中有可恢复的任务，请完成或停止后再删除。': 'Resume and finish, or stop, recoverable tasks in this workspace before deleting it.',
-  '工作区中有运行中的进程，请停止后再删除。': 'Stop running processes in this workspace before deleting it.',
+  '只从应用中移除，磁盘文件不会删除。对话和消息会保留并移到默认工作区，后续文件操作将使用默认目录。':
+    'Remove it from the app only; files on disk will not be deleted. Chats and messages are kept in the default workspace. Future file operations will use its directory.',
+  '工作区中有未结束的任务，请完成或停止后再删除。':
+    'Finish or stop unfinished tasks in this workspace before deleting it.',
+  '工作区中有可恢复的任务，请完成或停止后再删除。':
+    'Resume and finish, or stop, recoverable tasks in this workspace before deleting it.',
+  '工作区中有运行中的进程，请停止后再删除。':
+    'Stop running processes in this workspace before deleting it.',
   '只有工作区所有者可以删除工作区。': 'Only the workspace owner can delete it.',
-  '对话状态同步失败，正在重新连接。当前执行状态尚未确认，请勿重复发送。': 'Chat state could not be synced. Reconnecting; the current execution status is unconfirmed. Please do not resend.',
+  '对话状态同步失败，正在重新连接。当前执行状态尚未确认，请勿重复发送。':
+    'Chat state could not be synced. Reconnecting; the current execution status is unconfirmed. Please do not resend.',
   命令进程: 'Command processes',
   本地存储: 'Local storage',
 }

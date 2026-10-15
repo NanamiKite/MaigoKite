@@ -1,13 +1,28 @@
-import type { AgentEvent, AgentTask, Approval, ChatMessage, Conversation, UserMemory, WorkspaceFolder } from './client'
+import type {
+  AgentEvent,
+  AgentTask,
+  Approval,
+  ChatMessage,
+  Conversation,
+  UserMemory,
+  WorkspaceFileContent,
+  WorkspaceFolder,
+} from './client'
 import { mockEnvelope, playTask } from './mock-playback'
 import { t } from '@/i18n'
 
 const now = () => new Date().toISOString()
 const folders: WorkspaceFolder[] = [{ id: '', name: '默认工作区', root_path: '/demo/workspace' }]
 const conversationDefaults = {
-  thinking: '', folder_id: '', archived: false, memory_enabled: false,
-  max_subagent_calls: 0, max_concurrent_subagents: 1, subagent_model_ids: [],
-  forked_from_conversation_id: '', forked_from_message_id: '',
+  thinking: '',
+  folder_id: '',
+  archived: false,
+  memory_enabled: false,
+  max_subagent_calls: 0,
+  max_concurrent_subagents: 1,
+  subagent_model_ids: [],
+  forked_from_conversation_id: '',
+  forked_from_message_id: '',
 }
 const conversations: Conversation[] = [
   {
@@ -61,7 +76,9 @@ function stopTimers(taskId: string) {
 function start(sessionId: string, content: string) {
   const id = `demo-${Date.now()}`
   const task: AgentTask = {
-    subagent_model_ids: [], output_mode: 'text', result_ready: false,
+    subagent_model_ids: [],
+    output_mode: 'text',
+    result_ready: false,
     id,
     workspace_id: 'personal',
     conversation_id: sessionId,
@@ -75,7 +92,13 @@ function start(sessionId: string, content: string) {
   }
   tasks.push(task)
   const list = messages.get(sessionId) || []
-  list.push({ id: `user-${id}`, conversation_id: sessionId, role: 'user', content, created_at: now() })
+  list.push({
+    id: `user-${id}`,
+    conversation_id: sessionId,
+    role: 'user',
+    content,
+    created_at: now(),
+  })
   messages.set(sessionId, list)
   emit(sessionId, id, 'task.started', { input_text: content, trace_id: id })
   const wait = (delay: number, action: () => void) => {
@@ -104,8 +127,13 @@ function start(sessionId: string, content: string) {
         status: 'pending',
         version: 1,
         expires_at: '2099-01-01T00:00:00Z',
-        note: '', decided_at: '', allowed_scopes: ['once'], reuse_scope: {},
-        authorization_scope: 'once', authorization_expires_at: '', authorization_revoked_at: '',
+        note: '',
+        decided_at: '',
+        allowed_scopes: ['once'],
+        reuse_scope: {},
+        authorization_scope: 'once',
+        authorization_expires_at: '',
+        authorization_revoked_at: '',
       }
       task.status = 'waiting_approval'
       approvals.push(approval)
@@ -129,7 +157,9 @@ function start(sessionId: string, content: string) {
       emit(sessionId, id, 'memory.added', { memory_id: memory.id, content: memory.content })
     },
     finish: (answer) => {
-      const wroteFile = approvals.some((approval) => approval.task_id === id && approval.status === 'consumed')
+      const wroteFile = approvals.some(
+        (approval) => approval.task_id === id && approval.status === 'consumed',
+      )
       list.push({
         id: `answer-${id}`,
         conversation_id: sessionId,
@@ -187,7 +217,10 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
   const method = init?.method || 'GET',
     body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : {}
   // Never report a synthetic listing as a successful real filesystem mutation.
-  if (method === 'POST' && (parsed.pathname.endsWith('/files') || parsed.pathname.endsWith('/files/open-folder')))
+  if (
+    method === 'POST' &&
+    (parsed.pathname.endsWith('/files') || parsed.pathname.endsWith('/files/open-folder'))
+  )
     throw new Error(t('当前环境不支持创建文件或打开文件夹。'))
   let result: unknown
   if (url === '/health') result = { status: 'ok', version: 'demo' }
@@ -200,7 +233,9 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
   } else if (parsed.pathname.endsWith('/runtime-status'))
     result = {
       workspace_id: 'personal',
-      workspace_root: folders.find((folder) => folder.id === (parsed.searchParams.get('folder_id') || ''))?.root_path || '/demo/workspace',
+      workspace_root:
+        folders.find((folder) => folder.id === (parsed.searchParams.get('folder_id') || ''))
+          ?.root_path || '/demo/workspace',
       workspace_source: parsed.searchParams.get('folder_id') ? 'selection' : 'configuration',
       environment: 'demo',
       backend: { status: 'serving' },
@@ -218,36 +253,64 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
       }
     }
     result = {
-      path: current, parent: current === '/' ? '' : current.slice(0, current.lastIndexOf('/')) || '/',
-      home: '/demo', root: '/', truncated: false,
-      entries: [...children].map(name => ({ name, path: prefix + name })),
+      path: current,
+      parent: current === '/' ? '' : current.slice(0, current.lastIndexOf('/')) || '/',
+      home: '/demo',
+      root: '/',
+      truncated: false,
+      entries: [...children].map((name) => ({ name, path: prefix + name })),
     }
-  }
-  else if (parsed.pathname.endsWith('/folders')) {
+  } else if (parsed.pathname.endsWith('/folders')) {
     if (method === 'POST') {
       const root = String(body.root_path)
       const existing = folders.find((folder) => folder.root_path === root)
-      const item = existing || { id: `folder-${Date.now()}`, root_path: root, name: String(body.name || root.split(/[\\/]/).filter(Boolean).pop() || '工作区') }
+      const item = existing || {
+        id: `folder-${Date.now()}`,
+        root_path: root,
+        name: String(body.name || root.split(/[\\/]/).filter(Boolean).pop() || '工作区'),
+      }
       if (!existing) folders.push(item)
       result = item
     } else result = { folders }
-  }
-  else if (parsed.pathname.includes('/folders/') && method === 'DELETE') {
-    const index = folders.findIndex(folder => folder.id === id)
+  } else if (parsed.pathname.includes('/folders/') && method === 'DELETE') {
+    const index = folders.findIndex((folder) => folder.id === id)
     if (!id || index < 0) throw new Error(t('工作区不存在。'))
-    if (conversations.some(item => item.folder_id === id && tasks.some(task =>
-      task.conversation_id === item.id && ['created', 'queued', 'running', 'waiting_approval', 'retry_wait', 'interrupted'].includes(task.status))))
+    if (
+      conversations.some(
+        (item) =>
+          item.folder_id === id &&
+          tasks.some(
+            (task) =>
+              task.conversation_id === item.id &&
+              [
+                'created',
+                'queued',
+                'running',
+                'waiting_approval',
+                'retry_wait',
+                'interrupted',
+              ].includes(task.status),
+          ),
+      )
+    )
       throw new Error(t('工作区中有未结束的任务，请完成或停止后再删除。'))
     for (const item of conversations) if (item.folder_id === id) item.folder_id = ''
     folders.splice(index, 1)
     result = undefined
-  }
-  else if (parsed.pathname.endsWith('/permissions')) result = { default_mode: body.default_mode || 'workspace' }
+  } else if (parsed.pathname.endsWith('/permissions'))
+    result = { default_mode: body.default_mode || 'workspace' }
   else if (parsed.pathname.includes('/models/actions/validate'))
     result = { ok: true, message: '本地预览', model: 'demo' }
-  else if (parsed.pathname.includes('/models/actions/discover')) result = { models: [{ id: 'demo' }] }
+  else if (parsed.pathname.includes('/models/actions/discover'))
+    result = { models: [{ id: 'demo' }] }
   else if (parsed.pathname.endsWith('/thinking'))
-    result = { kind: 'effort', options: ['low', 'medium', 'high'], default: 'medium', source: 'mock', reason: '' }
+    result = {
+      kind: 'effort',
+      options: ['low', 'medium', 'high'],
+      default: 'medium',
+      source: 'mock',
+      reason: '',
+    }
   else if (parsed.pathname.endsWith('/models') || parsed.pathname.endsWith('/default'))
     result = { models: [model], default_model_id: 'demo' }
   else if (parsed.pathname.includes('/models/')) result = { ...model, ...body }
@@ -255,12 +318,26 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
   else if (parsed.pathname.includes('/credential-references')) result = { engines: [] }
   else if (parsed.pathname.endsWith('/tool-settings')) result = { tools: [] }
   else if (parsed.pathname.endsWith('/mcp-servers')) result = { servers: [] }
-  else if (parsed.pathname.endsWith('/extension-settings') && method === 'GET') result = {
-    config: { revision: 0, mcp_servers: [], skills: [], skill_directories: [], disabled_skills: [] },
-    applied_revision: 0, reload_required: false, reloading: false, runtime_ready: true,
-    servers: [], skills: [], skill_errors: [], management_available: false,
-  }
-  else if (parsed.pathname.includes('/extension-settings')) throw new Error(t('扩展管理不可用，请检查服务连接。'))
+  else if (parsed.pathname.endsWith('/extension-settings') && method === 'GET')
+    result = {
+      config: {
+        revision: 0,
+        mcp_servers: [],
+        skills: [],
+        skill_directories: [],
+        disabled_skills: [],
+      },
+      applied_revision: 0,
+      reload_required: false,
+      reloading: false,
+      runtime_ready: true,
+      servers: [],
+      skills: [],
+      skill_errors: [],
+      management_available: false,
+    }
+  else if (parsed.pathname.includes('/extension-settings'))
+    throw new Error(t('扩展管理不可用，请检查服务连接。'))
   else if (parsed.pathname.endsWith('/skills')) result = { skills: [] }
   else if (parsed.pathname.endsWith('/audit-events')) result = { events: [] }
   else if (parsed.pathname.endsWith('/data-summary'))
@@ -273,14 +350,22 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
       audit_event_count: 0,
     }
   else if (parsed.pathname.endsWith('/memory-settings')) {
-    const folder = String(method === 'PATCH' ? body.folder_id : parsed.searchParams.get('folder_id') || '')
+    const folder = String(
+      method === 'PATCH' ? body.folder_id : parsed.searchParams.get('folder_id') || '',
+    )
     if (method === 'PATCH') memorySettings.set(folder, body.enabled === true)
     result = { folder_id: folder, enabled: memorySettings.get(folder) === true }
-  }
-  else if (parsed.pathname.includes('/memories')) {
+  } else if (parsed.pathname.includes('/memories')) {
     if (method === 'GET')
-      result = { memories: memories.filter((m) => (m.folder_scope ?? null) === parsed.searchParams.get('folder_id') &&
-        m.content.toLocaleLowerCase().includes((parsed.searchParams.get('q') || '').toLocaleLowerCase())) }
+      result = {
+        memories: memories.filter(
+          (m) =>
+            (m.folder_scope ?? null) === parsed.searchParams.get('folder_id') &&
+            m.content
+              .toLocaleLowerCase()
+              .includes((parsed.searchParams.get('q') || '').toLocaleLowerCase()),
+        ),
+      }
     else if (method === 'DELETE') {
       const index = memories.findIndex((m) => m.id === id)
       if (index >= 0) memories.splice(index, 1)
@@ -290,7 +375,8 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
         id: existing?.id || `memory-${Date.now()}`,
         workspace_id: 'personal',
         subject_user_id: 'local-user',
-        folder_scope: typeof body.folder_id === 'string' ? body.folder_id : existing?.folder_scope ?? null,
+        folder_scope:
+          typeof body.folder_id === 'string' ? body.folder_id : (existing?.folder_scope ?? null),
         category: String(body.category) as UserMemory['category'],
         content: String(body.content),
         source_type: existing?.source_type || 'user',
@@ -325,7 +411,8 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
     approval.version++
     const task = tasks.find((t) => t.id === approval.task_id)
     emit(approval.conversation_id, approval.task_id, 'approval.decided', {
-      ...approval, approval_id: approval.id,
+      ...approval,
+      approval_id: approval.id,
       decision: body.decision,
       note: approval.note,
     })
@@ -343,7 +430,11 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
         a.status = 'rejected'
         a.version++
         a.decided_at = now()
-        emit(task.conversation_id, task.id, 'approval.decided', { ...a, approval_id: a.id, decision: 'deny' })
+        emit(task.conversation_id, task.id, 'approval.decided', {
+          ...a,
+          approval_id: a.id,
+          decision: 'deny',
+        })
       }
     }
     result = task
@@ -368,11 +459,16 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
     result = {
       messages: messages.get(sessionId) || [],
       tasks: tasks.filter((item) => item.conversation_id === sessionId),
-      approvals: approvals.filter((item) => item.conversation_id === sessionId && item.status === 'pending')
+      approvals: approvals
+        .filter((item) => item.conversation_id === sessionId && item.status === 'pending')
         .map(({ arguments: args, reuse_scope, ...approval }) => ({
-          ...approval, arguments_json: JSON.stringify(args), reuse_scope_json: JSON.stringify(reuse_scope || {}),
+          ...approval,
+          arguments_json: JSON.stringify(args),
+          reuse_scope_json: JSON.stringify(reuse_scope || {}),
         })),
-      questions: [], last_sequence: history[history.length - 1]?.sequence || 0, truncated: false,
+      questions: [],
+      last_sequence: history[history.length - 1]?.sequence || 0,
+      truncated: false,
     }
   } else if (parsed.pathname.endsWith('/fork') && method === 'POST') {
     const sourceId = decodeURIComponent(parts[parts.length - 2])
@@ -387,22 +483,49 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
     } else {
       const source = conversations.find((item) => item.id === sourceId)
       if (!source) throw new Error('对话不存在。')
-      if (tasks.some((task) => task.conversation_id === sourceId && ['running', 'waiting_approval'].includes(task.status)))
+      if (
+        tasks.some(
+          (task) =>
+            task.conversation_id === sourceId &&
+            ['running', 'waiting_approval'].includes(task.status),
+        )
+      )
         throw new Error('任务尚未结束，暂时无法分岔。')
       const history = messages.get(sourceId) || []
-      const index = messageId ? history.findIndex((message) => message.id === messageId) : history.length - 1
+      const index = messageId
+        ? history.findIndex((message) => message.id === messageId)
+        : history.length - 1
       const pivot = history[index]
       if (!pivot || pivot.role !== 'assistant') throw new Error('请从已保存的助手回复创建分岔。')
-      const copied = history.slice(0, index + 1).filter((message) => ['user', 'assistant'].includes(message.role))
-      if (copied.length > 500 || new TextEncoder().encode(copied.map((message) => message.content).join('')).length > 2 * 1024 * 1024)
+      const copied = history
+        .slice(0, index + 1)
+        .filter((message) => ['user', 'assistant'].includes(message.role))
+      if (
+        copied.length > 500 ||
+        new TextEncoder().encode(copied.map((message) => message.content).join('')).length >
+          2 * 1024 * 1024
+      )
         throw new Error('此位置的对话历史过长，请选择较早的回复。')
       const branch: Conversation = {
-        ...source, id: crypto.randomUUID(), title: source.title.slice(0, 190) + ' · 分岔',
+        ...source,
+        id: crypto.randomUUID(),
+        title: source.title.slice(0, 190) + ' · 分岔',
         permission_mode: source.permission_mode === 'read_only' ? 'read_only' : 'workspace',
-        archived: false, created_at: now(), updated_at: now(), message_count: copied.length,
-        forked_from_conversation_id: sourceId, forked_from_message_id: pivot.id,
+        archived: false,
+        created_at: now(),
+        updated_at: now(),
+        message_count: copied.length,
+        forked_from_conversation_id: sourceId,
+        forked_from_message_id: pivot.id,
       }
-      messages.set(branch.id, copied.map((message) => ({ ...message, id: crypto.randomUUID(), conversation_id: branch.id })))
+      messages.set(
+        branch.id,
+        copied.map((message) => ({
+          ...message,
+          id: crypto.randomUUID(),
+          conversation_id: branch.id,
+        })),
+      )
       conversations.unshift(branch)
       forks.set(identity, { messageId, conversation: branch })
       result = branch
@@ -449,7 +572,13 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
   } else if (parsed.pathname.includes('/conversations/')) {
     const conversation = conversations.find((c) => c.id === id)
     if (!conversation) throw new Error('对话不存在。')
-    if ((method === 'DELETE' || body.archived !== undefined || body.folder_id !== undefined) && tasks.some((task) => task.conversation_id === id && ['running', 'waiting_approval'].includes(task.status)))
+    if (
+      (method === 'DELETE' || body.archived !== undefined || body.folder_id !== undefined) &&
+      tasks.some(
+        (task) =>
+          task.conversation_id === id && ['running', 'waiting_approval'].includes(task.status),
+      )
+    )
       throw new Error('任务尚未结束，暂时无法移动、归档或删除对话。')
     if (method === 'DELETE') {
       const owned = tasks.filter((task) => task.conversation_id === id)
@@ -457,7 +586,10 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
       for (let index = tasks.length - 1; index >= 0; index--)
         if (tasks[index].conversation_id === id) tasks.splice(index, 1)
       for (let index = approvals.length - 1; index >= 0; index--)
-        if (approvals[index].conversation_id === id) { resumes.delete(approvals[index].id); approvals.splice(index, 1) }
+        if (approvals[index].conversation_id === id) {
+          resumes.delete(approvals[index].id)
+          approvals.splice(index, 1)
+        }
       conversations.splice(conversations.indexOf(conversation), 1)
       messages.delete(id)
       events.delete(id)
@@ -475,16 +607,19 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
         modified_at: now(),
       })),
     }
-  else if (parsed.pathname.endsWith('/files/content'))
+  else if (parsed.pathname.endsWith('/files/content')) {
+    const content = '# 个人手记\n想法与待办事项。'
     result = {
-      path: parsed.searchParams.get('path'),
-      content: '# 个人手记\n想法与待办事项。',
+      path: parsed.searchParams.get('path') ?? 'README.md',
+      content,
       binary: false,
       truncated: false,
-      size: 50,
+      size: new TextEncoder().encode(content).byteLength,
       modified_at: now(),
-    }
-  else if (parsed.pathname.includes('/changes')) {
+      mime_type: 'text/markdown',
+      data_url: '',
+    } satisfies WorkspaceFileContent
+  } else if (parsed.pathname.includes('/changes')) {
     const change = {
       path: 'notes/next-step.md',
       status: 'added',
@@ -495,7 +630,11 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
     }
     result = parsed.pathname.endsWith('/diff')
       ? change
-      : { changes: tasks.some((t) => t.status === 'succeeded') ? [change] : [], git: true, truncated: false }
+      : {
+          changes: tasks.some((t) => t.status === 'succeeded') ? [change] : [],
+          git: true,
+          truncated: false,
+        }
   } else throw new Error('此操作不可用。')
   return structuredClone(result) as T
 }

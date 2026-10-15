@@ -65,10 +65,12 @@ from agent.data_contracts import (
 )
 from agent.errors import UserFacingCancellation, UserFacingError, public_error
 from agent.event_contracts import event_payload
+from agent.media import IMAGE_LIMIT, ImageReference
 from agent.models.context_capacity import ContextCapacity
 from agent.models.reasoning import ThinkTagStream, split_thinking, visible_reasoning
 from agent.repository import ConversationBusyError, SQLiteRepository
 from agent.runtime.context import ContextBudgetMiddleware, SafeSummarizationMiddleware
+from agent.runtime.images import image_message
 from agent.runtime.subagents import CHILD_TAG, ChildContext, DelegateTool, ListSubagentModelsTool, create_readonly_agent
 from agent.safety import SafetyReviewer, SafetyReviewError, SafetyReviewInput, SafetyReviewResult, skipped_review
 from agent.structured_output import (
@@ -118,6 +120,7 @@ class RuntimeRunRequest:
     trace_id: str = ""
     request_hash: str = ""
     output_schema: JSONObject | None = None
+    attachments: tuple[ImageReference, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,6 +259,14 @@ class _ProductToolMiddleware(AgentMiddleware[AgentState[object], _RunContext]):
                     if getattr(tool, "name", "") not in {"delegate", "list_subagent_models"}
                 ]
             )
+        profile = request.model.profile or {}
+        if profile.get("image_inputs") is False and any(
+            isinstance(message, HumanMessage) and isinstance(message.content, list)
+            and any(isinstance(block, dict) and block.get("type") in {"image", "image_url"}
+                    for block in message.content)
+            for message in request.messages
+        ):
+            raise UserFacingError("当前模型声明不支持图片输入，请切换到支持看图的模型。")
         response = await handler(request)
         if context.request.output_schema is not None:
             result = response.model_response if isinstance(response, ExtendedModelResponse) else response
@@ -703,6 +714,9 @@ class LangGraphRuntime:
         if name == "web_search" and not clean.get("engine"):
             keys = context.execution_metadata.get("api_keys", {})
             clean["engine"] = "tavily" if keys.get("tavily") else "google" if keys.get("google") else "duckduckgo"
+        if name == "image_generate":
+            # Approval hashes bind the endpoint/model/options without exposing credentials.
+            clean["configuration"] = context.execution_metadata.get("image_configuration", "")
         policy = self.policy.for_workspace(context.execution_metadata.get("workspace_root", self.workspace_root))
         decision = policy.evaluate(
             name,
@@ -837,6 +851,17 @@ class LangGraphRuntime:
         # Resolve credentials/model before committing product state. Failure to
         # prepare a run must not leave a phantom running task behind.
         graph = await self._graph_for(actual)
+        branch = await self.repository.get_conversation(actual.workspace_id, actual.conversation_id)
+        metadata: ExecutionMetadata = await self._execution_metadata(actual) if self._execution_metadata else {}
+        root = Path(metadata.get("workspace_root", str(self.workspace_root)))
+        if len(actual.attachments) > 4 or sum(image.size for image in actual.attachments) > IMAGE_LIMIT:
+            raise UserFacingError("每条消息最多附带 4 张图片，总计不能超过 16 MiB。")
+        image_bytes = sum(image.size for image in actual.attachments)
+        if any(image.folder_id != branch["folder_id"] for image in actual.attachments):
+            raise UserFacingError("图片所属工作区与当前对话不一致，请在当前工作区重新添加。")
+        if actual.attachments and prompt.startswith("/tool "):
+            raise UserFacingError("图片分析请使用普通聊天消息；直接工具指令不会读取图片附件。")
+        user_message = await image_message(prompt, actual.attachments, root)
         self._direct_tool_call(prompt, actual.task_id)  # Validate command syntax before persisting.
         messages: list[Any] = []
         history_source = "product_history"
@@ -846,6 +871,19 @@ class LangGraphRuntime:
                 # Carry the framework's retained messages, including its summary
                 # and ToolMessages. Counters/interrupts belong to the old run.
                 messages = list(snapshot.values.get("messages", []))
+                messages = [
+                    HumanMessage(content=message.text + "\n[图片未跨工作区附带]", id=message.id)
+                    if isinstance(message, HumanMessage) and message.additional_kwargs.get("image_folder") is not None
+                    and message.additional_kwargs["image_folder"] != branch["folder_id"] else message
+                    for message in messages
+                ]
+                image_bytes += sum(
+                    message.additional_kwargs.get("image_bytes", 0)
+                    for message in messages if isinstance(message, HumanMessage)
+                    and type(message.additional_kwargs.get("image_bytes", 0)) is int
+                )
+                if image_bytes > IMAGE_LIMIT:
+                    raise UserFacingError("当前上下文的图片总量超过 16 MiB，请减少图片大小或在新对话中发送。")
                 history_source = "checkpoint"
         if not messages:
             # First migration/legacy or interrupted history: no invented tool
@@ -854,10 +892,25 @@ class LangGraphRuntime:
             history = await self.repository.list_messages(
                 actual.conversation_id, limit=500 if branch.get("forked_from_conversation_id") else 100,
             )
-            messages = [
-                {"role": str(item["role"]), "content": str(item["content"])}
-                for item in history if str(item.get("role")) in {"user", "assistant", "system"}
-            ]
+            for item in history:
+                if item["role"] == "user":
+                    references = tuple(ImageReference.model_validate(value)
+                                       for value in json.loads(item.get("attachments_json", "[]")))
+                    try:
+                        if any(image.folder_id != branch["folder_id"] for image in references):
+                            raise UserFacingError("图片未跨工作区附带")
+                        size = sum(image.size for image in references)
+                        if image_bytes + size > IMAGE_LIMIT:
+                            raise UserFacingError("历史图片超过当前输入大小限制")
+                        messages.append(await image_message(item["content"], references, root))
+                        image_bytes += size
+                    except (OSError, UserFacingError):
+                        messages.append(HumanMessage(
+                            content=item["content"] + "\n[历史图片未附带：文件已改变、不可用、跨工作区或超过大小限制。"
+                            "如回答依赖该图片，应先说明缺失并请用户重新添加，不能猜测图片内容。]",
+                        ))
+                elif item["role"] in {"assistant", "system"}:
+                    messages.append({"role": item["role"], "content": item["content"]})
             if branch.get("forked_from_conversation_id"):
                 messages.insert(0, SystemMessage(
                     "This is an independent conversation branch containing visible user/assistant history only. "
@@ -879,8 +932,9 @@ class LangGraphRuntime:
             actual.task_id, actual.workspace_id, actual.conversation_id, prompt, actual.request_hash,
             model_call_limit=self.max_model_calls,
             output_schema=actual.output_schema,
+            attachments_json=json.dumps([image.model_dump() for image in actual.attachments], ensure_ascii=False),
         )
-        messages.append({"role": "user", "content": prompt})
+        messages.append(user_message)
         try:
             return await self._launch(
                 {"messages": messages},
@@ -892,6 +946,7 @@ class LangGraphRuntime:
                         {
                             "trace_id": actual.trace_id,
                             "input_text": prompt,
+                            "attachments_json": json.dumps([image.model_dump() for image in actual.attachments]),
                             "output_mode": "json_schema" if actual.output_schema is not None else "text",
                         },
                     ),

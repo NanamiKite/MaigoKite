@@ -1,20 +1,33 @@
 import { GatewayError, request, workspacePath } from './http'
 import type { components } from './generated/transport'
 import {
-  validateConversationResponse, validateConversationsResponse, validateTaskResponse,
-  validateTasksResponse, validateTaskResultResponse, validateApprovalsResponse,
-  validateAuthorizationsResponse, validateMessagesResponse, validateEventsResponse,
-  validateKnownEvent, validateEventEnvelope, validateSnapshotResponse,
-  validateApprovalResponse, validateQuestionResponse, validateQuestionsResponse,
+  validateConversationResponse,
+  validateConversationsResponse,
+  validateTaskResponse,
+  validateTasksResponse,
+  validateTaskResultResponse,
+  validateApprovalsResponse,
+  validateAuthorizationsResponse,
+  validateMessagesResponse,
+  validateEventsResponse,
+  validateKnownEvent,
+  validateEventEnvelope,
+  validateSnapshotResponse,
+  validateApprovalResponse,
+  validateQuestionResponse,
+  validateQuestionsResponse,
+  validateWorkspaceFileResponse,
 } from './generated/validators.js'
 import { mockConnect } from './mock'
 import type { ContextUsage, PlanItem } from './events'
 import { mapContextPayload } from './model-events'
+import type { ImageReference } from './images'
 
 type Transport = components['schemas']
 export type TaskResult = Transport['TaskResultResponse']
 export type KnownAgentEvent = Transport['KnownEvent']
-export type PermissionMode = 'read_only' | 'workspace' | 'workspace_auto' | 'danger_full_access' | 'full_access'
+export type PermissionMode =
+  'read_only' | 'workspace' | 'workspace_auto' | 'danger_full_access' | 'full_access'
 export type ApprovalScope = 'once' | 'task' | 'session'
 export interface ApprovalAuthorization {
   approval_id: string
@@ -88,6 +101,7 @@ export interface ChatMessage {
   content: string
   created_at: string
   streaming?: boolean
+  attachments_json?: string
 }
 
 export interface AgentEvent {
@@ -248,14 +262,7 @@ export interface WorkspaceFileEntry {
   modified_at: string
 }
 
-export interface WorkspaceFileContent {
-  path: string
-  content: string
-  binary: boolean
-  truncated: boolean
-  size: number
-  modified_at: string
-}
+export type WorkspaceFileContent = Transport['WorkspaceFileResponse']
 
 export interface WorkspaceChange {
   path: string
@@ -386,8 +393,11 @@ export interface ExtensionSettings {
 }
 
 // View state also represents locally constructed turns before the server receipt.
-export type AgentTask = Omit<Transport['TaskResponse'], 'subagent_model_ids' | 'output_mode' | 'result_ready'>
-  & Partial<Pick<Transport['TaskResponse'], 'subagent_model_ids' | 'output_mode' | 'result_ready'>>
+export type AgentTask = Omit<
+  Transport['TaskResponse'],
+  'subagent_model_ids' | 'output_mode' | 'result_ready'
+> &
+  Partial<Pick<Transport['TaskResponse'], 'subagent_model_ids' | 'output_mode' | 'result_ready'>>
 
 export interface InstalledSkill {
   name: string
@@ -447,8 +457,10 @@ function chatModelFromWire(value: ChatModelWire): ChatModelSettings {
     baseUrl: value.base_url,
     temperature: value.temperature,
     maxTokens: value.max_tokens,
-    contextWindow: Number.isSafeInteger(value.context_window) && (value.context_window ?? 0) > 0
-      ? value.context_window : undefined,
+    contextWindow:
+      Number.isSafeInteger(value.context_window) && (value.context_window ?? 0) > 0
+        ? value.context_window
+        : undefined,
     timeoutSeconds: value.timeout_seconds,
     credentialConfigured: value.credential_configured ?? false,
   }
@@ -562,7 +574,8 @@ export const api = {
   },
   async getModelContext(modelId: string, signal?: AbortSignal): Promise<ContextUsage> {
     const body = await request<Record<string, unknown>>(
-      `${path}/models/${encodeURIComponent(modelId)}/context`, { signal },
+      `${path}/models/${encodeURIComponent(modelId)}/context`,
+      { signal },
     )
     return mapContextPayload(body)
   },
@@ -662,9 +675,13 @@ export const api = {
   getMemorySettings(folderId: string): Promise<{ folder_id: string; enabled: boolean }> {
     return request(`${path}/memory-settings?folder_id=${encodeURIComponent(folderId)}`)
   },
-  setMemorySettings(folderId: string, enabled: boolean): Promise<{ folder_id: string; enabled: boolean }> {
+  setMemorySettings(
+    folderId: string,
+    enabled: boolean,
+  ): Promise<{ folder_id: string; enabled: boolean }> {
     return request(`${path}/memory-settings`, {
-      method: 'PATCH', body: JSON.stringify({ folder_id: folderId, enabled }),
+      method: 'PATCH',
+      body: JSON.stringify({ folder_id: folderId, enabled }),
     })
   },
   saveMemory(memory: MemoryInput & { id?: string }): Promise<UserMemory> {
@@ -718,7 +735,11 @@ export const api = {
     })
   },
   getTaskResult(taskId: string, signal?: AbortSignal): Promise<TaskResult> {
-    return request(`${path}/tasks/${encodeURIComponent(taskId)}/result`, { signal }, validateTaskResultResponse)
+    return request(
+      `${path}/tasks/${encodeURIComponent(taskId)}/result`,
+      { signal },
+      validateTaskResultResponse,
+    )
   },
   async listTaskInputs(taskId: string, signal?: AbortSignal): Promise<TaskInput[]> {
     const body = await request<{ inputs: TaskInput[] }>(
@@ -747,7 +768,9 @@ export const api = {
     })
   },
   async getCapabilities(signal?: AbortSignal): Promise<Record<string, boolean>> {
-    const body = await request<{ capabilities: Record<string, boolean> }>(`${path}/capabilities`, { signal })
+    const body = await request<{ capabilities: Record<string, boolean> }>(`${path}/capabilities`, {
+      signal,
+    })
     return body.capabilities || {}
   },
   resumeTask(taskId: string, version: number): Promise<MessageReceipt> {
@@ -757,7 +780,11 @@ export const api = {
     })
   },
   cancelTask(taskId: string): Promise<AgentTask> {
-    return request(`${path}/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' }, validateTaskResponse)
+    return request(
+      `${path}/tasks/${encodeURIComponent(taskId)}/cancel`,
+      { method: 'POST' },
+      validateTaskResponse,
+    )
   },
   async listTaskEvents(
     conversationId: string,
@@ -766,7 +793,8 @@ export const api = {
   ): Promise<AgentEvent[]> {
     const body = await request(
       `${path}/conversations/${encodeURIComponent(conversationId)}/events/history?after=${after}`,
-      { signal }, validateEventsResponse,
+      { signal },
+      validateEventsResponse,
     )
     return body.events || []
   },
@@ -778,7 +806,11 @@ export const api = {
     const body = await request<{ folders?: WorkspaceFolder[] }>(`${path}/folders`)
     return (body.folders || []).map((folder) => ({ ...folder, id: folder.id || '' }))
   },
-  browseWorkspaceFolders(location = '', showHidden = false, signal?: AbortSignal): Promise<WorkspaceFolderListing> {
+  browseWorkspaceFolders(
+    location = '',
+    showHidden = false,
+    signal?: AbortSignal,
+  ): Promise<WorkspaceFolderListing> {
     const query = new URLSearchParams({ path: location, show_hidden: String(showHidden) })
     return request(`${path}/folders/browse?${query}`, { signal })
   },
@@ -793,17 +825,25 @@ export const api = {
     return request(`${path}/folders/${encodeURIComponent(folderId)}`, { method: 'DELETE' })
   },
   getConversation(id: string): Promise<Conversation> {
-    return request(`${path}/conversations/${encodeURIComponent(id)}`, undefined, validateConversationResponse)
+    return request(
+      `${path}/conversations/${encodeURIComponent(id)}`,
+      undefined,
+      validateConversationResponse,
+    )
   },
   deleteConversation(id: string): Promise<void> {
     return request(`${path}/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' })
   },
   forkConversation(id: string, key: string, messageId = ''): Promise<Conversation> {
-    return request(`${path}/conversations/${encodeURIComponent(id)}/fork`, {
-      method: 'POST',
-      headers: { 'Idempotency-Key': key },
-      body: JSON.stringify({ message_id: messageId }),
-    }, validateConversationResponse)
+    return request(
+      `${path}/conversations/${encodeURIComponent(id)}/fork`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': key },
+        body: JSON.stringify({ message_id: messageId }),
+      },
+      validateConversationResponse,
+    )
   },
   createConversation(data: {
     memory_enabled?: boolean
@@ -817,13 +857,21 @@ export const api = {
     thinking?: string
     folder_id?: string
   }): Promise<Conversation> {
-    return request(`${path}/conversations`, { method: 'POST', body: JSON.stringify(data) }, validateConversationResponse)
+    return request(
+      `${path}/conversations`,
+      { method: 'POST', body: JSON.stringify(data) },
+      validateConversationResponse,
+    )
   },
   updateConversationPermission(id: string, permissionMode: PermissionMode): Promise<Conversation> {
-    return request(`${path}/conversations/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ permission_mode: permissionMode }),
-    }, validateConversationResponse)
+    return request(
+      `${path}/conversations/${id}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ permission_mode: permissionMode }),
+      },
+      validateConversationResponse,
+    )
   },
   updateConversationSettings(
     id: string,
@@ -841,18 +889,28 @@ export const api = {
       subagent_model_ids?: string[]
     },
   ): Promise<Conversation> {
-    return request(`${path}/conversations/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(settings),
-    }, validateConversationResponse)
+    return request(
+      `${path}/conversations/${id}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(settings),
+      },
+      validateConversationResponse,
+    )
   },
   async listMessages(id: string): Promise<ChatMessage[]> {
-    const body = await request(`${path}/conversations/${id}/messages`, undefined, validateMessagesResponse)
+    const body = await request(
+      `${path}/conversations/${id}/messages`,
+      undefined,
+      validateMessagesResponse,
+    )
     return body.messages || []
   },
   async getConversationSnapshot(id: string): Promise<ConversationSnapshot> {
     const body = await request(
-      `${path}/conversations/${encodeURIComponent(id)}/snapshot`, undefined, validateSnapshotResponse,
+      `${path}/conversations/${encodeURIComponent(id)}/snapshot`,
+      undefined,
+      validateSnapshotResponse,
     )
     // The snapshot protocol stores these fields as JSON strings. Validate the
     // decoded values too; validating the outer string cannot check its shape.
@@ -875,11 +933,16 @@ export const api = {
       throw new GatewayError('对话快照格式异常，请更新应用或重试。', 502, 'CONTRACT_INVALID')
     }
   },
-  sendMessage(id: string, content: string, idempotencyKey: string): Promise<MessageReceipt> {
+  sendMessage(
+    id: string,
+    content: string,
+    idempotencyKey: string,
+    attachments: ImageReference[] = [],
+  ): Promise<MessageReceipt> {
     return request(`${path}/conversations/${id}/messages`, {
       method: 'POST',
       headers: { 'Idempotency-Key': idempotencyKey },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, attachments }),
     })
   },
   async listApprovals(conversationId?: string): Promise<Approval[]> {
@@ -907,17 +970,29 @@ export const api = {
   ): Promise<{ task_id: string }> {
     return request(`${path}/approvals/${encodeURIComponent(id)}/decision`, {
       method: 'POST',
-      body: JSON.stringify({ decision, version, note, scope: decision === 'deny' ? 'once' : scope }),
+      body: JSON.stringify({
+        decision,
+        version,
+        note,
+        scope: decision === 'deny' ? 'once' : scope,
+      }),
     })
   },
-  async listApprovalAuthorizations(id: string, signal?: AbortSignal): Promise<ApprovalAuthorization[]> {
+  async listApprovalAuthorizations(
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<ApprovalAuthorization[]> {
     const body = await request(
-      `${path}/approval-authorizations?conversation_id=${encodeURIComponent(id)}`, { signal }, validateAuthorizationsResponse,
+      `${path}/approval-authorizations?conversation_id=${encodeURIComponent(id)}`,
+      { signal },
+      validateAuthorizationsResponse,
     )
     return body.authorizations || []
   },
   revokeApprovalAuthorization(id: string): Promise<void> {
-    return request(`${path}/approvals/${encodeURIComponent(id)}/authorization`, { method: 'DELETE' })
+    return request(`${path}/approvals/${encodeURIComponent(id)}/authorization`, {
+      method: 'DELETE',
+    })
   },
   getPermissionSettings(): Promise<PermissionSettings> {
     return request(`${path}/permissions`)
@@ -934,8 +1009,15 @@ export const api = {
   getSafetySettings(signal?: AbortSignal): Promise<SafetySettings> {
     return request(`${path}/settings/safety`, { signal })
   },
-  updateSafetySettings(settings: SafetySettingsUpdate, signal?: AbortSignal): Promise<SafetySettings> {
-    return request(`${path}/settings/safety`, { method: 'PATCH', body: JSON.stringify(settings), signal })
+  updateSafetySettings(
+    settings: SafetySettingsUpdate,
+    signal?: AbortSignal,
+  ): Promise<SafetySettings> {
+    return request(`${path}/settings/safety`, {
+      method: 'PATCH',
+      body: JSON.stringify(settings),
+      signal,
+    })
   },
   async listAuditEvents(): Promise<AuditEvent[]> {
     const body = await request<{ events: AuditEvent[] }>(`${path}/audit-events`)
@@ -947,9 +1029,15 @@ export const api = {
     )
     return body.entries || []
   },
-  getWorkspaceFile(relativePath: string, folderId = ''): Promise<WorkspaceFileContent> {
+  getWorkspaceFile(
+    relativePath: string,
+    folderId = '',
+    signal?: AbortSignal,
+  ): Promise<WorkspaceFileContent> {
     return request(
       `${path}/files/content?path=${encodeURIComponent(relativePath)}&${folderQuery(folderId)}`,
+      { signal },
+      validateWorkspaceFileResponse,
     )
   },
   createWorkspaceEntry(
@@ -1003,8 +1091,15 @@ export const api = {
       // JSON parser. Swallowing them here can silently lose a terminal receipt.
       if (event && typeof event === 'object' && 'type' in event && event.type === 'stream.ready') {
         // Control frames are not durable task events and have no replay cursor.
-        onEvent({ type: 'stream.ready', schema_version: 1, event_id: '', sequence: 0,
-          conversation_id: conversationId, task_id: '', payload: {} })
+        onEvent({
+          type: 'stream.ready',
+          schema_version: 1,
+          event_id: '',
+          sequence: 0,
+          conversation_id: conversationId,
+          task_id: '',
+          payload: {},
+        })
       } else if (validateKnownEvent(event) || validateEventEnvelope(event)) onEvent(event)
       else socket.close()
     }

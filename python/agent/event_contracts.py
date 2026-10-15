@@ -33,6 +33,7 @@ class TaskStartedPayload(Payload):
     input_text: str
     trace_id: str
     output_mode: Literal["text", "json_schema"] = "text"
+    attachments_json: str = "[]"
 
 
 class TaskSucceededPayload(Payload):

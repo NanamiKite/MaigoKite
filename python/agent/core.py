@@ -34,6 +34,8 @@ from agent.data_contracts import (
 from agent.event_bus import EventBus
 from agent.extensions import ExtensionConfig, startup_config
 from agent.mcp import MCPClient
+from agent.media import ImageReference
+from agent.models.image_generation import IMAGE_SETTING_KEY, ImageSettings
 from agent.models.runtime import ChatModelRuntime, ChatModelSettings
 from agent.observability import Observability
 from agent.process_registry import ProcessRegistry
@@ -66,6 +68,7 @@ from agent.tools.native import (
     WebSearchTool,
 )
 from agent.tools.native.bash import ExecCommandTool
+from agent.tools.native.image_generate import ImageGenerateTool
 from agent.tools.permission_mgr import PermissionManager
 from agent.tools.tool_registry import ToolRegistry
 
@@ -90,6 +93,7 @@ class AgentCore:
         repository: SQLiteRepository | None = None,
     ) -> None:
         self.config = config
+        self._image_credential_provider: Callable[[str, str], Awaitable[str]] | None = None
         self.event_bus = event_bus
         self.observability = observability
         # Injected models are owned by the caller; configured models by self.models.
@@ -296,6 +300,7 @@ class AgentCore:
                           WebSearchTool, WebFetchTool, GlobTool, GrepTool, SleepTool):
             registry.register(tool_type())
         registry.register(TodoWriteTool(self.repository))
+        registry.register(ImageGenerateTool(self.repository, self._get_image_credential))
         if restore_only:
             skills, inventory, errors = self._skills, self._skill_inventory, self._skill_errors
         else:
@@ -504,6 +509,14 @@ class AgentCore:
     def set_safety_credential_provider(self, provider: Callable[[str], Awaitable[str]]) -> None:
         self._safety_credential_provider = provider
 
+    def set_image_credential_provider(self, provider: Callable[[str, str], Awaitable[str]]) -> None:
+        self._image_credential_provider = provider
+
+    async def _get_image_credential(self, workspace_id: str, reference: str) -> str:
+        if self._image_credential_provider is None:
+            return ""
+        return await self._image_credential_provider(workspace_id, reference)
+
     def _configured_tool_selection(self) -> tuple[set[str], set[str]]:
         """Defaults are visibility preferences, disabled_tools is a config ceiling."""
         defaults = self.config.get("tools.default_tools", list(ToolRegistry.DEFAULT_TOOLS))
@@ -549,10 +562,7 @@ class AgentCore:
                 raise ValueError(f"invalid tool selection: {name}")
             if value and not catalog[name]["configurable"]:
                 raise ValueError(f"tool disabled by startup configuration: {name}")
-        stored = await self.repository.get_workspace_setting(workspace_id, "tools.selection")
-        overrides = dict(stored) if isinstance(stored, dict) else {}
-        overrides.update(enabled)
-        await self.repository.save_workspace_setting(workspace_id, "tools.selection", overrides)
+        await self.repository.update_tool_selection(workspace_id, enabled)
         return await self.get_tool_settings(workspace_id)
 
     async def _enabled_tool_names(self, workspace_id: str) -> list[str]:
@@ -872,6 +882,7 @@ class AgentCore:
             task_id=str(metadata.get("task_id") or ""),
             request_hash=str(metadata.get("request_hash") or ""),
             output_schema=metadata.get("output_schema"),
+            attachments=tuple(ImageReference.model_validate(item) for item in metadata.get("attachments", [])),
         )
         handle = await runtime.start(prompt, request)
         try:
@@ -988,6 +999,9 @@ class AgentCore:
             "approved": False,
             "workspace_root": folder["root_path"],
             "api_keys": api_keys,
+            "image_configuration": ImageSettings.model_validate(
+                await self.repository.get_workspace_setting(workspace_id, IMAGE_SETTING_KEY) or {}
+            ).fingerprint(),
             "enabled_tools": await self._enabled_tool_names(workspace_id),
             "model_id": str(conversation.get("model_id") or ""),
         }

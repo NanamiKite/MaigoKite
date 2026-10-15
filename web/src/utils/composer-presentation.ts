@@ -1,5 +1,6 @@
 import type { PermissionMode } from '@/api/client'
 import type { ModelOption } from '@/config/model-groups'
+import type { ImageReference } from '@/api/images'
 export function menuSelectionIndex(key: string, current: number, count: number): number | null {
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End', 'PageDown', 'PageUp'].includes(key)) return null
   if (!count) return -1
@@ -25,7 +26,11 @@ export interface ComposerProps {
   waiting?: boolean
   queuedCount?: number
   guideReason?: string
-  submit?: (content: string, intent: 'send' | 'guide' | 'later') => Promise<void>
+  submit?: (
+    content: string,
+    intent: 'send' | 'guide' | 'later',
+    images?: ImageReference[],
+  ) => Promise<void>
 }
 export const composerDefaults = {
   assistantName: '助手',

@@ -68,6 +68,7 @@ class PermissionManager:
         "exec_command": RiskLevel.L3,
         "file_write": RiskLevel.L4,
         "file_edit": RiskLevel.L4,
+        "image_generate": RiskLevel.L5,
     }
     MODES = {"read_only", "workspace", "workspace_auto", "danger_full_access"}
     LEGACY_MODES = {

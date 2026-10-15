@@ -102,12 +102,15 @@ class LocalBoundary:
 
         # Bound even chunked input before JSON parsing; forwarded headers never establish local identity.
         body = bytearray()
+        # Image upload is the only large JSON input. Keep ordinary chat/settings
+        # requests on the existing small bound.
+        limit = 23 * 1024 * 1024 if scope["path"].endswith("/files/images") else 2 * 1024 * 1024
         while True:
             message = await receive()
             if message["type"] == "http.disconnect":
                 return
             body.extend(message.get("body", b""))
-            if len(body) > 2 * 1024 * 1024:
+            if len(body) > limit:
                 await reject(413, "BODY_TOO_LARGE", "请求内容超过允许大小。")
                 return
             if not message.get("more_body"):
@@ -164,6 +167,7 @@ def create_app(core: AgentCore, web_dir: Path | None = None) -> FastAPI:
         except APIError:
             return ""
     core.set_safety_credential_provider(safety_credential)
+    core.set_image_credential_provider(credentials.get)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

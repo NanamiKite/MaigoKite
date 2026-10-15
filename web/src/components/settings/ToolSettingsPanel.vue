@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import { api, type ToolSetting } from '@/api/client'
 import { builtinToolCopy } from '@/config/tool-copy'
 import SearchToolSettingsPanel from './SearchToolSettingsPanel.vue'
+import ImageGenerationSettingsPanel from './ImageGenerationSettingsPanel.vue'
 import InkLoader from '@/components/common/InkLoader.vue'
 import CollapseCard from '@/components/common/CollapseCard.vue'
 const route = useRoute()
@@ -17,18 +18,45 @@ const loading = ref(false),
   message = ref('')
 const failedAction = ref<'load' | 'save'>('load')
 const dirty = computed(() => tools.value.some((tool) => draft.value[tool.name] !== tool.enabled))
-const presentedTools = computed(() => tools.value.map(tool => ({
-  ...tool,
-  copy: tool.source === 'builtin' && Object.prototype.hasOwnProperty.call(builtinToolCopy, tool.name)
-    ? builtinToolCopy[tool.name] : undefined,
-})))
-const groups = computed(() => [
-  { title: '内置工具', icon: 'files', tools: presentedTools.value.filter((tool) => tool.source === 'builtin') },
-  { title: '外部工具', icon: 'globe', tools: presentedTools.value.filter((tool) => tool.source === 'mcp') },
-].map(group => ({ ...group, enabled: group.tools.filter(tool => draft.value[tool.name]).length })))
+const presentedTools = computed(() =>
+  tools.value
+    .filter((tool) => tool.name !== 'image_generate')
+    .map((tool) => ({
+      ...tool,
+      copy:
+        tool.source === 'builtin' &&
+        Object.prototype.hasOwnProperty.call(builtinToolCopy, tool.name)
+          ? builtinToolCopy[tool.name]
+          : undefined,
+    })),
+)
+const groups = computed(() =>
+  [
+    {
+      title: '内置工具',
+      icon: 'files',
+      tools: presentedTools.value.filter((tool) => tool.source === 'builtin'),
+    },
+    {
+      title: '外部工具',
+      icon: 'globe',
+      tools: presentedTools.value.filter((tool) => tool.source === 'mcp'),
+    },
+  ].map((group) => ({
+    ...group,
+    enabled: group.tools.filter((tool) => draft.value[tool.name]).length,
+  })),
+)
 function apply(items: ToolSetting[]) {
   tools.value = items
   draft.value = Object.fromEntries(items.map((tool) => [tool.name, tool.enabled]))
+}
+function imageSaved(enabled: boolean) {
+  const tool = tools.value.find((item) => item.name === 'image_generate')
+  if (tool?.configurable) {
+    tool.enabled = enabled
+    draft.value.image_generate = enabled
+  }
 }
 async function load() {
   loading.value = true
@@ -81,15 +109,17 @@ onMounted(() => {
         v-if="loading"
         class="panel-loading"
       >
-        <InkLoader /><InkLoader /><span class="sr-only">{{ $t('正在读取工具…') }}</span>
+        <InkLoader />
+        <InkLoader />
+        <span class="sr-only">{{ $t('正在读取工具…') }}</span>
       </div>
       <p
         v-if="error"
         class="field-error"
         role="alert"
       >
-        {{ error
-        }}<button
+        {{ error }}
+        <button
           class="secondary-button"
           :disabled="loading || saving"
           @click="failedAction === 'save' ? save() : load()"
@@ -107,7 +137,9 @@ onMounted(() => {
             :icon="group.icon"
             :default-expanded="route.query.field === 'tool-selection'"
           >
-            <template #summary>{{ $t('已启用 {0}/{1}', [group.enabled, group.tools.length]) }}</template>
+            <template #summary>
+              {{ $t('已启用 {0}/{1}', [group.enabled, group.tools.length]) }}
+            </template>
             <p
               v-if="!group.tools.length"
               class="panel-copy"
@@ -122,17 +154,40 @@ onMounted(() => {
               :key="tool.name"
               class="tool-entry"
             >
-              <label class="tool-row"><span><strong>{{ tool.copy ? $t(tool.copy.title) : tool.name }}</strong><small>{{ tool.copy ? $t(tool.copy.summary) : $t('暂无说明') }}</small><small v-if="!tool.configurable">{{ $t('当前不可用') }}</small></span><input
-                v-model="draft[tool.name]"
-                type="checkbox"
-                :disabled="saving || !tool.configurable"
-                :aria-label="tool.copy ? $t(tool.copy.title) : tool.name"
-              ></label>
-              <details v-if="tool.copy || tool.description.trim()" class="tool-instructions">
-                <summary>{{ tool.copy ? $t('工具说明') : tool.source === 'mcp' ? $t('服务说明（原文）') : $t('模型指令（原文）') }}</summary>
+              <label class="tool-row">
+                <span>
+                  <strong>{{ tool.copy ? $t(tool.copy.title) : tool.name }}</strong>
+                  <small>{{ tool.copy ? $t(tool.copy.summary) : $t('暂无说明') }}</small>
+                  <small v-if="!tool.configurable">{{ $t('当前不可用') }}</small>
+                </span>
+                <input
+                  v-model="draft[tool.name]"
+                  type="checkbox"
+                  :disabled="saving || !tool.configurable"
+                  :aria-label="tool.copy ? $t(tool.copy.title) : tool.name"
+                />
+              </label>
+              <details
+                v-if="tool.copy || tool.description.trim()"
+                class="tool-instructions"
+              >
+                <summary>
+                  {{
+                    tool.copy
+                      ? $t('工具说明')
+                      : tool.source === 'mcp'
+                        ? $t('服务说明（原文）')
+                        : $t('模型指令（原文）')
+                  }}
+                </summary>
                 <template v-if="tool.copy">
-                  <p class="tool-description">{{ $t(tool.copy.details) }}</p>
-                  <details v-if="tool.description.trim()" class="tool-original">
+                  <p class="tool-description">
+                    {{ $t(tool.copy.details) }}
+                  </p>
+                  <details
+                    v-if="tool.description.trim()"
+                    class="tool-original"
+                  >
                     <summary>{{ $t('模型指令（原文）') }}</summary>
                     <pre>{{ tool.description }}</pre>
                   </details>
@@ -151,7 +206,10 @@ onMounted(() => {
               v-if="message && !dirty"
               class="field-saved"
               role="status"
-            >{{ message }}</span><button
+            >
+              {{ message }}
+            </span>
+            <button
               class="primary-button"
               :disabled="saving || !dirty"
               :aria-busy="saving || undefined"
@@ -173,6 +231,7 @@ onMounted(() => {
       </p>
     </section>
     <SearchToolSettingsPanel />
+    <ImageGenerationSettingsPanel @saved="imageSaved" />
   </div>
 </template>
 <style scoped lang="scss">

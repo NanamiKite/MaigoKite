@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
+import codecs
 import contextlib
 import os
 import re
 import subprocess
 import sys
+import uuid
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -18,6 +22,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from agent.api import contracts as dto
 from agent.api.sessions import owner
 from agent.api.workspace_fs import create_entry, read_file
+from agent.media import IMAGE_LIMIT, IMAGE_SUFFIXES, ImageReference, image_mime, save_image
 from agent.security.sensitive_paths import validate_windows_path
 from agent.tools.native.file_search import file_search_status
 from agent.utils.sandbox import process_sandbox_status
@@ -46,6 +51,8 @@ class FilePreview(TypedDict):
     size: int
     modified_at: str
     truncated: bool
+    mime_type: str
+    data_url: str
 
 
 def timestamp(value: float) -> str:
@@ -100,16 +107,27 @@ def list_files(root: Path, relative: str) -> dict[str, object]:
 
 def preview(root: Path, relative: str, limit: int = PREVIEW_LIMIT) -> FilePreview:
     path = resolve(root, relative)
-    data, info = read_file(root, str(path.relative_to(root)), limit)
+    read_limit = IMAGE_LIMIT if path.suffix.lower() in IMAGE_SUFFIXES else limit
+    data, info = read_file(root, str(path.relative_to(root)), read_limit)
+    mime_type = image_mime(data)
+    if mime_type:
+        truncated = len(data) > read_limit
+        return {
+            "path": relative, "content": "", "binary": True, "size": info.st_size,
+            "modified_at": timestamp(info.st_mtime), "truncated": truncated, "mime_type": mime_type,
+            "data_url": "" if truncated else f"data:{mime_type};base64,{base64.b64encode(data).decode('ascii')}",
+        }
     truncated = len(data) > limit
     data = data[:limit]
     try:
-        content = data.decode("utf-8")
+        # A preview boundary may split a UTF-8 character; that is not a binary file.
+        content = codecs.getincrementaldecoder("utf-8")().decode(data, final=not truncated)
         binary = b"\0" in data
     except UnicodeDecodeError:
         content, binary = "", True
     return {"path": relative, "content": "" if binary else content, "binary": binary,
-            "size": info.st_size, "modified_at": timestamp(info.st_mtime), "truncated": truncated}
+            "size": info.st_size, "modified_at": timestamp(info.st_mtime), "truncated": truncated,
+            "mime_type": "application/octet-stream" if binary else "text/plain", "data_url": ""}
 
 
 def new_entry(root: Path, parent: str, name: str, kind: str) -> FileEntry:
@@ -282,9 +300,24 @@ def routes(core: AgentCore, execution: Execution) -> APIRouter:
     async def files(workspace_id: str, folder_id: str = "", path: str = "") -> dict[str, object]:
         return await to_thread.run_sync(partial(list_files, await root(workspace_id, folder_id), path))
 
-    @router.get("/files/content", response_model=None)
+    @router.get("/files/content", response_model=dto.WorkspaceFileResponse)
     async def content(workspace_id: str, folder_id: str = "", path: str = "") -> FilePreview:
         return await to_thread.run_sync(partial(preview, await root(workspace_id, folder_id), path))
+
+    @router.post("/files/images", status_code=201, dependencies=[Depends(owner)], response_model=ImageReference)
+    async def upload_image(workspace_id: str, body: dto.ImageUpload, folder_id: str = "") -> ImageReference:
+        try:
+            data = base64.b64decode(body.data, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise dto.APIError(400, "INVALID_IMAGE", "图片编码无效。") from exc
+        if image_mime(data) not in {"image/png", "image/jpeg", "image/webp", "image/gif"}:
+            raise dto.APIError(400, "INVALID_IMAGE", "请选择 PNG、JPEG、WebP 或 GIF 图片。")
+        if len(data) > IMAGE_LIMIT:
+            raise dto.APIError(413, "IMAGE_TOO_LARGE", "图片不能超过 16 MiB。")
+        # The user chooses this upload explicitly; no agent tool or approval is involved.
+        return await to_thread.run_sync(
+            partial(save_image, await root(workspace_id, folder_id), "chat-images", uuid.uuid4().hex, data, folder_id),
+        )
 
     @router.post("/files", status_code=201, dependencies=[Depends(owner)], response_model=None)
     async def create(

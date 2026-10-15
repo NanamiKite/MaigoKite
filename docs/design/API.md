@@ -124,6 +124,20 @@ GET    /workspaces/{workspace_id}/conversations/{conversation_id}/snapshot
 
 `files / files/content / changes / changes/diff / runtime-status` 支持可选 `folder_id` 查询参数，API 通过 Core 解析已登记目录，客户端不能直接传任意根目录。Runtime 权限校验与工具上下文使用会话所属目录，不变更共享全局根目录；MCP 进程启动目录和技能加载目录不因切换而变化。
 
+#### 图片输入、生成与文件预览（源码接线，尚未运行验收）
+
+- `POST /workspaces/{workspace_id}/files/images?folder_id=...` 接受 `{data: "纯 Base64"}`，仅工作区所有者可上传。支持 PNG/JPEG/WebP/GIF，单张不超过 16 MiB；创建 `chat-images/` 下的独立文件，返回 `ImageReference`（type/path/folder_id/sha256/mime_type/size）。文件名由应用生成，不接受任意写入路径。仅此路由放宽请求体至 23 MiB，其余路由仍为 2 MiB。
+- 消息 `attachments` 接受上述引用，最多 4 张、总计 16 MiB。准入检查当前文件夹归属和内容哈希，再构造 LangChain `HumanMessage` 多模态内容；附件不是 URL 抓取入口。普通消息查询与 `task.started` 的 `attachments_json` 只含文件引用，图片快照保存在 LangGraph 消息状态供后续追问/恢复使用。
+- 未压缩的当前上下文图片总量也限制为 16 MiB；新附件与保留历史合计超限时明确拒绝。历史导入遇到文件缺失、变化、跨目录或大小限制时保留文字并告知模型图片缺失，不伪造视觉内容。当前 GUI 图片消息不支持执行中引导或新建排队发送。
+- `GET /workspaces/{workspace_id}/settings/image-generation` 和 `PUT` 使用已声明的响应契约。PUT 为 `{settings, api_key?, clear_api_key?}`；settings 包含 enabled/protocol/base_url/model/size/response_format/timeout_seconds。凭证引用按端点绑定，`credential_required` 由服务端管理，换地址不沿用旧密钥。
+- protocol 为 `images` 时复用 OpenAI SDK `images.generate`，一次请求一张图片；`responses` 时调用官方 Responses `image_generation` 工具，限制一次工具调用并设置 `store=false`。不按端口或模型名猜协议、不自动换接口、不自动重试；兼容服务必须实际实现所选接口。
+- `image_generate` 走现有权限审批与审计，L5 单次授权；显式完全访问沿用既有放行语义。审批哈希绑定当前配置摘要。请求前使用工具调用 ID 原子写入审计意图，同一 ID 的崩溃重放不再请求服务；结果不确定时提示先检查产物，再显式发起新的调用。成功结果 `images` 只含工作区文件信息，保存到 `generated-images/`，并沿现有 `file.changed` 通知文件变化。取消不能保证远端停止或未计费；不提供跨崩溃 exactly-once 保证。
+- `GET /files/content` 增加 mime_type/data_url。文本上限 512 KiB，受支持栅格图片上限 16 MiB，超限不返回截断 Base64。Markdown 由前端净化后渲染；HTML 为无脚本、无网络、无同源权限的静态 iframe。SVG 沿用文本接口，由前端 XML 解析与 DOMPurify 净化后作为 `<img>` 图片预览，不作为内联 DOM 或可执行文档；外部引用、脚本与嵌入网页不可用，保留本地片段引用和内嵌栅格图片。截断、畸形或含自定义实体的 SVG 不渲染，保留源码入口。
+
+上面的路径仍受既有本机访问和工作区授权边界约束。不新增多模态 Runtime，不表示所有模型均支持图片输入，也不包含任意厂商原生图片输出、图生图/蒙版编辑、视频或音频。
+
+协议参考：[OpenAI 图片输入说明](https://developers.openai.com/api/docs/guides/images-vision)、[Responses 生图工具](https://developers.openai.com/api/docs/guides/tools-image-generation)。
+
 ### 3.3 任务、工具调用与审批
 
 ```text

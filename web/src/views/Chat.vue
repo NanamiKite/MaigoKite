@@ -20,6 +20,8 @@ import { modelSwitches } from '@/utils/model-switches'
 import { copySubagentSettings } from '@/config/subagents'
 import { api, type ChatMessage, type PermissionMode } from '@/api/client'
 import UserMessage from '@/components/chat-area/UserMessage.vue'
+import GeneratedImages from '@/components/chat-area/GeneratedImages.vue'
+import type { ImageReference } from '@/api/images'
 import AgentMessage from '@/components/chat-area/AgentMessage.vue'
 import MessageForkAction from '@/components/chat-area/MessageForkAction.vue'
 import ModelSwitchNotice from '@/components/chat-area/ModelSwitchNotice.vue'
@@ -55,38 +57,63 @@ const scroll = ref<HTMLElement | null>(null),
 const highlightedTurn = ref('')
 const mode = ref<PermissionMode>('workspace')
 let draftPermissionChosen = false
-watch(() => settings.permissions.default_mode, (value) => {
-  if (!sessionId.value && !draftPermissionChosen) mode.value = value
-})
+watch(
+  () => settings.permissions.default_mode,
+  (value) => {
+    if (!sessionId.value && !draftPermissionChosen) mode.value = value
+  },
+)
 const draftModel = ref(''),
   draftThinking = ref(''),
   savingThinking = ref(false)
 const draftSubagents = ref(copySubagentSettings(settings.subagentDefaults)),
   savingSubagents = ref(false)
 let draftSubagentsChosen = false
-watch(() => settings.subagentDefaults, (value) => {
-  if (!sessionId.value && !draftSubagentsChosen) draftSubagents.value = copySubagentSettings(value)
-})
-const draftMemory = ref(false), savingMemory = ref(false)
-const memoryEnabled = computed(() => sessionId.value ? session.activeSession?.memory_enabled === true : draftMemory.value)
-watch(() => workspace.selectedId, () => { draftMemory.value = false })
+watch(
+  () => settings.subagentDefaults,
+  (value) => {
+    if (!sessionId.value && !draftSubagentsChosen)
+      draftSubagents.value = copySubagentSettings(value)
+  },
+)
+const draftMemory = ref(false),
+  savingMemory = ref(false)
+const memoryEnabled = computed(() =>
+  sessionId.value ? session.activeSession?.memory_enabled === true : draftMemory.value,
+)
+watch(
+  () => workspace.selectedId,
+  () => {
+    draftMemory.value = false
+  },
+)
 const turns = computed(() => run.turns[sessionId.value] || [])
 const modelChanges = computed<Map<string, string>>((previous) => {
   // Compare all loaded history before paging; streaming text leaves markers stable.
   const next = modelSwitches(turns.value)
-  return previous && previous.size === next.size &&
-    [...next].every(([id, name]) => previous.get(id) === name) ? previous : next
+  return previous &&
+    previous.size === next.size &&
+    [...next].every(([id, name]) => previous.get(id) === name)
+    ? previous
+    : next
 })
-const forkDisabled = computed(() => sending.value || restoring.value ||
-  Boolean(session.runningTaskIds[sessionId.value]?.length) ||
-  turns.value.some((turn) => ['running', 'waiting'].includes(turn.status)))
+const forkDisabled = computed(
+  () =>
+    sending.value ||
+    restoring.value ||
+    Boolean(session.runningTaskIds[sessionId.value]?.length) ||
+    turns.value.some((turn) => ['running', 'waiting'].includes(turn.status)),
+)
 const savedMessages = computed(() =>
   sessionId.value ? session.messages[sessionId.value] || [] : [],
 )
 const unprojectedMessages = computed<ChatMessage[]>((previous) => {
   const next = remainingMessages(savedMessages.value, turns.value)
-  return previous && previous.length === next.length &&
-    next.every((message, index) => message === previous[index]) ? previous : next
+  return previous &&
+    previous.length === next.length &&
+    next.every((message, index) => message === previous[index])
+    ? previous
+    : next
 })
 type TimelineItem = {
   key: string
@@ -111,12 +138,17 @@ const timeline = computed<TimelineItem[]>((previous) => {
     })),
   ].map((item) => {
     const prior = entries.get(item.key)
-    return prior && prior.time === item.time && prior.turn === item.turn && prior.message === item.message
-      ? prior : item
+    return prior &&
+      prior.time === item.time &&
+      prior.turn === item.turn &&
+      prior.message === item.message
+      ? prior
+      : item
   })
   // A text delta changes content, never chronological order. Keep old entries
   // stable and sort only when history membership or timestamps actually change.
-  const sameOrder = previous?.length === next.length &&
+  const sameOrder =
+    previous?.length === next.length &&
     next.every((item) => entries.get(item.key)?.time === item.time)
   if (previous && sameOrder) {
     const byKey = new Map(next.map((item) => [item.key, item]))
@@ -128,13 +160,21 @@ const timeline = computed<TimelineItem[]>((previous) => {
 const visibleTimeline = computed(() => timeline.value.slice(-visibleCount.value))
 const nodes = computed<{ id: string; turnId: string }[]>((previous) => {
   // The minimap measures mounted history only; hidden pages have no real position.
-  const next = visibleTimeline.value.flatMap(({ turn }) => turn ? [
-    ...presentationNodes(turn).map((node) => ({ id: node.id, turnId: turn.id })),
-    ...(turn.summary ? [{ id: 'end', turnId: turn.id }] : []),
-  ] : [])
-  return previous && previous.length === next.length && next.every((node, index) =>
-    node.id === previous[index]?.id && node.turnId === previous[index]?.turnId,
-  ) ? previous : next
+  const next = visibleTimeline.value.flatMap(({ turn }) =>
+    turn
+      ? [
+          ...presentationNodes(turn).map((node) => ({ id: node.id, turnId: turn.id })),
+          ...(turn.summary ? [{ id: 'end', turnId: turn.id }] : []),
+        ]
+      : [],
+  )
+  return previous &&
+    previous.length === next.length &&
+    next.every(
+      (node, index) => node.id === previous[index]?.id && node.turnId === previous[index]?.turnId,
+    )
+    ? previous
+    : next
 })
 function loadEarlier() {
   visibleCount.value += 20
@@ -256,11 +296,17 @@ onMounted(() => {
     })
     .catch(() => {})
 })
-async function send(content: string, intent: 'send' | 'guide' | 'later' = 'send') {
+async function send(
+  content: string,
+  intent: 'send' | 'guide' | 'later' = 'send',
+  images: ImageReference[] = [],
+) {
   if (sending.value) return
   sending.value = true
   let id = sessionId.value
   try {
+    if (images.length && (intent !== 'send' || (id && session.runningTaskIds[id]?.length)))
+      throw new Error(t('请等待当前任务结束后再发送图片。'))
     if (id && intent === 'guide') {
       await session.guideTask(id, content)
       resume()
@@ -285,7 +331,7 @@ async function send(content: string, intent: 'send' | 'guide' | 'later' = 'send'
         id,
       )
     }
-    await session.sendToSession(id, content)
+    await session.sendToSession(id, content, undefined, images)
     resume()
   } finally {
     sending.value = false
@@ -322,11 +368,11 @@ function permission(value: PermissionMode) {
   if (!id) {
     draftPermissionChosen = true
     mode.value = value
-  }
-  else configure(async () => {
-    await session.setPermissionMode(value, id)
-    if (sessionId.value === id) mode.value = session.activeSession?.permission_mode || 'workspace'
-  })
+  } else
+    configure(async () => {
+      await session.setPermissionMode(value, id)
+      if (sessionId.value === id) mode.value = session.activeSession?.permission_mode || 'workspace'
+    })
 }
 function subagents(value: { calls: number; concurrent: number; modelIds?: string[] }) {
   const id = sessionId.value
@@ -351,7 +397,10 @@ function subagents(value: { calls: number; concurrent: number; modelIds?: string
 function toggleMemory() {
   const enabled = !memoryEnabled.value
   const id = sessionId.value
-  if (!id) { draftMemory.value = enabled; return }
+  if (!id) {
+    draftMemory.value = enabled
+    return
+  }
   savingMemory.value = true
   configure(async () => {
     try {
@@ -360,7 +409,9 @@ function toggleMemory() {
       // Refresh persisted state if the response was lost; never resend a toggle.
       await session.loadSessions()
       throw reason
-    } finally { savingMemory.value = false }
+    } finally {
+      savingMemory.value = false
+    }
   })
 }
 function model(value: string) {
@@ -386,7 +437,8 @@ function thinking(value: string) {
     try {
       await session.setConversationRuntime(
         session.sessions.find((item) => item.id === id)?.model_id || settings.defaultModelId,
-        value, id,
+        value,
+        id,
       )
     } finally {
       savingThinking.value = false
@@ -414,8 +466,7 @@ watch(
   () => {
     const request = ui.chatTurnRequest
     if (!request || request.sessionId !== sessionId.value) return null
-    return timeline.value.some((item) => item.turn?.id === request.turnId)
-      ? request.serial : null
+    return timeline.value.some((item) => item.turn?.id === request.turnId) ? request.serial : null
   },
   async (serial, _previous, onCleanup) => {
     const request = ui.chatTurnRequest
@@ -485,7 +536,9 @@ watch(
         :key="sessionId"
         :calls="sessionId ? (session.activeSession?.max_subagent_calls ?? 0) : draftSubagents.calls"
         :concurrent="
-          sessionId ? (session.activeSession?.max_concurrent_subagents ?? 1) : draftSubagents.concurrent
+          sessionId
+            ? (session.activeSession?.max_concurrent_subagents ?? 1)
+            : draftSubagents.concurrent
         "
         :model-options="settings.modelProfiles"
         :model-ids="
@@ -497,17 +550,35 @@ watch(
         @change="subagents"
       />
     </Teleport>
-    <Teleport v-if="session.capabilities.scoped_memory === true && !session.activeSession?.archived" to="#chat-session-actions">
-      <StatPopover :label="$t('本对话记忆')" :title="memoryEnabled ? $t('本对话记忆：开启') : $t('本对话记忆：关闭')" placement="below" toolbar>
-        <template #trigger>{{ $t('记忆') }}</template>
+    <Teleport
+      v-if="session.capabilities.scoped_memory === true && !session.activeSession?.archived"
+      to="#chat-session-actions"
+    >
+      <StatPopover
+        :label="$t('本对话记忆')"
+        :title="memoryEnabled ? $t('本对话记忆：开启') : $t('本对话记忆：关闭')"
+        placement="below"
+        toolbar
+      >
+        <template #trigger>
+          {{ $t('记忆') }}
+        </template>
         <div class="conversation-memory">
-          <button class="secondary-button" type="button" role="switch" :aria-checked="memoryEnabled"
-            :disabled="sending || savingMemory" @click="toggleMemory">
+          <button
+            class="secondary-button"
+            type="button"
+            role="switch"
+            :aria-checked="memoryEnabled"
+            :disabled="sending || savingMemory"
+            @click="toggleMemory"
+          >
             {{ memoryEnabled ? $t('本对话记忆：开启') : $t('本对话记忆：关闭') }}
           </button>
           <p>{{ $t('只有本工作区和本对话都开启时才使用保存的记忆；不会读取其他工作区。') }}</p>
           <p>{{ $t('所选模型会收到这些记忆；关闭只影响后续请求，不会清除历史回复。') }}</p>
-          <RouterLink to="/memory">{{ $t('管理工作区记忆') }}</RouterLink>
+          <RouterLink to="/memory">
+            {{ $t('管理工作区记忆') }}
+          </RouterLink>
         </div>
       </StatPopover>
     </Teleport>
@@ -543,7 +614,8 @@ watch(
               v-if="unfinished.length"
               class="unfinished"
             >
-              <span>{{ $t('上次没做完的事') }}</span><router-link
+              <span>{{ $t('上次没做完的事') }}</span>
+              <router-link
                 v-for="turn in unfinished"
                 :key="turn.id"
                 :to="'/chat/' + turn.sessionId"
@@ -590,7 +662,9 @@ watch(
                 <UserMessage
                   v-if="item.message.role === 'user'"
                   :content="item.message.content"
-                /><AgentMessage
+                  :attachments-json="item.message.attachments_json"
+                />
+                <AgentMessage
                   v-else
                   :content="item.message.content"
                   :assistant-name="settings.profile.assistantName"
@@ -614,12 +688,14 @@ watch(
                 <UserMessage
                   v-if="item.turn.userText"
                   :content="item.turn.userText"
+                  :attachments-json="item.turn.attachmentsJSON"
                 />
                 <RailTrack
                   :turn="item.turn"
                   :can-resend="!session.isSending && !session.activeSession?.archived && !sending"
                   :resend-input="(id) => session.resendInput(sessionId, item.turn!.id, id)"
                 >
+                  <GeneratedImages :steps="item.turn.steps" />
                   <AgentMessage
                     v-if="item.turn.text"
                     :content="item.turn.text"
@@ -634,15 +710,16 @@ watch(
                         :disabled="forkDisabled"
                       />
                     </template>
-                  </AgentMessage><InkLoader v-else-if="item.turn.status === 'running'" />
+                  </AgentMessage>
+                  <InkLoader v-else-if="item.turn.status === 'running'" />
                 </RailTrack>
                 <p
                   v-if="item.turn.inputsError"
                   class="chat-error"
                   role="alert"
                 >
-                  {{ item.turn.inputsError
-                  }}<button
+                  {{ item.turn.inputsError }}
+                  <button
                     class="text-button"
                     @click="session.refreshTaskDetails(sessionId, item.turn.id)"
                   >
@@ -775,9 +852,7 @@ watch(
             : draftModel || settings.defaultModelId
         "
         :model-options="settings.modelProfiles"
-        :thinking="
-          sessionId ? session.activeSession?.thinking || '' : draftThinking
-        "
+        :thinking="sessionId ? session.activeSession?.thinking || '' : draftThinking"
         :saving-thinking="savingThinking"
         :permission-mode="session.activeSession?.permission_mode || mode"
         :last-message="lastMessage"
@@ -791,9 +866,13 @@ watch(
         v-if="!timeline.length"
         class="workpaper-signature"
       >
-        <span><AppIcon :size="24" />{{ settings.profile.assistantName }}</span>
+        <span>
+          <AppIcon :size="24" />
+          {{ settings.profile.assistantName }}
+        </span>
         <router-link to="/overview">
-          {{ $t('工作记录') }}<span aria-hidden="true">↗</span>
+          {{ $t('工作记录') }}
+          <span aria-hidden="true">↗</span>
         </router-link>
       </footer>
     </div>
@@ -806,6 +885,8 @@ watch(
   gap: var(--space-3);
   max-width: 24rem;
   font-size: var(--type-small);
-  p { margin: 0; }
+  p {
+    margin: 0;
+  }
 }
 </style>

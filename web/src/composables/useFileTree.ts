@@ -33,6 +33,7 @@ export function useFileTree() {
   let treeRequest = 0,
     previewRequest = 0,
     revealRequest = 0
+  let previewController: AbortController | undefined
 
   function toNode(item: Awaited<ReturnType<typeof api.listWorkspaceFiles>>[number]): FileTreeNode {
     return { ...item, children: item.type === 'directory' ? [] : undefined, loaded: false }
@@ -40,6 +41,7 @@ export function useFileTree() {
 
   /** 加载文件树 */
   async function loadFileTree(rootPath: string) {
+    previewController?.abort()
     revealRequest++
     const request = ++treeRequest
     const folderId = workspace.selectedId
@@ -96,6 +98,7 @@ export function useFileTree() {
 
   /** 关闭预览并使进行中的读取结果失效。 */
   function closePreview() {
+    previewController?.abort()
     revealRequest++
     previewRequest++
     selectedNode.value = null
@@ -106,6 +109,8 @@ export function useFileTree() {
 
   /** 选择节点 */
   async function selectNode(node: FileTreeNode) {
+    previewController?.abort()
+    previewController = new AbortController()
     revealRequest++
     const request = ++previewRequest
     selectedNode.value = node
@@ -115,7 +120,11 @@ export function useFileTree() {
     if (node.type !== 'file') return
     previewLoading.value = true
     try {
-      const content = await api.getWorkspaceFile(node.path, workspace.selectedId)
+      const content = await api.getWorkspaceFile(
+        node.path,
+        workspace.selectedId,
+        previewController.signal,
+      )
       if (request === previewRequest) selectedContent.value = content
     } catch (reason) {
       if (request === previewRequest)
@@ -132,14 +141,18 @@ export function useFileTree() {
     const parts = path.split('/').filter(Boolean)
     let nodes = tree.value
     for (let index = 0; index < parts.length - 1; index++) {
-      const parent = nodes.find(node => node.path === parts.slice(0, index + 1).join('/'))
+      const parent = nodes.find((node) => node.path === parts.slice(0, index + 1).join('/'))
       if (!parent || parent.type !== 'directory') break
       if (!parent.expanded) await toggleExpand(parent)
       if (intent !== revealRequest || request !== treeRequest) return
       nodes = parent.children || []
     }
     if (intent !== revealRequest || request !== treeRequest) return
-    const node = nodes.find(item => item.path === path) || { name: parts.at(-1) || path, path, type }
+    const node = nodes.find((item) => item.path === path) || {
+      name: parts.at(-1) || path,
+      path,
+      type,
+    }
     await selectNode(node)
   }
 
@@ -151,8 +164,13 @@ export function useFileTree() {
     return []
   }
 
-  watch(() => workspace.selectedId, () => void loadFileTree(''), { immediate: true, flush: 'sync' })
+  watch(
+    () => workspace.selectedId,
+    () => void loadFileTree(''),
+    { immediate: true, flush: 'sync' },
+  )
   onScopeDispose(() => {
+    previewController?.abort()
     treeRequest++
     previewRequest++
     revealRequest++

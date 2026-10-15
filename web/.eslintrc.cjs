@@ -18,6 +18,8 @@ module.exports = {
   plugins: ['vue'],
   rules: {
     'vue/multi-word-component-names': 'off',
+    // Prettier closes void tags; Vue accepts both forms in existing templates.
+    'vue/html-self-closing': ['warn', { html: { void: 'any' } }],
     '@typescript-eslint/no-explicit-any': 'warn',
     '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }]
   }

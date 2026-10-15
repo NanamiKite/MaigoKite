@@ -13,6 +13,7 @@ import {
   type TaskInput,
 } from '@/api/client'
 import { GatewayError } from '@/api/http'
+import type { ImageReference } from '@/api/images'
 import { EventSocket } from '@/api/socket'
 import { mapGatewayEvent } from '@/api/event-adapter'
 import { useRunStore } from './run'
@@ -31,7 +32,9 @@ export const useSessionStore = defineStore('session', () => {
     error = ref<string | null>(null)
   const runningTaskIds = ref<Record<string, string[]>>({}),
     approvals = ref<Record<string, Approval[]>>({})
-  const queuedMessages = ref<Record<string, { id: string; content: string }[]>>({})
+  const queuedMessages = ref<
+    Record<string, { id: string; content: string; attachments?: ImageReference[] }[]>
+  >({})
   const queuedPaused = ref<Record<string, boolean>>({})
   const stoppingTaskIds = ref<string[]>([])
   const tasks = ref<Record<string, AgentTask[]>>({})
@@ -47,6 +50,7 @@ export const useSessionStore = defineStore('session', () => {
         key: string
         content: string
         uncertain: boolean
+        attachments: ImageReference[]
         inputOrigin?: { taskId: string; inputId: string }
       }
     >
@@ -155,6 +159,9 @@ export const useSessionStore = defineStore('session', () => {
         task,
         String(event.payload.input_text || '') || undefined,
         event.occurred_at,
+        typeof event.payload.attachments_json === 'string'
+          ? event.payload.attachments_json
+          : undefined,
       )
     }
     if (!covered && !staleState && event.type === 'task.resumed') mark(id, task)
@@ -238,8 +245,8 @@ export const useSessionStore = defineStore('session', () => {
         // A task can commit its terminal row before its event is published.
         // Successful heartbeat replay also reconciles active product facts;
         // an open socket or an empty event page is not proof it is still running.
-        const needsReconciliation = online &&
-          (runningTaskIds.value[id] || []).some((task) => !task.startsWith('pending-'))
+        const needsReconciliation =
+          online && (runningTaskIds.value[id] || []).some((task) => !task.startsWith('pending-'))
         if (online) connectedOnce = true
         if (online && error.value === syncError) error.value = null
         run.setConnection(id, online)
@@ -257,10 +264,13 @@ export const useSessionStore = defineStore('session', () => {
   }
   function retainedWorkspace(conversation: Conversation): Conversation {
     return conversation.folder_id && workspace.wasRemoved(conversation.folder_id)
-      ? { ...conversation, folder_id: '' } : conversation
+      ? { ...conversation, folder_id: '' }
+      : conversation
   }
   function moveWorkspaceSessionsToDefault(folderId: string) {
-    sessions.value = sessions.value.map(item => item.folder_id === folderId ? { ...item, folder_id: '' } : item)
+    sessions.value = sessions.value.map((item) =>
+      item.folder_id === folderId ? { ...item, folder_id: '' } : item,
+    )
   }
   async function loadSessions() {
     if (isLoading.value) return
@@ -268,9 +278,9 @@ export const useSessionStore = defineStore('session', () => {
     error.value = null
     try {
       await workspace.load()
-      sessions.value = (await api.listConversations()).map(retainedWorkspace).filter(
-        (item) => !deletedSessions.has(item.id),
-      )
+      sessions.value = (await api.listConversations())
+        .map(retainedWorkspace)
+        .filter((item) => !deletedSessions.has(item.id))
       const current = activeSession.value
       if (current) {
         workspace.select(current.folder_id || '')
@@ -283,24 +293,31 @@ export const useSessionStore = defineStore('session', () => {
       isLoading.value = false
     }
   }
-  async function createSession(title: string, folderId = workspace.selectedId, subagents?: SubagentSettings) {
+  async function createSession(
+    title: string,
+    folderId = workspace.selectedId,
+    subagents?: SubagentSettings,
+  ) {
     try {
       const defaults = copySubagentSettings(subagents || useSettingsStore().subagentDefaults)
       if (defaults.calls || defaults.modelIds.length) {
-        if (capabilities.value.subagents === undefined) capabilities.value = await api.getCapabilities()
+        if (capabilities.value.subagents === undefined)
+          capabilities.value = await api.getCapabilities()
         if (!capabilities.value.subagents)
           throw new Error(t('当前服务不支持子 Agent，请在设置中关闭默认配置后重试。'))
         if (defaults.modelIds.length && !capabilities.value.subagent_model_selection)
           throw new Error(t('当前服务不支持指定子 Agent 模型，请取消模型选择后重试。'))
       }
       // Every creation entry point uses the same defaults, in the create request itself.
-      const item = retainedWorkspace(await api.createConversation({
-        title,
-        folder_id: folderId,
-        max_subagent_calls: defaults.calls,
-        max_concurrent_subagents: defaults.concurrent,
-        subagent_model_ids: defaults.modelIds,
-      }))
+      const item = retainedWorkspace(
+        await api.createConversation({
+          title,
+          folder_id: folderId,
+          max_subagent_calls: defaults.calls,
+          max_concurrent_subagents: defaults.concurrent,
+          subagent_model_ids: defaults.modelIds,
+        }),
+      )
       showArchived.value = false
       sessions.value.unshift(item)
       await switchSession(item.id)
@@ -518,11 +535,16 @@ export const useSessionStore = defineStore('session', () => {
     const item = queuedMessages.value[id]?.find((entry) => entry.id === entryId)
     if (item && content.trim()) item.content = content.trim()
   }
-  function reorderQueued(id: string, entryId: string, targetId: string, position: 'before' | 'after') {
+  function reorderQueued(
+    id: string,
+    entryId: string,
+    targetId: string,
+    position: 'before' | 'after',
+  ) {
     const queue = queuedMessages.value[id]
     if (!queue || entryId === targetId) return
-    const from = queue.findIndex(item => item.id === entryId)
-    const target = queue.findIndex(item => item.id === targetId)
+    const from = queue.findIndex((item) => item.id === entryId)
+    const target = queue.findIndex((item) => item.id === targetId)
     if (from < 0 || target < 0) return
     const to = target + (position === 'after' ? 1 : 0) - (from < target ? 1 : 0)
     if (from === to) return
@@ -533,6 +555,7 @@ export const useSessionStore = defineStore('session', () => {
   async function guideQueued(id: string, entryId: string) {
     const item = queuedMessages.value[id]?.find((entry) => entry.id === entryId)
     if (!item) return
+    if (item.attachments?.length) throw new Error(t('请等待当前任务结束后再发送图片。'))
     await guideTask(id, item.content)
     const index = queuedMessages.value[id]?.findIndex((entry) => entry.id === entryId) ?? -1
     if (index >= 0) removeQueued(id, index)
@@ -631,12 +654,15 @@ export const useSessionStore = defineStore('session', () => {
     id: string,
     content: string,
     inputOrigin?: { taskId: string; inputId: string },
+    attachments: ImageReference[] = [],
   ) {
     const previous = submissions.value[id]
     if (!previous && sessions.value.find((item) => item.id === id)?.archived)
       throw new Error(t('对话已归档，恢复后可发送消息。'))
     if (previous && !previous.uncertain) throw new Error(t('消息正在提交，请稍候。'))
     if (previous && previous.content !== content)
+      throw new Error(t('上一条消息提交结果未知，请点击“确认提交结果”。'))
+    if (previous && JSON.stringify(previous.attachments) !== JSON.stringify(attachments))
       throw new Error(t('上一条消息提交结果未知，请点击“确认提交结果”。'))
     if (
       previous &&
@@ -655,6 +681,7 @@ export const useSessionStore = defineStore('session', () => {
       content,
       uncertain: false,
       inputOrigin,
+      attachments: attachments.map((image) => ({ ...image })),
     }
     submission.uncertain = false
     submissions.value[id] = submission
@@ -669,12 +696,14 @@ export const useSessionStore = defineStore('session', () => {
       conversation_id: id,
       role: 'user',
       content,
+      attachments_json: JSON.stringify(submission.attachments),
       created_at: new Date().toISOString(),
     }
-    ;(messages.value[id] ||= []).push(optimistic)
+    const conversationMessages = (messages.value[id] ||= [])
+    conversationMessages.push(optimistic)
     let result: MessageReceipt
     try {
-      result = await api.sendMessage(id, content, submission.key)
+      result = await api.sendMessage(id, content, submission.key, submission.attachments)
     } catch (reason) {
       if (epoch !== lifecycle || deletedSessions.has(id)) throw reason
       clear(id, pending)
@@ -701,7 +730,7 @@ export const useSessionStore = defineStore('session', () => {
         result.task_id,
       )
     if (queuedAfterTask.get(id) === pending) queuedAfterTask.set(id, result.task_id)
-    run.markStarted(id, result.task_id, content)
+    run.markStarted(id, result.task_id, content, undefined, JSON.stringify(submission.attachments))
     const turn = run.getTurn(id, result.task_id)
     if (
       !['completed', 'failed', 'cancelled'].includes(turn.status) &&
@@ -729,12 +758,16 @@ export const useSessionStore = defineStore('session', () => {
     const submission = submissions.value[id]
     if (!submission?.uncertain) return
     try {
-      await sendToSession(id, submission.content)
+      await sendToSession(id, submission.content, submission.inputOrigin, submission.attachments)
     } catch {
       // A definitive refusal releases the key but must not lose the user's text.
       if (!deletedSessions.has(id) && !submissions.value[id] && !submission.inputOrigin) {
         const queue = (queuedMessages.value[id] ||= [])
-        queue.unshift({ id: submission.key, content: submission.content })
+        queue.unshift({
+          id: submission.key,
+          content: submission.content,
+          attachments: submission.attachments,
+        })
         queuedPaused.value[id] = true
       }
     }
@@ -778,7 +811,7 @@ export const useSessionStore = defineStore('session', () => {
       if (!next) return
       queuedPaused.value[id] = false
       try {
-        await sendToSession(id, next.content)
+        await sendToSession(id, next.content, undefined, next.attachments)
       } catch {
         // An ambiguous send already has a confirmation entry with the original key.
         if (!submissions.value[id]) (queuedMessages.value[id] ||= []).unshift(next)
@@ -821,7 +854,9 @@ export const useSessionStore = defineStore('session', () => {
         const current = await api.getConversation(id)
         const index = sessions.value.findIndex((item) => item.id === id)
         if (index >= 0) sessions.value[index] = current
-      } catch { /* Keep the original error and block new submissions. */ }
+      } catch {
+        /* Keep the original error and block new submissions. */
+      }
       throw reason
     }
     const i = sessions.value.findIndex((s) => s.id === updated.id)

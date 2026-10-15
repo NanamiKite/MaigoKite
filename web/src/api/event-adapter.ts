@@ -27,6 +27,7 @@ function text(value: unknown): string {
 function hintAction(value: unknown, tool: string): ToolHintAction | undefined {
   const destinations: Record<string, string> = {
     '/settings?tab=tools': '设置工具',
+    '/settings?tab=tools&field=image-generation': '配置生图服务',
     '/settings?tab=models': '设置模型',
     '/settings?tab=permissions': '设置权限',
     '/settings?tab=workspace': '查看运行状态',

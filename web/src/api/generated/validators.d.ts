@@ -17,3 +17,6 @@ export function validateEventEnvelope(value: unknown): value is components['sche
 export function validateSnapshotResponse(value: unknown): value is components['schemas']['SnapshotResponse'];
 export function validateQuestionsResponse(value: unknown): value is components['schemas']['QuestionsResponse'];
 export function validateQuestionResponse(value: unknown): value is components['schemas']['QuestionResponse'];
+export function validateImageReference(value: unknown): value is components['schemas']['ImageReference'];
+export function validateImageSettingsResponse(value: unknown): value is components['schemas']['ImageSettingsResponse'];
+export function validateWorkspaceFileResponse(value: unknown): value is components['schemas']['WorkspaceFileResponse'];

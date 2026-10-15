@@ -12,6 +12,7 @@
 - 当前业务数据库只有 SQLite，启用 foreign keys 与 WAL。
 - SQLite 保存工作区、成员关系、会话、消息、任务、事件、工具调用、审批、设置、审计、Todo 和显式用户记忆。
 - 模型与其他非敏感工作区配置保存在 `workspace_settings` JSON 中。
+- 图片生成配置使用 `models.image_generation` 设置键，生图密钥仅存操作系统凭证库。消息表增加 `attachments_json TEXT NOT NULL DEFAULT '[]'`，保存已上传图片的文件夹、路径、哈希、类型和大小；启动增列保留旧消息，分岔事务复制引用，不复制文件。LangGraph checkpoint 保存该轮实际图片输入快照；普通消息/事件不保存 Base64。删除对话仍不删除 `chat-images/` 或 `generated-images/` 中的工作区文件。该迁移尚未运行数据库或重启验收。
 - 敏感凭证值由 Python API 通过操作系统凭证存储保存，不进入 SQLite；访问边界见 [后端设计](BackendDesign.md#3-凭证与访问边界)。
 - 原始文档、FTS、向量嵌入、向量索引、PostgreSQL 和对象存储尚未接入。
 

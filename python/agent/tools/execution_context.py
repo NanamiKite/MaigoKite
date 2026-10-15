@@ -26,6 +26,7 @@ class ExecutionMetadata(TypedDict, total=False):
     approved: bool
     enabled_tools: list[str]
     api_keys: dict[str, str]
+    image_configuration: str
     process_registry: ProcessRegistry
     command_limits: JSONObject
     linux_sandbox: JSONObject

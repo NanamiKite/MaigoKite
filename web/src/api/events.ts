@@ -204,6 +204,7 @@ export interface Turn {
   thinking: string
   thinkingStatus?: 'running' | 'completed'
   userText?: string
+  attachmentsJSON?: string
   messageId?: string
   steps: Step[]
   awaits: AwaitItem[]

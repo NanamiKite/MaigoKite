@@ -22,6 +22,7 @@ from agent.data_contracts import (
 from agent.data_contracts import PermissionMode as ActivePermissionMode
 from agent.errors import UserFacingError
 from agent.event_contracts import WireEvent, wire_event
+from agent.media import ImageReference
 from agent.structured_output import validate_output_schema
 
 if TYPE_CHECKING:
@@ -40,6 +41,19 @@ class APIError(UserFacingError):
 
 class Input(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class WorkspaceFileResponse(BaseModel):
+    path: str
+    content: str
+    binary: bool
+    size: int = Field(ge=0)
+    modified_at: str
+    truncated: bool
+    mime_type: str
+    data_url: str = Field(
+        pattern=r"^(|data:image/(png|jpeg|gif|webp|bmp);base64,[A-Za-z0-9+/]+=*)$",
+    )
 
 
 class ConversationCreate(Input):
@@ -69,15 +83,13 @@ class ConversationUpdate(Input):
     subagent_model_ids: list[ModelID] | None = Field(default=None, max_length=32)
 
 
-class Attachment(Input):
-    type: Literal["", "file", "image", "url"] = ""
-    path: str = Field(default="", max_length=4096)
-    url: str = Field(default="", max_length=8192)
+class ImageUpload(Input):
+    data: str = Field(min_length=1, max_length=22369624)
 
 
 class SendMessage(Input):
     content: str = Field(min_length=1, max_length=10000)
-    attachments: list[Attachment] = Field(default_factory=list, max_length=100)
+    attachments: list[ImageReference] = Field(default_factory=list, max_length=4)
     output_schema: JSONObject | None = None
 
     @field_validator("output_schema")
@@ -350,6 +362,7 @@ class MessageResponse(Output):
     role: Literal["system", "user", "assistant", "tool"]
     content: str
     created_at: str
+    attachments_json: str = "[]"
 
 
 class SnapshotResponse(Output):

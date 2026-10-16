@@ -7,8 +7,8 @@ import json
 import re
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, cast, get_type_hints
+from dataclasses import replace
+from typing import Any, cast, get_type_hints
 from uuid import uuid4
 
 from langchain.agents import create_agent
@@ -23,6 +23,7 @@ from langchain.agents.middleware.types import (
 from langchain.tools import ToolRuntime
 from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately
 from langchain_core.tools import StructuredTool
@@ -30,16 +31,14 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from agent.errors import UserFacingError, public_error
-from agent.models.context_capacity import ContextCapacity
 from agent.models.reasoning import raw_message_text, reasoning_text, split_thinking
 from agent.runtime.context import ContextBudgetMiddleware, summary_target_tokens
+from agent.runtime.run_context import ChildContext as ChildContext
+from agent.runtime.run_context import ExecutionMetadataProvider, RunContext
 from agent.tools.base import BaseTool, ExecutionContext, ToolResult
-from agent.tools.execution_context import ExecutionMetadata
+from agent.tools.permission_mgr import PolicyDecision
 
-if TYPE_CHECKING:
-    from agent.runtime.langgraph_runtime import LangGraphRuntime
-    from agent.runtime.run_context import RunContext, RuntimeRunRequest
-
+ToolDecision = Callable[[str, dict[str, Any], RunContext | ChildContext], PolicyDecision]
 READ_TOOLS = frozenset({"file_read", "glob", "grep"})
 CHILD_TAG = "maigokite:subagent"
 # Product transcript only; the graph/checkpoint still owns execution. Bound
@@ -68,54 +67,44 @@ class DelegateArgs(BaseModel):
     label: str = Field(default="", max_length=80, description="Short display name for this investigation.")
 
 
-@dataclass(slots=True)
-class ChildContext:
-    parent: RunContext
-    subagent_id: str
-    request: RuntimeRunRequest
-    execution_metadata: ExecutionMetadata
-    model_info: dict[str, Any]
-    scope: asyncio.TaskGroup | None = None
-    context_capacity: ContextCapacity | None = None
-    result_token_limit: int = 0
-
-    @property
-    def adapter(self) -> LangGraphRuntime:
-        return self.parent.adapter
+async def refresh_child_authority(child: ChildContext, metadata: ExecutionMetadataProvider | None) -> None:
+    parent = child.parent
+    if metadata is not None:
+        fresh = await metadata(parent.request)
+        # Children stay read-only regardless of the parent's live mode.
+        # A mode change does not stop an already-admitted investigation.
+        if fresh.get("workspace_root") != child.execution_metadata.get("workspace_root") or "delegate" not in fresh.get(
+            "enabled_tools", []
+        ):
+            raise PermissionError("父任务权限或工作区已改变，请重新发起任务。")
+        child.execution_metadata = {
+            **child.execution_metadata,
+            "enabled_tools": sorted(
+                set(child.execution_metadata["enabled_tools"]) & set(fresh.get("enabled_tools", []))
+            ),
+        }
+    task = await child.repository.get_task(child.request.workspace_id, child.request.task_id)
+    if task["status"] == "cancelled":
+        raise asyncio.CancelledError()
+    # A sibling ToolNode can publish an approval interrupt while this
+    # already-admitted read-only investigation is still draining. That is
+    # not a user stop; propagating CancelledError would cancel the parent.
+    if task["status"] not in {"running", "waiting_approval"}:
+        raise DelegationError("父任务已结束或中断，子 Agent 不再执行。")
 
 
 class _ReadOnlyTools(AgentMiddleware[AgentState[object], ChildContext]):
-    @staticmethod
-    async def refresh_authority(child: ChildContext) -> None:
-        adapter, parent = child.adapter, child.parent
-        if adapter._execution_metadata is not None:
-            fresh = await adapter._execution_metadata(parent.request)
-            # Children stay read-only regardless of the parent's live mode.
-            # A mode change does not stop an already-admitted investigation.
-            if (fresh.get("workspace_root") != child.execution_metadata.get("workspace_root")
-                    or "delegate" not in fresh.get("enabled_tools", [])):
-                raise PermissionError("父任务权限或工作区已改变，请重新发起任务。")
-            child.execution_metadata = {
-                **child.execution_metadata,
-                "enabled_tools": sorted(
-                    set(child.execution_metadata["enabled_tools"]) & set(fresh.get("enabled_tools", []))
-                ),
-            }
-        task = await adapter.repository.get_task(child.request.workspace_id, child.request.task_id)
-        if task["status"] == "cancelled":
-            raise asyncio.CancelledError()
-        # A sibling ToolNode can publish an approval interrupt while this
-        # already-admitted read-only investigation is still draining. That is
-        # not a user stop; propagating CancelledError would cancel the parent.
-        if task["status"] not in {"running", "waiting_approval"}:
-            raise DelegationError("父任务已结束或中断，子 Agent 不再执行。")
+    def __init__(self, evaluate_tool: ToolDecision, execution_metadata: ExecutionMetadataProvider | None) -> None:
+        self._evaluate_tool = evaluate_tool
+        self._execution_metadata = execution_metadata
 
     async def awrap_model_call(
-        self, request: ModelRequest[ChildContext],
+        self,
+        request: ModelRequest[ChildContext],
         handler: Callable[[ModelRequest[ChildContext]], Awaitable[ModelResponse]],
     ) -> ModelResponse | ExtendedModelResponse:
         child = request.runtime.context
-        await self.refresh_authority(child)
+        await refresh_child_authority(child, self._execution_metadata)
         enabled = child.execution_metadata["enabled_tools"]
         response = await handler(
             request.override(tools=[tool for tool in request.tools if getattr(tool, "name", "") in enabled])
@@ -128,18 +117,22 @@ class _ReadOnlyTools(AgentMiddleware[AgentState[object], ChildContext]):
             reasoning = reasoning_text(message) or tagged_reasoning
             if not content and not reasoning:
                 continue
-            await child.adapter._emit(child.parent, "subagent.message", {
-                "subagent_id": child.subagent_id,
-                "message_id": message.id or str(uuid4()),
-                "content": content[:_TRANSCRIPT_LIMIT],
-                "reasoning": reasoning[:_TRANSCRIPT_LIMIT],
-                "final": not message.tool_calls,
-                "truncated": len(content) > _TRANSCRIPT_LIMIT or len(reasoning) > _TRANSCRIPT_LIMIT,
-            })
+            await child.parent.projection.emit(
+                "subagent.message",
+                {
+                    "subagent_id": child.subagent_id,
+                    "message_id": message.id or str(uuid4()),
+                    "content": content[:_TRANSCRIPT_LIMIT],
+                    "reasoning": reasoning[:_TRANSCRIPT_LIMIT],
+                    "final": not message.tool_calls,
+                    "truncated": len(content) > _TRANSCRIPT_LIMIT or len(reasoning) > _TRANSCRIPT_LIMIT,
+                },
+            )
         return response
 
     async def awrap_tool_call(
-        self, request: ToolCallRequest,
+        self,
+        request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[str]]],
     ) -> ToolMessage | Command[str]:
         # A child owns its reads. Drain them before returning a failed/timed-out
@@ -152,16 +145,19 @@ class _ReadOnlyTools(AgentMiddleware[AgentState[object], ChildContext]):
                 result = ToolMessage(content=public_error(exc), tool_call_id=request.tool_call["id"], status="error")
             if isinstance(result, ToolMessage):
                 output = raw_message_text(result)
-                await child.adapter._emit(child.parent, "subagent.tool.completed", {
-                    "subagent_id": child.subagent_id,
-                    "tool_call_id": request.tool_call["id"],
-                    "tool_name": request.tool_call["name"],
-                    "arguments": request.tool_call.get("args") or {},
-                    "output": output[:_TRANSCRIPT_LIMIT],
-                    "ok": result.status != "error",
-                    "duration_ms": round((time.monotonic() - started) * 1000),
-                    "truncated": len(output) > _TRANSCRIPT_LIMIT,
-                })
+                await child.parent.projection.emit(
+                    "subagent.tool.completed",
+                    {
+                        "subagent_id": child.subagent_id,
+                        "tool_call_id": request.tool_call["id"],
+                        "tool_name": request.tool_call["name"],
+                        "arguments": request.tool_call.get("args") or {},
+                        "output": output[:_TRANSCRIPT_LIMIT],
+                        "ok": result.status != "error",
+                        "duration_ms": round((time.monotonic() - started) * 1000),
+                        "truncated": len(output) > _TRANSCRIPT_LIMIT,
+                    },
+                )
             return result
 
         child = cast(ChildContext, request.runtime.context)
@@ -170,45 +166,67 @@ class _ReadOnlyTools(AgentMiddleware[AgentState[object], ChildContext]):
         return await child.scope.create_task(read())
 
     async def _read(
-        self, request: ToolCallRequest,
+        self,
+        request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[str]]],
     ) -> ToolMessage | Command[str]:
         child = cast(ChildContext, request.runtime.context)
-        adapter, parent = child.adapter, child.parent
+        parent = child.parent
         # Re-check revocation and the actual workspace on every read, including replay.
-        await self.refresh_authority(child)
+        await refresh_child_authority(child, self._execution_metadata)
         call = request.tool_call
-        decision = adapter._policy_decision(call["name"], dict(call.get("args") or {}), child)
+        decision = self._evaluate_tool(call["name"], dict(call.get("args") or {}), child)
         if call["name"] not in READ_TOOLS or decision.outcome != "allow":
             return ToolMessage(content=decision.reason, tool_call_id=call["id"], status="error")
         # Parallel reads retain the authority captured for their own admission;
         # another read's refresh must not mutate an already-running tool context.
-        authority = replace(child, execution_metadata={
-            **child.execution_metadata,
-            "sandbox_mode": decision.sandbox_mode, "allow_network": decision.allow_network,
-        })
+        authority = replace(
+            child,
+            execution_metadata={
+                **child.execution_metadata,
+                "sandbox_mode": decision.sandbox_mode,
+                "allow_network": decision.allow_network,
+            },
+        )
         # ToolCallRequest's upstream field defaults to a None context, while
         # create_agent injects the ChildContext declared in context_schema.
         runtime = replace(cast(ToolRuntime[ChildContext], request.runtime), context=authority)
         request = replace(request, runtime=cast(ToolRuntime[None], runtime))
-        await adapter._emit(parent, "subagent.progress", {
-            "subagent_id": child.subagent_id, "tool_call_id": call["id"],
-            "tool_name": call["name"], "arguments": decision.arguments,
-            **child.model_info,
-        })
+        await parent.projection.emit(
+            "subagent.progress",
+            {
+                "subagent_id": child.subagent_id,
+                "tool_call_id": call["id"],
+                "tool_name": call["name"],
+                "arguments": decision.arguments,
+                **child.model_info,
+            },
+        )
         result = await handler(request.override(tool_call={**call, "args": decision.arguments}))
-        await adapter.repository.record_audit(
-            child.request.workspace_id, child.request.principal_id, "subagent.tool", call["name"],
+        await child.repository.record_audit(
+            child.request.workspace_id,
+            child.request.principal_id,
+            "subagent.tool",
+            call["name"],
             "failed" if isinstance(result, ToolMessage) and result.status == "error" else "success",
             {"task_id": child.request.task_id, "subagent_id": child.subagent_id, "risk": decision.risk.name},
         )
         return result
 
 
-def create_readonly_agent(model: Any, specs: Any, input_budget: int, max_calls: int) -> Any:
+def create_readonly_agent(
+    model: BaseChatModel,
+    specs: Any,
+    input_budget: int,
+    max_calls: int,
+    *,
+    evaluate_tool: ToolDecision,
+    execution_metadata: ExecutionMetadataProvider | None,
+) -> Any:
     middleware: list[AgentMiddleware[Any, Any, Any]] = [
         ModelCallLimitMiddleware(thread_limit=min(4, max_calls), exit_behavior="error"),
-        _ReadOnlyTools(), ContextBudgetMiddleware[ChildContext](input_budget),
+        _ReadOnlyTools(evaluate_tool, execution_metadata),
+        ContextBudgetMiddleware[ChildContext](input_budget),
     ]
     if isinstance(model, ChatAnthropic):
         middleware.append(AnthropicPromptCachingMiddleware())
@@ -243,9 +261,22 @@ class DelegateTool(BaseTool):
     )
     risk_level = 1
 
-    def __init__(self, graph: Any = None, model_info: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        graph: Any = None,
+        model_info: dict[str, Any] | None = None,
+        *,
+        execution_metadata: ExecutionMetadataProvider | None = None,
+        model_catalog: Callable[[str], Awaitable[list[dict[str, Any]]]] | None = None,
+        model_resolver: Callable[[str, str, str], Awaitable[tuple[str, BaseChatModel]]] | None = None,
+        readonly_graph: Callable[[str, BaseChatModel], Any] | None = None,
+    ) -> None:
         self.graph = graph
         self.model_info = model_info or {}
+        self._execution_metadata = execution_metadata
+        self._model_catalog = model_catalog
+        self._model_resolver = model_resolver
+        self._readonly_graph = readonly_graph
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
@@ -268,17 +299,21 @@ class DelegateTool(BaseTool):
         # that filtering without exposing it in the model-facing DelegateArgs.
         invoke.__annotations__ = get_type_hints(invoke, include_extras=True)
         return StructuredTool.from_function(
-            coroutine=invoke, name=self.name, description=self.description, args_schema=DelegateArgs,
+            coroutine=invoke,
+            name=self.name,
+            description=self.description,
+            args_schema=DelegateArgs,
         )
 
     async def _run(self, task: str, runtime: ToolRuntime[object], model_id: str, label: str) -> ToolMessage:
         parent = cast("RunContext", runtime.context)
-        adapter = parent.adapter
         call_id = str(runtime.tool_call_id)
         selected = dict(self.model_info) if not model_id or model_id == self.model_info.get("model_id") else {}
         try:
-            used, limit = await adapter.repository.reserve_subagent_call(
-                parent.request.workspace_id, parent.request.task_id, call_id,
+            used, limit = await parent.repository.reserve_subagent_call(
+                parent.request.workspace_id,
+                parent.request.task_id,
+                call_id,
             )
             # ToolRuntime provides the current checkpoint messages. Divide the
             # remaining input space across this batch, rather than giving each
@@ -293,10 +328,17 @@ class DelegateTool(BaseTool):
             result_limit = min(summary_target_tokens(input_budget), max(0, available) // batch_size)
             if result_limit <= _result_tokens(_TRUNCATED_RESULT):
                 raise DelegationError("父任务剩余上下文不足以接收子 Agent 结果，请先压缩上下文或缩小任务。")
-            await adapter._emit(parent, "subagent.queued", {
-                "subagent_id": call_id, "task": task, "used": used, "limit": limit,
-                "label": label, "requested_model_id": model_id,
-            })
+            await parent.projection.emit(
+                "subagent.queued",
+                {
+                    "subagent_id": call_id,
+                    "task": task,
+                    "used": used,
+                    "limit": limit,
+                    "label": label,
+                    "requested_model_id": model_id,
+                },
+            )
             async with parent.child_slots:
                 graph = self.graph
                 if model_id and model_id != self.model_info.get("model_id"):
@@ -304,16 +346,16 @@ class DelegateTool(BaseTool):
                         raise DelegationError(
                             "该模型未获本轮子 Agent 授权，请在对话设置中允许后重新发起任务；未替换模型。"
                         )
-                    if adapter.model_resolver is None or adapter.model_catalog is None:
+                    if self._model_resolver is None or self._model_catalog is None or self._readonly_graph is None:
                         raise DelegationError("当前运行环境不支持独立子 Agent 模型。")
-                    catalog = await adapter.model_catalog(parent.request.workspace_id)
+                    catalog = await self._model_catalog(parent.request.workspace_id)
                     selected = next((item for item in catalog if item["model_id"] == model_id), {})
                     if not selected:
                         raise DelegationError("指定的模型配置已不存在，请重新配置；未替换模型。")
                     # Same Core-owned SDK/client factory as chat. No child owns
                     # or closes shared transports, and no fallback route is tried.
-                    key, model = await adapter.model_resolver(parent.request.workspace_id, model_id, "")
-                    graph = adapter.readonly_graph(key, model)
+                    key, model = await self._model_resolver(parent.request.workspace_id, model_id, "")
+                    graph = self._readonly_graph(key, model)
                     selected = {
                         **selected,
                         "model": getattr(model, "model_name", None) or getattr(model, "model", selected["model"]),
@@ -337,17 +379,25 @@ class DelegateTool(BaseTool):
                     {**selected, "label": label},
                     result_token_limit=result_limit,
                 )
-                await adapter._emit(parent, "subagent.started", {
-                    "subagent_id": call_id, "task": task, **child.model_info,
-                })
+                await parent.projection.emit(
+                    "subagent.started",
+                    {
+                        "subagent_id": call_id,
+                        "task": task,
+                        **child.model_info,
+                    },
+                )
                 # Tags keep inherited child model streams out of the main reply.
                 config = {**runtime.config, "tags": [*runtime.config.get("tags", []), CHILD_TAG]}
                 async with asyncio.timeout(120):
                     async with asyncio.TaskGroup() as reads:
                         child.scope = reads
-                        await _ReadOnlyTools.refresh_authority(child)
+                        await refresh_child_authority(child, self._execution_metadata)
                         result = await graph.ainvoke(
-                            {"messages": [HumanMessage(content=task)]}, config=config, context=child, durability="sync",
+                            {"messages": [HumanMessage(content=task)]},
+                            config=config,
+                            context=child,
+                            durability="sync",
                         )
                 last = result["messages"][-1]
                 if not isinstance(last, AIMessage) or last.tool_calls:
@@ -363,8 +413,8 @@ class DelegateTool(BaseTool):
                 summary = _bounded_result(
                     answer, result_limit, incomplete=reason in {"length", "max_tokens", "max_output_tokens"}
                 )
-                await adapter._emit(
-                    parent, "subagent.completed", {"subagent_id": call_id, "summary": summary, **child.model_info}
+                await parent.projection.emit(
+                    "subagent.completed", {"subagent_id": call_id, "summary": summary, **child.model_info}
                 )
                 return ToolMessage(
                     content=summary,
@@ -376,7 +426,7 @@ class DelegateTool(BaseTool):
                     },
                 )
         except asyncio.CancelledError:
-            await adapter._emit(parent, "subagent.cancelled", {"subagent_id": call_id, **selected, "label": label})
+            await parent.projection.emit("subagent.cancelled", {"subagent_id": call_id, **selected, "label": label})
             raise
         except Exception as exc:
             # Recoverable failures become native tool results; TaskGroup won't
@@ -393,8 +443,7 @@ class DelegateTool(BaseTool):
                 summary = "子 Agent 执行超时，请缩小任务范围后重试；未切换模型。"
             else:
                 summary = f"子 Agent 执行失败（{type(exc).__name__}），请检查模型配置与任务预算；未切换模型。"
-            await adapter._emit(
-                parent,
+            await parent.projection.emit(
                 "subagent.failed",
                 {
                     "subagent_id": call_id,
@@ -410,8 +459,9 @@ _TRUNCATED_RESULT = "[结果超出本轮摘要预算，仅保留完整段落；�
 
 
 def _result_tokens(text: str) -> int:
-    return count_tokens_approximately([ToolMessage(content=text, tool_call_id="delegate", name="delegate")],
-                                      use_usage_metadata_scaling=False)
+    return count_tokens_approximately(
+        [ToolMessage(content=text, tool_call_id="delegate", name="delegate")], use_usage_metadata_scaling=False
+    )
 
 
 def _bounded_result(text: str, limit: int, *, incomplete: bool = False) -> str:
@@ -463,8 +513,14 @@ class ListSubagentModelsTool(BaseTool):
     )
     risk_level = 1
 
-    def __init__(self, model_info: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        model_info: dict[str, Any] | None = None,
+        *,
+        model_catalog: Callable[[str], Awaitable[list[dict[str, Any]]]] | None = None,
+    ) -> None:
         self.model_info = model_info or {}
+        self._model_catalog = model_catalog
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
@@ -476,9 +532,7 @@ class ListSubagentModelsTool(BaseTool):
     def to_langchain_tool(self) -> StructuredTool:
         async def invoke(runtime: ToolRuntime[object], model_id: str = "") -> ToolMessage:
             parent = cast("RunContext", runtime.context)
-            catalog = (
-                await parent.adapter.model_catalog(parent.request.workspace_id) if parent.adapter.model_catalog else []
-            )
+            catalog = await self._model_catalog(parent.request.workspace_id) if self._model_catalog else []
             # Empty allowlist means parent model only, never all configured models.
             available = {item["model_id"]: item for item in catalog if item["model_id"] in parent.subagent_model_ids}
             if self.model_info:

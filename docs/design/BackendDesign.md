@@ -29,12 +29,15 @@ Vue Web / Electron Renderer
 | `api/credentials.py` | OS keyring 引用与 Core 内存凭证准备；不接管审批策略 |
 | `api/workspace.py` / `workspace_fs.py` | 已登记目录的浏览、预览、空文件创建、系统文件夹打开和只读 Git 查询 |
 | `models/discovery.py` | 有时间、分页与大小上限的服务端模型目录查询 |
+| `conversations.py` | 会话、工作区登记、默认权限与设置校验；复用 Repository 事务，不持有 Runtime |
 
 协议层不能运行第二套 Agent Loop、审批状态机、续接数据或事件仓库。`AgentCore` 与 Repository 的现有命令被直接复用，不为去掉 RPC 再造 Service/Manager 框架。
 
 Core 的扩展数据归入 `extensions.ExtensionCatalog`：已应用配置、ToolRegistry、Skill 目录、MCP 连接及临时凭证由同一个快照持有。目录自身负责凭证筛选、健康连接复用、工具重新发现及候选连接状态；Core 仍负责运行准入、准备候选快照、同时切换目录与 graph，以及按顺序关闭旧资源。失败时只清理候选新建的连接，不关闭复用的现有连接；不引入通用插件生命周期。
 
-模型配置、凭证同步与统计接口直接调用现有 `core.models`；记忆管理接口调用 `core.memories`（`memory.notes.FolderMemories`）。后者集中保存内容校验、敏感信息拒绝、文件夹作用域和开关管理，路径解析仍复用 Core 的工作区检查，写入与审计仍由 Repository 提交。仓库中无调用方的六个 Core 模型转发方法已移除，模型配置读写/列表/删除/默认值/连接验证统一使用 `core.models`；仍有调用方的入口保留显式委托。记忆对象不缓存记忆、开关或模型请求，不接入预留的 MemorySystem。
+会话与工作区管理通过 `core.conversations`（`ConversationService`）执行：API 只做传输与凭证准备，产品层负责名称、模型/思考配置、子 Agent 模型选择、目录与权限校验。Core 原有会话方法仅保留签名兼容的薄转发，新调用直接使用服务。服务通过窄回调检查活跃运行、清理会话 checkpoint 和查询进程，回调在调用时解析当前 Runtime，避免扩展重载后继续指向已关闭实例；根任务、资源关闭与扩展切换仍由 Core/Runtime 持有。Repository 的锁、SQL 与业务事务未改变。
+
+模型配置、凭证同步与统计接口直接调用现有 `core.models`；记忆管理接口调用 `core.memories`（`memory.notes.FolderMemories`）。后者集中保存内容校验、敏感信息拒绝、文件夹作用域和开关管理，路径解析复用 ConversationService 的工作区检查，写入与审计仍由 Repository 提交。仓库中无调用方的六个 Core 模型转发方法已移除，模型配置读写/列表/删除/默认值/连接验证统一使用 `core.models`；仍有调用方的入口保留显式委托。记忆对象不缓存记忆、开关或模型请求，不接入预留的 MemorySystem。
 
 聊天、审批恢复、中断恢复和回答提问共用 `_wait_for_run`，统一消费事件、等待根任务及传播调用方取消。Core 的运行准入、扩展原子切换和资源关闭顺序不变；涉及活跃任务/进程的工作区删除仍保留在协调入口中。
 

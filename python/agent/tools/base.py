@@ -19,8 +19,7 @@ from agent.tools.execution_context import ExecutionMetadata
 from agent.tools.validator import ToolValidator
 
 if TYPE_CHECKING:
-    from agent.runtime.run_context import RunContext
-    from agent.runtime.subagents import ChildContext
+    from agent.runtime.run_context import ChildContext, RunContext
 
 
 class BaseTool(ABC):

@@ -266,7 +266,7 @@ class Credentials:
 
     async def prepare(self, workspace: str, conversation_id: str, task_id: str = "", *,
                       models_only: bool = False, tool_name: str = "") -> None:
-        conversation = await self.core.get_conversation(workspace, conversation_id)
+        conversation = await self.core.conversations.get_conversation(workspace, conversation_id)
         subagent_models_json = conversation["subagent_model_ids_json"]
         if task_id:
             task = await self.core.get_task(workspace, task_id)

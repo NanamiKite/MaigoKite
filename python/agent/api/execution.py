@@ -90,7 +90,7 @@ class Execution:
             await asyncio.gather(*active, return_exceptions=True)
 
     async def websocket(self, socket: WebSocket, workspace: str, conversation: str) -> None:
-        await self.core.get_conversation(workspace, conversation)
+        await self.core.conversations.get_conversation(workspace, conversation)
         await socket.accept()
         queue: asyncio.Queue[JSONObject] = asyncio.Queue(maxsize=64)
         overflow = asyncio.Event()

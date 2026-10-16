@@ -5,15 +5,18 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from agent.config_manager import ConfigManager
 from agent.data_contracts import JSONObject
+from agent.errors import UserFacingError
 from agent.models.context_capacity import ContextCapacity
 from agent.models.runtime import ChatModelRuntime, ChatModelSettings
 from agent.models.usage import message_usage
 from agent.repository import SQLiteRepository
 from agent.runtime import LangGraphRuntime, ProductToolSpec, RuntimeRunRequest
 from agent.runtime.context import ContextBudgetExceeded, ContextBudgetMiddleware, SafeSummarizationMiddleware
+from agent.runtime.run_context import ChildContext, RunContext
 from agent.skill_registry import SkillDefinition, SkillRegistry
 from agent.tools.native.skill import SkillTool
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
@@ -31,7 +34,7 @@ from langgraph.runtime import Runtime
 from pydantic import Field
 
 from tests.fixtures.chat_model import FakeModel
-from tests.fixtures.runtime_context import BudgetContext
+from tests.fixtures.runtime_context import budget_context
 
 
 class InspectModel(BaseChatModel):
@@ -98,23 +101,31 @@ async def test_context_budget_preserves_messages_and_counts_tools():
     # Count tools without altering conversation messages or stable system instructions.
     messages = [HumanMessage("hello"), AIMessage("answer"), HumanMessage("next")]
     original = list(messages)
-    request = ModelRequest(model=InspectModel(), messages=messages, system_message=SystemMessage("stable rules"),
-                              tools=[], runtime=Runtime(context=BudgetContext(
-                                  context_capacity=ContextCapacity(256, "test", "known"))))
     seen = []
     async def handler(value):
         seen.append(value)
         return ModelResponse(result=[])
-    await ContextBudgetMiddleware(500).awrap_model_call(request, handler)
-    assert messages == original and len(seen) == 1
-    assert seen[0].messages == original and seen[0].system_message == request.system_message
-    request = request.override(tools=[{
-        "type": "function", "function": {"name": "large", "description": "schema documentation" * 100,
-                                        "parameters": {"type": "object", "properties": {}}},
-    }])
-    with pytest.raises(ContextBudgetExceeded):
-        await ContextBudgetMiddleware(100).awrap_model_call(request, handler)
-    assert len(seen) == 1
+    async with budget_context(capacity=ContextCapacity(256, "test", "known")) as context:
+        request = ModelRequest(
+            model=InspectModel(), messages=messages, system_message=SystemMessage("stable rules"),
+            tools=[], runtime=Runtime(context=context),
+        )
+        await ContextBudgetMiddleware(500).awrap_model_call(request, handler)
+        assert messages == original and len(seen) == 1
+        assert seen[0].messages == original and seen[0].system_message == request.system_message
+        request = request.override(tools=[{
+            "type": "function", "function": {"name": "large", "description": "schema documentation" * 100,
+                                            "parameters": {"type": "object", "properties": {}}},
+        }])
+        with pytest.raises(ContextBudgetExceeded):
+            await ContextBudgetMiddleware(100).awrap_model_call(request, handler)
+        assert len(seen) == 1
+        task = await context.repository.get_task("personal", context.request.task_id)
+        assert task["model_calls_used"] == 1
+        events = await context.repository.list_task_events("personal", context.request.conversation_id)
+        kinds = [item["event_type"] for item in events]
+        assert kinds.count("model.call.started") == kinds.count("model.call.completed") == 1
+        assert kinds.count("context.updated") == 2
 
 
 @pytest.mark.asyncio
@@ -127,33 +138,32 @@ async def test_context_budget_counts_result_schema_before_model_call(structured:
         },
         "required": ["answer"],
     } if structured else None
-    context = BudgetContext(
-        request=RuntimeRunRequest(output_schema=schema),
-        context_capacity=ContextCapacity(256, "test", "known"),
-    )
     messages = [HumanMessage("short request")]
     original = list(messages)
-    request = ModelRequest(
-        model=InspectModel(), messages=messages, tools=[], runtime=Runtime(context=context),
-    )
     calls = 0
 
-    async def handler(value: ModelRequest[BudgetContext]) -> ModelResponse:
+    async def handler(value: ModelRequest[RunContext]) -> ModelResponse:
         nonlocal calls
         calls += 1
         assert value.messages == original
         assert value.tools == []
         return ModelResponse(result=[])
 
-    middleware = ContextBudgetMiddleware[BudgetContext](256)
-    if structured:
-        with pytest.raises(ContextBudgetExceeded):
+    async with budget_context(capacity=ContextCapacity(256, "test", "known"), output_schema=schema) as context:
+        request = ModelRequest(
+            model=InspectModel(), messages=messages, tools=[], runtime=Runtime(context=context),
+        )
+        middleware = ContextBudgetMiddleware[RunContext](256)
+        if structured:
+            with pytest.raises(ContextBudgetExceeded):
+                await middleware.awrap_model_call(request, handler)
+        else:
             await middleware.awrap_model_call(request, handler)
-    else:
-        await middleware.awrap_model_call(request, handler)
-    assert calls == (0 if structured else 1)
-    assert messages == original
-    assert context.request.output_schema == schema
+        assert calls == (0 if structured else 1)
+        assert messages == original
+        assert context.request.output_schema == schema
+        task = await context.repository.get_task("personal", context.request.task_id)
+        assert task["model_calls_used"] == calls
 
 
 @pytest.mark.asyncio
@@ -166,14 +176,73 @@ async def test_oversized_current_turn_fails_without_slicing(tool_result):
             ToolMessage(content="large output" * 1000, tool_call_id="read"),
         ])
     original = list(messages)
-    request = ModelRequest(model=InspectModel(), messages=messages, system_message=None, tools=[],
-                              runtime=Runtime(context=BudgetContext(
-                                  context_capacity=ContextCapacity(50, "test", "known"))))
     async def forbidden(_request):
         raise AssertionError("oversized request reached the model")
-    with pytest.raises(ContextBudgetExceeded):
-        await ContextBudgetMiddleware(50).awrap_model_call(request, forbidden)
-    assert messages == original
+    async with budget_context(capacity=ContextCapacity(50, "test", "known")) as context:
+        request = ModelRequest(
+            model=InspectModel(), messages=messages, system_message=None, tools=[], runtime=Runtime(context=context),
+        )
+        with pytest.raises(ContextBudgetExceeded):
+            await ContextBudgetMiddleware(50).awrap_model_call(request, forbidden)
+        assert messages == original
+        task = await context.repository.get_task("personal", context.request.task_id)
+        assert task["model_calls_used"] == 0
+
+
+@pytest.mark.asyncio
+async def test_shared_budget_reserves_final_parent_call() -> None:
+    calls = 0
+
+    async def handler(_request: ModelRequest[RunContext | ChildContext]) -> ModelResponse:
+        nonlocal calls
+        calls += 1
+        return ModelResponse(result=[])
+
+    async with budget_context(model_call_limit=3) as parent:
+        child = ChildContext(parent, "child-1", parent.request, {}, {"model": "test-child"})
+        model = InspectModel(profile={"max_input_tokens": 1024})
+        middleware = ContextBudgetMiddleware[RunContext | ChildContext](1024)
+        child_request = ModelRequest(
+            model=model, messages=[HumanMessage("child request")], tools=[], runtime=Runtime(context=child),
+        )
+        for _ in range(2):
+            await middleware.awrap_model_call(child_request, handler)
+        with pytest.raises(UserFacingError, match="共享模型调用预算已用完"):
+            await middleware.awrap_model_call(child_request, handler)
+        assert calls == 2
+        events = await parent.repository.list_task_events("personal", parent.request.conversation_id)
+        assert not any(event["event_type"] == "context.updated" for event in events)
+        started = [event["payload"] for event in events if event["event_type"] == "model.call.started"]
+        assert len(started) == 2
+        assert all(event["purpose"] == "subagent" and event["subagent_id"] == "child-1" for event in started)
+
+        parent_request = child_request.override(runtime=Runtime(context=parent))
+        await middleware.awrap_model_call(parent_request, handler)
+        with pytest.raises(UserFacingError, match="共享模型调用预算已用完"):
+            await middleware.awrap_model_call(parent_request, handler)
+        task = await parent.repository.get_task("personal", parent.request.task_id)
+        assert calls == task["model_calls_used"] == task["model_call_limit"] == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("child_run", [False, True], ids=["parent", "child"])
+async def test_cancelled_task_cannot_spend_model_budget(child_run: bool) -> None:
+    async def forbidden(_request: ModelRequest[RunContext | ChildContext]) -> ModelResponse:
+        raise AssertionError("cancelled task reached the model")
+
+    async with budget_context() as parent:
+        context = ChildContext(parent, "child-1", parent.request, {}, {}) if child_run else parent
+        await parent.repository.update_task_status(parent.request.task_id, "cancelled")
+        request = ModelRequest(
+            model=InspectModel(profile={"max_input_tokens": 1024}),
+            messages=[HumanMessage("do not execute")], tools=[], runtime=Runtime(context=context),
+        )
+        with pytest.raises(UserFacingError, match="任务已停止"):
+            await ContextBudgetMiddleware(1024).awrap_model_call(request, forbidden)
+        task = await parent.repository.get_task("personal", parent.request.task_id)
+        assert task["model_calls_used"] == 0
+        events = await parent.repository.list_task_events("personal", parent.request.conversation_id)
+        assert not any(event["event_type"] == "model.call.started" for event in events)
 
 
 def test_cache_usage_preserves_nested_details_but_does_not_invent_missing_values():
@@ -222,20 +291,24 @@ async def test_summary_failure_preserves_original_state_and_system_rules():
         HumanMessage("current request"),
     ]
     state = {"messages": messages}
-    runtime = Runtime(context=BudgetContext(context_capacity=ContextCapacity(8000, "test", "known")))
-    middleware = SafeSummarizationMiddleware(
-        InspectModel(summary_error=True),
-        input_budget=8000,
-    )
-    with pytest.raises(ContextBudgetExceeded, match="压缩失败"):
-        await middleware.abefore_model(state, runtime)
-    assert state["messages"] == messages
-    assert messages[0].content == "NEVER discard this rule"
-    middleware.model = InspectModel()
-    update = await middleware.abefore_model(state, runtime)
-    assert update is not None
-    assert update["messages"][1] == messages[0]
-    assert update["messages"][-1] == messages[-1]
+    async with budget_context(capacity=ContextCapacity(8000, "test", "known")) as context:
+        runtime = Runtime(context=context)
+        failed_model = InspectModel(summary_error=True)
+        middleware = SafeSummarizationMiddleware(failed_model, input_budget=8000)
+        with pytest.raises(ContextBudgetExceeded, match="压缩失败"):
+            await middleware.abefore_model(state, runtime)
+        assert len(failed_model.requests) == 1
+        assert state["messages"] == messages
+        assert messages[0].content == "NEVER discard this rule"
+        assert context.compaction_receipt is None
+        middleware.model = InspectModel()
+        update = await middleware.abefore_model(state, runtime)
+        assert update is not None
+        assert update["messages"][1] == messages[0]
+        assert update["messages"][-1] == messages[-1]
+        assert context.compaction_receipt is not None
+        task = await context.repository.get_task("personal", context.request.task_id)
+        assert task["model_calls_used"] == 2  # Failed summaries still consume a request.
 
 
 @pytest.mark.asyncio
@@ -244,13 +317,14 @@ async def test_summary_request_over_budget_preserves_history_without_model_call(
     middleware = SafeSummarizationMiddleware(model, input_budget=1000)
     messages = [HumanMessage("old " * 1000), AIMessage("answer " * 1000), HumanMessage("current request")]
     state = {"messages": messages}
-    with pytest.raises(ContextBudgetExceeded, match="压缩失败"):
-        await middleware.abefore_model(
-            state, Runtime(context=BudgetContext(
-                context_capacity=ContextCapacity(1024, "test", "known"))))
-    assert model.requests == []
-    assert state["messages"] == messages
-    assert messages[-1].content == "current request"
+    async with budget_context(capacity=ContextCapacity(1024, "test", "known")) as context:
+        with pytest.raises(ContextBudgetExceeded, match="压缩失败"):
+            await middleware.abefore_model(state, Runtime(context=context))
+        assert model.requests == []
+        assert state["messages"] == messages
+        assert messages[-1].content == "current request"
+        task = await context.repository.get_task("personal", context.request.task_id)
+        assert task["model_calls_used"] == 0
 
 
 @pytest.mark.asyncio
@@ -266,12 +340,12 @@ async def test_compaction_keeps_latest_user_request_and_tool_pair():
         InspectModel(),
         input_budget=8000,
     )
-    update = await middleware.abefore_model(
-        {"messages": messages}, Runtime(context=BudgetContext(
-            context_capacity=ContextCapacity(8000, "test", "known"))),
-    )
-    assert update is not None
-    assert update["messages"][-3:] == messages[-3:]
+    async with budget_context(capacity=ContextCapacity(8000, "test", "known")) as context:
+        update = await middleware.abefore_model({"messages": messages}, Runtime(context=context))
+        assert update is not None
+        assert update["messages"][-3:] == messages[-3:]
+        task = await context.repository.get_task("personal", context.request.task_id)
+        assert task["model_calls_used"] == 1
 
 
 @pytest.mark.asyncio
@@ -400,10 +474,18 @@ async def test_skill_workflow_instructions_load_only_on_demand(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_credential_rotation_changes_graph_cache_key_without_closing_active_client():
+async def test_credential_rotation_changes_graph_cache_key_without_closing_active_client(monkeypatch):
+    # Rotate real provider clients without depending on the public catalog's uptime.
+    def unavailable(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://models.dev/api.json"
+        assert "authorization" not in request.headers
+        return httpx.Response(503, json={"error": "test catalog unavailable"})
+
     repository = SQLiteRepository(":memory:")
     await repository.open()
     runtime = ChatModelRuntime(ConfigManager(), repository)
+    metadata_client = httpx.AsyncClient(transport=httpx.MockTransport(unavailable))
+    monkeypatch.setattr(runtime, "_metadata_http_client", lambda: metadata_client)
     try:
         profile = await runtime.upsert_settings(
             "personal",
@@ -421,8 +503,11 @@ async def test_credential_rotation_changes_graph_cache_key_without_closing_activ
         assert next_key != key and next_model is not model
         assert not model.root_async_client.is_closed()
     finally:
-        await runtime.close()
-        await repository.close()
+        try:
+            await runtime.close()
+        finally:
+            await metadata_client.aclose()
+            await repository.close()
     assert model.root_async_client.is_closed()
     assert next_model.root_async_client.is_closed()
 

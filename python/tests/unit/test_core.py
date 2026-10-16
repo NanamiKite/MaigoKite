@@ -248,6 +248,9 @@ async def test_provider_reasoning_and_think_blocks_are_not_final_message_content
     assert result["response"]=="最终答案。"
     assert summaries==["检查上下文。\n\n规划回答。"]
     assert visible==["最终答案。"]
+    assert [payload["content"] for kind, payload in events if kind == "message.completed"] == ["最终答案。"]
+    messages = await core.list_messages(conversation["id"])
+    assert [item["content"] for item in messages if item["role"] == "assistant"] == ["最终答案。"]
 
 
 @pytest.mark.asyncio

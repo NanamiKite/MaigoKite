@@ -250,11 +250,11 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
 
     @router.get("/permissions", response_model=None)
     async def permissions(workspace_id: str) -> dict[str, object]:
-        return await core.get_permission_settings(workspace_id)
+        return await core.conversations.get_permission_settings(workspace_id)
 
     @router.patch("/permissions", dependencies=owner_only, response_model=None)
     async def update_permissions(workspace_id: str, body: dto.Permissions) -> dict[str, object]:
-        return await core.update_permission_settings(workspace_id, **body.model_dump())
+        return await core.conversations.update_permission_settings(workspace_id, **body.model_dump())
 
     async def safety_view(workspace_id: str) -> dict[str, object]:
         # The key stays in the credential store; only its presence is exposed.

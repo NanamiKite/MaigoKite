@@ -3,19 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from langchain_core.messages import ToolCall as NativeToolCall
 
 from agent.data_contracts import AuthorizationRecord, JSONObject, PermissionMode
 from agent.media import ImageReference
 from agent.models.context_capacity import ContextCapacity
+from agent.repository import SQLiteRepository
 from agent.runtime.projection import RunProjection
 from agent.tools.execution_context import ExecutionMetadata
-
-if TYPE_CHECKING:
-    from agent.runtime.langgraph_runtime import LangGraphRuntime
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +32,7 @@ class RuntimeRunRequest:
 
 @dataclass(slots=True)
 class RunContext:
-    adapter: LangGraphRuntime
+    repository: SQLiteRepository
     request: RuntimeRunRequest
     projection: RunProjection
     execution_metadata: ExecutionMetadata = field(default_factory=ExecutionMetadata)
@@ -58,3 +57,22 @@ class RunContext:
     @property
     def terminal_emitted(self) -> bool:
         return self.projection.terminal_delivered
+
+
+ExecutionMetadataProvider = Callable[[RuntimeRunRequest], Awaitable[ExecutionMetadata]]
+
+
+@dataclass(slots=True)
+class ChildContext:
+    parent: RunContext
+    subagent_id: str
+    request: RuntimeRunRequest
+    execution_metadata: ExecutionMetadata
+    model_info: dict[str, Any]
+    scope: asyncio.TaskGroup | None = None
+    context_capacity: ContextCapacity | None = None
+    result_token_limit: int = 0
+
+    @property
+    def repository(self) -> SQLiteRepository:
+        return self.parent.repository

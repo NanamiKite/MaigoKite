@@ -12,9 +12,9 @@ import uuid
 from collections import defaultdict
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import aclosing
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
@@ -25,7 +25,6 @@ from langchain.agents.middleware import (
 )
 from langchain.agents.middleware.human_in_the_loop import InterruptOnConfig
 from langchain.agents.middleware.types import (
-    AgentState,
     ToolCallRequest,
 )
 from langchain.agents.structured_output import StructuredOutputError, ToolStrategy
@@ -42,13 +41,9 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.messages import ToolCall as NativeToolCall
-from langchain_core.tools import StructuredTool
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.errors import GraphInterrupt
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
-from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
-from langgraph.typing import ContextT
 
 from agent.data_contracts import (
     ApprovalNotice,
@@ -58,19 +53,20 @@ from agent.data_contracts import (
     approval_notice,
     available_approval_scopes,
 )
-from agent.errors import UserFacingCancellation, UserFacingError, public_error
+from agent.errors import UserFacingError, public_error
 from agent.media import IMAGE_LIMIT, ImageReference
 from agent.models.reasoning import message_text
 from agent.repository import ConversationBusyError, SQLiteRepository
 from agent.runtime.context import ContextBudgetMiddleware, SafeSummarizationMiddleware
 from agent.runtime.images import image_message
 from agent.runtime.product_tools import ProductToolMiddleware
+from agent.runtime.product_tools import ProductToolSpec as ProductToolSpec
 from agent.runtime.product_tools import tool_call_id as _tool_call_id
 from agent.runtime.projection import END_OF_EVENTS, EventPublisher, MaigoKiteEvent, RunProjection, publish_event
 from agent.runtime.prompt_safety import PromptSafetyMiddleware
 from agent.runtime.run_context import RunContext
 from agent.runtime.run_context import RuntimeRunRequest as RuntimeRunRequest
-from agent.runtime.subagents import CHILD_TAG, ChildContext, DelegateTool, ListSubagentModelsTool, create_readonly_agent
+from agent.runtime.subagents import CHILD_TAG, DelegateTool, ListSubagentModelsTool, create_readonly_agent
 from agent.safety import SafetyReviewer
 from agent.structured_output import (
     OUTPUT_TOOL_NAME,
@@ -78,22 +74,12 @@ from agent.structured_output import (
     response_schema,
     validate_output_schema,
 )
-from agent.tools.base import BaseTool
 from agent.tools.execution_context import ExecutionMetadata
 from agent.tools.native.file_read import FileReadTool
 from agent.tools.native.file_write import FileWriteTool
-from agent.tools.permission_mgr import PermissionManager, PolicyDecision, RiskLevel
-from agent.tools.validator import ToolValidator, ValidationError
+from agent.tools.permission_mgr import PermissionManager, PolicyDecision
 
 ModelResolver = Callable[[str, str, str], Awaitable[tuple[str, BaseChatModel]]]
-
-
-@dataclass(frozen=True, slots=True)
-class ProductToolSpec:
-    """Pair permission metadata with the tool callable passed to LangChain."""
-
-    tool: BaseTool
-    runtime_tool: StructuredTool
 
 
 class RunHandle:
@@ -205,10 +191,13 @@ class LangGraphRuntime:
             self.tool_specs = list(tools)
         # Tool order is part of the provider's reusable prompt prefix.
         self.tool_specs.sort(key=lambda spec: spec.tool.name)
-        self._specs_by_name = {spec.tool.name: spec for spec in self.tool_specs}
-        self._validator = ToolValidator(
-            lambda name: self._specs_by_name[name].tool.parameters_schema
-            if name in self._specs_by_name else None
+        self._tool_middleware = ProductToolMiddleware(
+            self.repository,
+            policy=self.policy,
+            workspace_root=self.workspace_root,
+            tools={spec.tool.name: spec.tool for spec in self.tool_specs},
+            execution_metadata=self._execution_metadata,
+            interrupt_tool=self._interrupt_tool,
         )
         self._checkpointer_context: Any | None = None
         self._checkpointer: AsyncSqliteSaver | None = None
@@ -238,7 +227,8 @@ class LangGraphRuntime:
         """Cache compiled native child graphs, not execution state or HTTP clients."""
         if key not in self._readonly_graphs:
             self._readonly_graphs[key] = create_readonly_agent(
-                model, self.tool_specs, self.context_max_tokens, self.max_model_calls
+                model, self.tool_specs, self.context_max_tokens, self.max_model_calls,
+                evaluate_tool=self._tool_middleware.evaluate, execution_metadata=self._execution_metadata,
             )
         return self._readonly_graphs[key]
 
@@ -246,14 +236,21 @@ class LangGraphRuntime:
         self, model: BaseChatModel, model_info: dict[str, Any] | None = None,
         *, output_schema: JSONObject | None = None,
     ) -> Any:
-        if output_schema is not None and OUTPUT_TOOL_NAME in self._specs_by_name:
+        if output_schema is not None and any(spec.tool.name == OUTPUT_TOOL_NAME for spec in self.tool_specs):
             raise UserFacingError("工具名称与结构化结果保留名称冲突，请停用同名扩展。")
-        child = create_readonly_agent(model, self.tool_specs, self.context_max_tokens, self.max_model_calls)
+        child = create_readonly_agent(
+            model, self.tool_specs, self.context_max_tokens, self.max_model_calls,
+            evaluate_tool=self._tool_middleware.evaluate, execution_metadata=self._execution_metadata,
+        )
         info = {**(model_info or {}), "model": getattr(model, "model_name", None) or getattr(model, "model", "")}
         runtime_tools = [
-            DelegateTool(child, info).to_langchain_tool()
+            DelegateTool(
+                child, info, execution_metadata=self._execution_metadata,
+                model_catalog=self.model_catalog, model_resolver=self.model_resolver,
+                readonly_graph=self.readonly_graph,
+            ).to_langchain_tool()
             if spec.tool.name == "delegate"
-            else ListSubagentModelsTool(info).to_langchain_tool()
+            else ListSubagentModelsTool(info, model_catalog=self.model_catalog).to_langchain_tool()
             if spec.tool.name == "list_subagent_models"
             else spec.runtime_tool
             for spec in self.tool_specs
@@ -261,8 +258,8 @@ class LangGraphRuntime:
         interrupt_on: dict[str, bool | InterruptOnConfig] = {
             spec.tool.name: InterruptOnConfig(
                 allowed_decisions=["approve", "reject"],
-                when=self._should_interrupt,
-                description=self._approval_description,
+                when=self._tool_middleware.should_interrupt,
+                description=self._tool_middleware.approval_description,
             )
             for spec in self.tool_specs
         }
@@ -298,11 +295,7 @@ class LangGraphRuntime:
             # Append queued user input after compaction so it cannot be reduced
             # to a summary before its first consumption receipt.
             HumanInTheLoopMiddleware(interrupt_on),
-            ProductToolMiddleware(
-                self.repository,
-                refresh_authority=self._refresh_execution_metadata,
-                execute_tool=self._execute_product_tool_call,
-            ),
+            self._tool_middleware,
             PromptSafetyMiddleware(
                 self.repository, self._safety_reviewer, self._safety_settings, self._safety_credential,
             ),
@@ -415,89 +408,6 @@ class LangGraphRuntime:
                 return graph
             self._graphs[key] = graph
         return graph
-
-    def _policy_decision(
-        self, name: str, arguments: dict[str, Any], context: RunContext | ChildContext, *, approved: bool = False,
-    ) -> PolicyDecision:
-        spec = self._specs_by_name.get(name)
-        enabled = context.execution_metadata.get("enabled_tools", self._specs_by_name)
-        if spec is None or name not in enabled:
-            return PolicyDecision("deny", RiskLevel.L5, "tool is not enabled for this run", arguments)
-        try:
-            clean = self._validator.sanitize(name, arguments)
-        except ValidationError as exc:
-            return PolicyDecision("deny", RiskLevel.L5, str(exc), arguments)
-        if name == "web_search" and not clean.get("engine"):
-            keys = context.execution_metadata.get("api_keys", {})
-            clean["engine"] = "tavily" if keys.get("tavily") else "google" if keys.get("google") else "duckduckgo"
-        if name == "image_generate":
-            # Approval hashes bind the endpoint/model/options without exposing credentials.
-            clean["configuration"] = context.execution_metadata.get("image_configuration", "")
-        policy = self.policy.for_workspace(context.execution_metadata.get("workspace_root", self.workspace_root))
-        decision = policy.evaluate(
-            name,
-            clean,
-            approved=approved,
-            risk_override=getattr(spec.tool, "risk_level", None),
-            mode=context.execution_metadata.get("permission_mode", context.request.permission_mode),
-        )
-        # Only the parent can use its own explicitly scoped receipts. Child
-        # tools never inherit authorizations, even inside the same conversation.
-        if isinstance(context, RunContext) and decision.outcome == "approval_required" and decision.reuse_scope:
-            receipt = next(
-                (item for item in context.authorizations if policy.authorizes(item, decision)),
-                None,
-            )
-            if receipt is not None:
-                return replace(decision, outcome="allow", reason="allowed by scoped approval",
-                               authorization_id=receipt["approval_id"])
-        return decision
-
-    async def _refresh_execution_metadata(self, context: RunContext) -> None:
-        fresh = (await self._execution_metadata(context.request) if self._execution_metadata
-                 else context.execution_metadata.copy())
-        original = context.execution_metadata.get("enabled_tools", self._specs_by_name)
-        # Tool discovery stays stable for this run; revocations still apply.
-        fresh["enabled_tools"] = sorted(set(original) & set(fresh.get("enabled_tools", original)))
-        # Fetch authority last, after configuration/credential lookups. Even a
-        # fixed-model runtime must read live permissions, not its initial request.
-        mode, grants = await self.repository.execution_authority(
-            context.request.workspace_id, context.request.conversation_id,
-            context.request.principal_id, context.request.task_id,
-        )
-        fresh["permission_mode"] = self.policy.normalize_mode(mode)
-        # Replace rather than mutate: an already-started tool keeps its snapshot.
-        context.authorizations = grants
-        context.execution_metadata = fresh
-
-    def _should_interrupt(self, tool_request: ToolCallRequest) -> bool:
-        context = cast(RunContext, tool_request.runtime.context)
-        if context.review_call_ids and any(
-            call["id"] in context.review_call_ids for call in context.latest_tool_calls
-        ):
-            # Replay must consume the original native HITL batch. Newly gated
-            # calls are checked separately at their actual execution boundary.
-            return _tool_call_id(tool_request.tool_call) in context.review_call_ids
-        decision = self._policy_decision(
-            str(tool_request.tool_call["name"]),
-            dict(tool_request.tool_call.get("args") or {}),
-            context,
-        )
-        return decision.outcome == "approval_required"
-
-    def _approval_description(
-        self, tool_call: NativeToolCall, state: AgentState[object], runtime: Runtime[ContextT],
-    ) -> str:
-        decision = self._policy_decision(
-            str(tool_call["name"]),
-            dict(tool_call.get("args") or {}),
-            cast(RunContext, runtime.context),
-        )
-        return (
-            f"{decision.reason}\n"
-            f"Risk: {decision.risk.name}\n"
-            f"Scope: {decision.resource_scope}"
-        )
 
     async def start(
         self,
@@ -744,12 +654,13 @@ class LangGraphRuntime:
             if call is None:
                 raise ValueError("approval no longer matches the runtime checkpoint")
             review_context = RunContext(
-                self, request, RunProjection(self.repository, self._event_publisher, request, asyncio.Queue()),
+                self.repository, request,
+                RunProjection(self.repository, self._event_publisher, request, asyncio.Queue()),
             )
             if self._execution_metadata is not None:
                 review_context.execution_metadata = await self._execution_metadata(request)
-            policy = self._policy_decision(call["name"], call["args"], review_context)
-            if policy.outcome == "deny" or not self._matches_approval(pending, call["name"], policy):
+            policy = self._tool_middleware.evaluate(call["name"], call["args"], review_context)
+            if policy.outcome == "deny" or not self._tool_middleware.matches_approval(pending, call["name"], policy):
                 # Do not consume the user's version for a different normalized
                 # path/payload, even if the checkpoint reused the same call ID.
                 raise PermissionError("approval parameters or policy changed; cancel and start a new task")
@@ -976,7 +887,9 @@ class LangGraphRuntime:
         ))
         cancelled = product_task["status"] == "cancelled"
         queue: asyncio.Queue[MaigoKiteEvent | object] = asyncio.Queue()
-        context = RunContext(self, request, RunProjection(self.repository, self._event_publisher, request, queue))
+        context = RunContext(
+            self.repository, request, RunProjection(self.repository, self._event_publisher, request, queue),
+        )
         context.direct_tool = (
             None if cancelled else self._direct_tool_call(str(product_task["input_text"]), request.task_id)
         )
@@ -1043,12 +956,13 @@ class LangGraphRuntime:
                     "permission_mode": request.permission_mode,
                 }
             )
-            await self._refresh_execution_metadata(context)
+            await self._tool_middleware.refresh_authority(context)
+            tool_names = [spec.tool.name for spec in self.tool_specs]
             if context.max_subagent_calls == 0 or "delegate" not in context.execution_metadata.get(
-                "enabled_tools", self._specs_by_name
+                "enabled_tools", tool_names
             ):
                 context.execution_metadata["enabled_tools"] = [
-                    name for name in context.execution_metadata.get("enabled_tools", self._specs_by_name)
+                    name for name in context.execution_metadata.get("enabled_tools", tool_names)
                     if name not in {"delegate", "list_subagent_models"}
                 ]
             run_graph = True
@@ -1370,13 +1284,6 @@ class LangGraphRuntime:
                 ):
                     raise ValueError("delegate call IDs cannot be reused for another dispatch")
 
-    def _matches_approval(self, record: ApprovalRecord, name: str, decision: PolicyDecision) -> bool:
-        return (
-            record["tool_name"] == name
-            and record["risk_level"] == decision.risk.name
-            and self.repository.approval_matches_arguments(record, decision.arguments)
-        )
-
     @staticmethod
     def _review_calls(interrupts: Any, ordered_calls: Sequence[NativeToolCall]) -> list[NativeToolCall]:
         """Match native HITL actions to the checkpoint's ordered call IDs."""
@@ -1400,16 +1307,6 @@ class LangGraphRuntime:
                 calls.append(remaining.pop(index))
         return calls
 
-    async def _review_records(self, context: RunContext) -> dict[str, ApprovalRecord]:
-        records: dict[str, ApprovalRecord] = {}
-        for status in ("pending", "consumed", "rejected", "expired"):
-            for record in await self.repository.list_approvals(
-                context.request.workspace_id, context.request.conversation_id, status
-            ):
-                if record["task_id"] == context.request.task_id:
-                    records[str(record["tool_call_id"])] = record
-        return records
-
     async def _review_resume_input(
         self, interrupts: Any, context: RunContext
     ) -> Command[Any] | None:
@@ -1425,16 +1322,16 @@ class LangGraphRuntime:
         context.boundary_review_ids = {
             _tool_call_id(call) for call in self._review_calls(boundary_interrupts, context.latest_tool_calls)
         }
-        records = await self._review_records(context)
+        records = await self._tool_middleware.review_records(context)
         reviewed = [records.get(_tool_call_id(call)) for call in calls]
         if any(record and record["status"] == "expired" for record in reviewed):
             raise PermissionError("approval has expired; start a new task")
         decisions: list[dict[str, Any]] = []
         for call, record in zip(calls, reviewed, strict=True):
             if record is not None and record["status"] == "rejected":
-                decisions.append({"type": "reject", "message": self._rejection_message(record)})
+                decisions.append({"type": "reject", "message": self._tool_middleware.rejection_message(record)})
                 continue
-            decision = self._policy_decision(call["name"], call["args"], context)
+            decision = self._tool_middleware.evaluate(call["name"], call["args"], context)
             if record is None and decision.authorization_id:
                 # Native HITL still resumes the complete original batch. A
                 # receipt can cover later siblings without inventing approvals.
@@ -1442,7 +1339,7 @@ class LangGraphRuntime:
                 continue
             if record is None or record["status"] != "consumed":
                 return None
-            if decision.outcome == "deny" or not self._matches_approval(record, call["name"], decision):
+            if decision.outcome == "deny" or not self._tool_middleware.matches_approval(record, call["name"], decision):
                 raise PermissionError("approved arguments no longer match the checkpoint tool call")
             decisions.append({"type": "approve"})
         # Native interrupt IDs also cover separate ToolNode boundary interrupts.
@@ -1456,17 +1353,6 @@ class LangGraphRuntime:
             offset += count
         return Command(resume=responses)
 
-    @staticmethod
-    def _rejection_message(record: ApprovalRecord | None) -> str:
-        message = (
-            "The user rejected this operation. It was not executed. "
-            "Do not retry it or bypass the refusal using another tool unless the user explicitly requests it. "
-            "Continue the permitted parts of the task; if the goal requires this operation, explain the limitation."
-        )
-        if record is not None and record["note"]:
-            message += f"\nUser's reason: {record['note']}"
-        return message
-
     async def _handle_interrupts(
         self, interrupts: Any, context: RunContext
     ) -> None:
@@ -1478,7 +1364,7 @@ class LangGraphRuntime:
         if all(isinstance(item.value, dict) and item.value.get("kind") == "user_question" for item in interrupts):
             await self._question_interrupts(interrupts, context)
             return
-        records = await self._review_records(context)
+        records = await self._tool_middleware.review_records(context)
         for call in self._review_calls(interrupts, context.latest_tool_calls):
             approval = records.get(_tool_call_id(call))
             if approval is not None and approval["status"] == "rejected":
@@ -1492,7 +1378,7 @@ class LangGraphRuntime:
             if approval is not None and approval["status"] != "pending":
                 raise PermissionError("approval is no longer pending")
             name = call["name"]
-            decision = self._policy_decision(name, call["args"], context)
+            decision = self._tool_middleware.evaluate(name, call["args"], context)
             if approval is None and decision.authorization_id:
                 continue
             if decision.outcome == "deny" or (approval is None and decision.outcome != "approval_required"):
@@ -1540,157 +1426,22 @@ class LangGraphRuntime:
             return
         raise RuntimeError("runtime requested approval for an already reviewed batch")
 
-    async def _execute_product_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
-    ) -> ToolMessage | Command[Any]:
-        context = request.runtime.context
-        if not isinstance(context, RunContext):
-            raise RuntimeError("LangGraph runtime context is missing")
-        tool_name = str(request.tool_call["name"])
-        task = await self.repository.get_task(context.request.workspace_id, context.request.task_id)
-        if task["status"] == "cancelled":
-            return ToolMessage(
-                content="Task cancelled; this tool was not executed.",
-                tool_call_id=_tool_call_id(request.tool_call),
-                name=tool_name,
-                status="error",
-            )
-        arguments = dict(request.tool_call.get("args") or {})
-        if await self.repository.task_inputs(context.request.workspace_id, context.request.task_id, pending=True):
-            return ToolMessage(
-                content=(
-                    "New user input arrived. This proposed tool was not executed; "
-                    "reconsider it after reading the user's message."
-                ),
-                tool_call_id=_tool_call_id(request.tool_call),
-                name=tool_name,
-                status="error",
-            )
-        record = (await self._review_records(context)).get(_tool_call_id(request.tool_call))
-        await self._refresh_execution_metadata(context)
-        authority = replace(context, execution_metadata=context.execution_metadata.copy())
-        # Capture authority only after waiting for this tool's admission and
-        # reading pending input/approvals. Earlier tools retain their own copy.
-        request = replace(request, runtime=replace(request.runtime, context=authority))
-        decision = self._policy_decision(tool_name, arguments, authority)
-        approved = record if record is not None and record["status"] == "consumed" else None
-        rejected = record if record is not None and record["status"] == "rejected" else None
-        if (_tool_call_id(request.tool_call) in context.boundary_review_ids
-                or (decision.outcome == "approval_required" and approved is None and rejected is None)):
-            # A permission change can occur after after_model HITL, while an
-            # earlier tool is executing. Suspend this ToolNode through native
-            # LangGraph interrupt; existing Approval API/audit still authorize it.
-            response = interrupt({
-                "action_requests": [{"name": tool_name, "args": arguments,
-                                     "description": decision.reason}],
-                "review_configs": [{"action_name": tool_name, "allowed_decisions": ["approve", "reject"]}],
-                "source": "tool_boundary",
-            })
-            if response["decisions"][0]["type"] == "reject":
-                return ToolMessage(
-                    content=self._rejection_message(rejected),
-                    tool_call_id=_tool_call_id(request.tool_call), name=tool_name, status="error",
-                )
-        if rejected is not None:
-            # Replaying a ToolNode after its interrupt was checkpointed away
-            # must still respect the audit, even if the permission mode changed.
-            return ToolMessage(
-                content=self._rejection_message(rejected),
-                tool_call_id=_tool_call_id(request.tool_call), name=tool_name, status="error",
-            )
-        if approved is not None or decision.outcome == "approval_required":
-            # HITL owns suspension/resume. The product audit still owns the
-            # authorization, including replay directly into a ToolNode after
-            # the approval interrupt has already been checkpointed away.
-            decision = self._policy_decision(tool_name, arguments, authority, approved=approved is not None)
-            if approved is None or not self._matches_approval(approved, tool_name, decision):
-                return ToolMessage(
-                    content="No matching approval for these tool parameters; this tool was not executed.",
-                    tool_call_id=_tool_call_id(request.tool_call), name=tool_name, status="error",
-                )
-        if decision.outcome != "allow":
-            # ToolNode still projects the returned failure to the model and UI;
-            # persist denial so it cannot be mistaken for a failed execution
-            # or for the user's separate HITL rejection.
-            await self.repository.update_tool_call(
-                _tool_call_id(request.tool_call), "denied", risk_level=decision.risk.name,
-            )
-            return ToolMessage(
-                content=decision.reason, tool_call_id=_tool_call_id(request.tool_call),
-                name=tool_name, status="error", artifact={
-                    "summary": decision.reason, "error_code": "TOOL_DENIED",
-                    "user_hint": "当前权限或工具设置不允许此操作，未执行。",
-                },
-            )
-        if decision.authorization_id:
-            await self.repository.record_audit(
-                context.request.workspace_id,
-                context.request.principal_id,
-                "authorization.used",
-                decision.authorization_id,
-                "allowed",
-                {
-                    "task_id": context.request.task_id,
-                    "tool_call_id": _tool_call_id(request.tool_call),
-                    "tool_name": tool_name,
-                },
-            )
-        # Only a successful product policy decision selects the execution
-        # boundary. Tool arguments can request escalation, never grant it.
-        authority.execution_metadata["sandbox_mode"] = decision.sandbox_mode
-        authority.execution_metadata["allow_network"] = decision.allow_network
-        call_id = str(request.tool_call.get("id") or "")
-        request = request.override(
-            tool_call={**request.tool_call, "args": decision.arguments}
-        )
-        await self.repository.update_tool_call(
-            call_id,
-            "running",
-            arguments=decision.arguments,
-            risk_level=decision.risk.name,
-        )
-        await self._emit(
-            context,
-            "tool.started",
-            {
-                "tool_call_id": call_id,
-                "tool_name": tool_name,
-                "arguments": decision.arguments,
-                "resource_scope": decision.resource_scope,
-                "risk_level": decision.risk.name,
-                "sandbox_mode": decision.sandbox_mode,
-                "allow_network": decision.allow_network,
-            },
-        )
-        try:
-            result = await handler(request)
-        except GraphInterrupt:
-            # LangGraph owns the suspension; asking a question is not a failed tool.
-            raise
-        except UserFacingCancellation as exc:
-            # A stopped local waiter is not proof that a remote action stopped.
-            # Project the authored cleanup warning, but keep root cancellation
-            # even if persisting/delivering that warning itself fails.
-            try:
-                hint = public_error(exc)
-                await self._map_message(ToolMessage(
-                    content=hint, tool_call_id=call_id, name=tool_name, status="error",
-                    artifact={"summary": hint, "user_hint": hint, "error_code": "TOOL_CLEANUP_PENDING"},
-                ), context)
-            finally:
-                raise exc from None
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            await self._map_message(ToolMessage(
-                content=public_error(exc), tool_call_id=call_id, name=tool_name, status="error",
-            ), context)
-            raise
-        if isinstance(result, ToolMessage):
-            await self._map_message(result, context)
-        return result
+    @staticmethod
+    def _interrupt_tool(request: ToolCallRequest, decision: PolicyDecision) -> bool:
+        """Pause the current ToolNode if authority changes after model-level HITL."""
+        response = interrupt({
+            "action_requests": [{
+                "name": str(request.tool_call["name"]),
+                "args": dict(request.tool_call.get("args") or {}),
+                "description": decision.reason,
+            }],
+            "review_configs": [{
+                "action_name": str(request.tool_call["name"]),
+                "allowed_decisions": ["approve", "reject"],
+            }],
+            "source": "tool_boundary",
+        })
+        return bool(response["decisions"][0]["type"] == "reject")
 
     async def _emit(
         self,

@@ -84,7 +84,7 @@ POST 仅所有者可用，接受 `root_path` 与可选 `name`，由 Core 校验�
 
 `folders/browse` 为本机 Web 文件夹选择器提供目录列表，要求 owner 且请求直接连接地址为 loopback（不信任转发头来判定本机）。可选 `path` 为已有绝对目录，省略时从 API 层进程用户的主目录开始；`show_hidden=true` 包含点开头目录。响应为 `{path, parent, home, root, entries: [{name, path}], truncated}`，根目录的 parent 为空。
 
-只枚举目录，不返回文件或读取内容；每次最多扫描 5000 项、返回 500 个文件夹，不缓存响应。注册路径仍调用上述 POST，由 Core 做最终校验。它不是工作区文件预览接口，也不是远程设备文件选择协议；API/Core 使用同一后端文件系统，反向代理不应将此本机专用入口公开到远程。
+只枚举目录，不返回文件或读取内容；每次最多扫描 5000 项、返回 500 个文件夹，不缓存响应。注册路径仍调用上述 POST，由 `core.conversations` 做最终校验。它不是工作区文件预览接口，也不是远程设备文件选择协议；API/Core 使用同一后端文件系统，反向代理不应将此本机专用入口公开到远程。
 
 手机访问为规划中，范围以 [手机远程访问](RemoteAccess.md) 为准。配对设备关联同一个个人主体；首版复用会话、任务、审批和 UI Event DTO，仅开放明确列出的远程资源。配对、会话和撤销的具体契约在实施时补充，本文不将它们列成已存在的端点。
 
@@ -122,7 +122,7 @@ GET    /workspaces/{workspace_id}/conversations/{conversation_id}/snapshot
 
 归档仅禁止新执行，不禁止相同幂等键/内容查询已存在的提交回执。幂等请求中的会话若已删除，返回 404，不悄悄新建会话。`snapshot` 的空列表返回 `[]`，不返回 `null`。
 
-`files / files/content / changes / changes/diff / runtime-status` 支持可选 `folder_id` 查询参数，API 通过 Core 解析已登记目录，客户端不能直接传任意根目录。Runtime 权限校验与工具上下文使用会话所属目录，不变更共享全局根目录；MCP 进程启动目录和技能加载目录不因切换而变化。
+`files / files/content / changes / changes/diff / runtime-status` 支持可选 `folder_id` 查询参数，API 通过 `core.conversations` 解析已登记目录，客户端不能直接传任意根目录。Runtime 权限校验与工具上下文使用会话所属目录，不变更共享全局根目录；MCP 进程启动目录和技能加载目录不因切换而变化。
 
 #### 图片输入、生成与文件预览（本机协议/GUI 已验收，SVG 符号预览已复验）
 

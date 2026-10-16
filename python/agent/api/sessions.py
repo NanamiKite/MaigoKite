@@ -57,17 +57,18 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
 
     @router.get("/conversations", response_model=dto.ConversationsResponse)
     async def conversations(workspace_id: str) -> dict[str, object]:
-        return {"conversations": [dto.conversation(row) for row in await core.list_conversations(workspace_id)]}
+        rows = await core.conversations.list_conversations(workspace_id)
+        return {"conversations": [dto.conversation(row) for row in rows]}
 
     @router.post("/conversations", status_code=201, response_model=dto.ConversationResponse)
     async def create_conversation(workspace_id: str, body: dto.ConversationCreate) -> dto.ConversationResponse:
         if body.thinking:
             await credentials.restore_model(workspace_id, body.model_id)
-        return dto.conversation(await core.create_conversation(workspace_id, **body.model_dump()))
+        return dto.conversation(await core.conversations.create_conversation(workspace_id, **body.model_dump()))
 
     @router.get("/conversations/{conversation_id}", response_model=dto.ConversationResponse)
     async def get_conversation(workspace_id: str, conversation_id: str) -> dto.ConversationResponse:
-        return dto.conversation(await core.get_conversation(workspace_id, conversation_id))
+        return dto.conversation(await core.conversations.get_conversation(workspace_id, conversation_id))
 
     @router.patch("/conversations/{conversation_id}", response_model=dto.ConversationResponse)
     async def update_conversation(
@@ -77,15 +78,16 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
         if not changes:
             raise dto.APIError(400, "VALIDATION", "请至少提供一项对话设置。")
         if body.thinking:
-            current = await core.get_conversation(workspace_id, conversation_id)
+            current = await core.conversations.get_conversation(workspace_id, conversation_id)
             await credentials.restore_model(
                 workspace_id, body.model_id if body.model_id is not None else current["model_id"]
             )
-        return dto.conversation(await core.update_conversation_settings(workspace_id, conversation_id, **changes))
+        updated = await core.conversations.update_conversation_settings(workspace_id, conversation_id, **changes)
+        return dto.conversation(updated)
 
     @router.delete("/conversations/{conversation_id}", status_code=204, response_model=None)
     async def delete_conversation(workspace_id: str, conversation_id: str) -> Response:
-        await core.delete_conversation(workspace_id, conversation_id)
+        await core.conversations.delete_conversation(workspace_id, conversation_id)
         return Response(status_code=204)
 
     @router.post("/conversations/{conversation_id}/fork", status_code=201, response_model=dto.ConversationResponse)
@@ -93,14 +95,14 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
         workspace_id: str, conversation_id: str, body: dto.Fork, request: Request
     ) -> dto.ConversationResponse:
         return dto.conversation(
-            await core.fork_conversation(
+            await core.conversations.fork_conversation(
                 workspace_id, conversation_id, body.message_id, request_key(request, required=True)
             )
         )
 
     @router.get("/conversations/{conversation_id}/messages", response_model=dto.MessagesResponse)
     async def messages(workspace_id: str, conversation_id: str) -> dict[str, object]:
-        return {"messages": await core.list_messages(conversation_id, workspace_id)}
+        return {"messages": await core.conversations.list_messages(conversation_id, workspace_id)}
 
     @router.get("/conversations/{conversation_id}/snapshot", response_model=dto.SnapshotResponse)
     async def snapshot(workspace_id: str, conversation_id: str) -> dict[str, object]:
@@ -123,7 +125,7 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
     async def send(
         workspace_id: str, conversation_id: str, body: dto.SendMessage, request: Request, response: Response,
     ) -> dict[str, object]:
-        await core.get_conversation(workspace_id, conversation_id)
+        await core.conversations.get_conversation(workspace_id, conversation_id)
         key = request_key(request)
         replay = False
         if key:

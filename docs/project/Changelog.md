@@ -7,6 +7,14 @@
 
 ## 尚未发布
 
+### 2026-10-16 上下文依赖、工具权限与会话业务边界收敛
+
+- 移除 `RunContext.adapter` 与 `ChildContext.adapter`；上下文预算、记忆注入和子 Agent 直接复用 Repository/RunProjection。子 Agent 在装配时显式接收模型目录、解析、只读图和最新元数据回调，保持只读工具、父任务预算、并发、取消及共享模型客户端所有权，不新增通用依赖容器。
+- 执行前权限重查、审批回执匹配、工具调用拦截和审计投影归入已有 ProductToolMiddleware；权限规则继续复用 PermissionManager，持久审计继续使用 Repository。Runtime 保留原生中断、审批批次恢复、根任务、图与 checkpoint；图节点名与 middleware 顺序未变，并移除 Runtime 中重复持有的工具名称索引。
+- 会话/工作区登记、设置与默认权限业务归入 `ConversationService`，API 直接调用 `core.conversations`，Core 原入口保持签名兼容的薄转发。活跃运行检查与 checkpoint 清理通过窄回调取得当前 Runtime，避免扩展重载后的旧实例引用；记忆路径校验复用同一会话服务。Repository、数据库结构及事务未修改。
+- Core 从 1300 行到 1195 行，Runtime 从 1713 行到 1464 行；本次是职责与依赖收敛，不宣称全项目代码量减少或整个 Core 已无产品逻辑。静态 AST 对照确认 15 个会话/工作区方法、8 个权限/工具方法及 Runtime 保留的 34 个方法在还原明确依赖替换后等价；图装配和新增中断回调另作源码核对。
+- 锁定 dev/vectorstores 依赖下，CI 范围 Ruff、mypy（126 个文件）、四个主要迁移模块的 Ruff 格式及差异空白检查通过。未修改测试、依赖锁文件或检查规则，未运行行为测试、构建、服务或模型调用；不能据此宣称完整 CI / 端到端验收通过。
+
 ### 2026-10-16 扩展准备与工具 middleware 边界收敛
 
 - MCP 凭证筛选、健康连接复用和工具发现移入已有 `ExtensionCatalog`；Core 保留准入锁、目录与 graph 原子切换、候选失败清理及关闭顺序。移除仓库内没有调用方的六个模型转发方法，已有 HTTP 契约和仍被调用的入口保持不变。

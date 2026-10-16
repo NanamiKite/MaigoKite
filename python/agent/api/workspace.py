@@ -277,11 +277,11 @@ def routes(core: AgentCore, execution: Execution) -> APIRouter:
     router = APIRouter()
 
     async def root(workspace: str, folder: str) -> Path:
-        return Path((await core.get_workspace_folder(workspace, folder))["root_path"]).resolve()
+        return Path((await core.conversations.get_workspace_folder(workspace, folder))["root_path"]).resolve()
 
     @router.get("/folders", response_model=None)
     async def folders(workspace_id: str) -> dict[str, object]:
-        return {"folders": await core.list_workspace_folders(workspace_id)}
+        return {"folders": await core.conversations.list_workspace_folders(workspace_id)}
 
     @router.get("/folders/browse", dependencies=[Depends(owner)], response_model=None)
     async def folder_browser(path: str = "", show_hidden: bool = False) -> dict[str, object]:
@@ -289,11 +289,11 @@ def routes(core: AgentCore, execution: Execution) -> APIRouter:
 
     @router.post("/folders", status_code=201, dependencies=[Depends(owner)], response_model=None)
     async def add_folder(workspace_id: str, body: dto.FolderCreate) -> dict[str, object]:
-        return await core.create_workspace_folder(workspace_id, body.root_path, body.name)
+        return await core.conversations.create_workspace_folder(workspace_id, body.root_path, body.name)
 
     @router.delete("/folders/{folder_id}", status_code=204, dependencies=[Depends(owner)], response_model=None)
     async def delete_folder(workspace_id: str, folder_id: str) -> Response:
-        await core.delete_workspace_folder(workspace_id, folder_id, dto.Principal)
+        await core.conversations.delete_workspace_folder(workspace_id, folder_id, dto.Principal)
         return Response(status_code=204)
 
     @router.get("/files", response_model=None)

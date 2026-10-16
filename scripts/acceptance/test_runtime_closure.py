@@ -27,7 +27,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.runtime import Runtime
 from pydantic import ValidationError
 from tests.fixtures.chat_model import FakeModel
-from tests.fixtures.runtime_context import BudgetContext
+from tests.fixtures.runtime_context import budget_context
 
 
 @pytest.mark.parametrize(
@@ -46,19 +46,21 @@ def test_budget_uses_sdk_capacity_without_model_name_table(profile, expected):
 @pytest.mark.asyncio
 async def test_small_model_rejected_before_network_without_slicing():
     messages = [HumanMessage("large request " * 600)]
-    request = ModelRequest(
-        model=FakeModel(profile={"max_input_tokens": 512}),
-        messages=messages,
-        tools=[],
-        runtime=Runtime(context=BudgetContext()),
-    )
-
     async def forbidden(_):
         raise AssertionError("model should not be called")
 
-    with pytest.raises(ContextBudgetExceeded):
-        await ContextBudgetMiddleware(32000).awrap_model_call(request, forbidden)
-    assert request.messages == messages
+    async with budget_context() as context:
+        request = ModelRequest(
+            model=FakeModel(profile={"max_input_tokens": 512}),
+            messages=messages, tools=[], runtime=Runtime(context=context),
+        )
+        with pytest.raises(ContextBudgetExceeded):
+            await ContextBudgetMiddleware(32000).awrap_model_call(request, forbidden)
+        assert request.messages == messages
+        task = await context.repository.get_task("personal", context.request.task_id)
+        assert task["model_calls_used"] == 0
+        events = await context.repository.list_task_events("personal", context.request.conversation_id)
+        assert [event["event_type"] for event in events] == ["context.updated"]
 
 
 async def make_core(tmp_path):

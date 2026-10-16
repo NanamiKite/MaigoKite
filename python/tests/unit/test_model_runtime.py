@@ -5,11 +5,11 @@ import pytest
 from agent.config_manager import ConfigManager
 from agent.errors import public_error
 from agent.models.native_model import build_chat_model, close_chat_models
+from agent.models.reasoning import message_text, reasoning_text
 from agent.models.runtime import ChatModelRuntime, ChatModelSettings
 from agent.models.usage import message_usage
 from agent.repository import SQLiteRepository
-from agent.runtime import LangGraphRuntime
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk
 from pydantic import Field
 
 from tests.fixtures.chat_model import FakeModel
@@ -249,10 +249,58 @@ def test_usage_ignores_non_numeric_details():
     assert usage == {"prompt_tokens": 2, "completion_tokens": 1, "input_tokens": 2, "output_tokens": 1}
 
 
-def test_runtime_keeps_provider_reasoning_separate_from_answer():
-    message = AIMessage(content="final answer", additional_kwargs={"reasoning_content": "public reasoning summary"})
-    assert LangGraphRuntime._message_text(message) == "final answer"
-    assert LangGraphRuntime._reasoning_text(message) == "public reasoning summary"
+@pytest.mark.parametrize("message_type", [AIMessage, AIMessageChunk], ids=["complete", "stream"])
+@pytest.mark.parametrize(
+    ("source", "expected_reasoning"),
+    [
+        pytest.param(
+            AIMessage(content="final answer", additional_kwargs={"reasoning_content": "public reasoning summary"}),
+            "public reasoning summary",
+            id="compatible-reasoning",
+        ),
+        pytest.param(
+            AIMessage(content=[
+                {"type": "reasoning", "reasoning": "public reasoning summary"},
+                "final ",
+                {"type": "text", "text": "answer"},
+            ]),
+            "public reasoning summary",
+            id="normalized-content-blocks",
+        ),
+        pytest.param(
+            # ChatAnthropic marks messages/chunks so LangChain can normalize
+            # native thinking blocks without interpreting opaque signatures.
+            AIMessage(content=[
+                {"type": "thinking", "thinking": "public reasoning summary", "signature": "opaque-signature"},
+                {"type": "text", "text": "final answer"},
+            ], response_metadata={"model_provider": "anthropic"}),
+            "public reasoning summary",
+            id="anthropic-thinking",
+        ),
+        pytest.param(
+            AIMessage(content=[
+                {"type": "redacted_thinking", "data": "redacted-payload"},
+                {"type": "text", "text": "final answer"},
+            ], additional_kwargs={
+                "reasoning_details": [{"type": "reasoning.encrypted", "data": "encrypted-payload"}],
+            }),
+            "",
+            id="hidden-payloads-are-not-display-text",
+        ),
+        pytest.param(AIMessage(content="final answer"), "", id="answer-without-reasoning"),
+    ],
+)
+def test_runtime_keeps_provider_reasoning_separate_from_answer(
+    message_type: type[AIMessage], source: AIMessage, expected_reasoning: str,
+) -> None:
+    # Exercise the shared extraction used by runtime projection and subagents.
+    message = message_type(
+        content=source.content,
+        additional_kwargs=source.additional_kwargs,
+        response_metadata=source.response_metadata,
+    )
+    assert message_text(message) == "final answer"
+    assert reasoning_text(message) == expected_reasoning
 
 
 @pytest.mark.asyncio

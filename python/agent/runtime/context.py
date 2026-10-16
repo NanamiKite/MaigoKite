@@ -6,7 +6,7 @@ import asyncio
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 from langchain.agents.middleware import AgentMiddleware, SummarizationMiddleware
 from langchain.agents.middleware.summarization import DEFAULT_SUMMARY_PROMPT
@@ -34,11 +34,8 @@ from agent.models.context_capacity import (
 )
 from agent.models.usage import message_usage
 from agent.runtime.memory import project_memories
+from agent.runtime.run_context import ChildContext, RunContext
 from agent.structured_output import output_budget_tools
-
-if TYPE_CHECKING:
-    from agent.runtime.run_context import RunContext
-    from agent.runtime.subagents import ChildContext
 
 
 # The class name is persisted and sent as error_type in compaction/task events.
@@ -125,25 +122,22 @@ def context_payload(model: Any, capacity: ContextCapacity, configured: int) -> d
     }
 
 
-async def _emit(context: Any, kind: str, payload: dict[str, Any]) -> None:
-    if getattr(context, "adapter", None) is not None:
-        parent = getattr(context, "parent", None)
-        if parent is not None:
-            # Child usage is charged to the same turn, without replacing the
-            # main conversation's context meter or streaming its answer.
-            if kind.startswith("model."):
-                await context.adapter._emit(parent, kind, {
-                    **payload, **context.model_info, "purpose": "subagent", "subagent_id": context.subagent_id,
-                })
-        else:
-            await context.adapter._emit(context, kind, payload)
+async def _emit(context: object, kind: str, payload: dict[str, Any]) -> None:
+    if isinstance(context, ChildContext):
+        # Charge child usage without replacing the parent's context meter or reply.
+        if kind.startswith("model."):
+            await context.parent.projection.emit(kind, {
+                **payload, **context.model_info, "purpose": "subagent", "subagent_id": context.subagent_id,
+            })
+    elif isinstance(context, RunContext):
+        await context.projection.emit(kind, payload)
 
 
-async def _charge_call(context: Any) -> None:
-    if getattr(context, "adapter", None) is not None:
-        await context.adapter.repository.reserve_model_call(
+async def _charge_call(context: RunContext | ChildContext | None) -> None:
+    if context is not None:
+        await context.repository.reserve_model_call(
             context.request.workspace_id, context.request.task_id,
-            child=getattr(context, "parent", None) is not None,
+            child=isinstance(context, ChildContext),
         )
 
 
@@ -319,8 +313,8 @@ class SafeSummarizationMiddleware(SummarizationMiddleware):
         latest_index = next((i for i in range(len(conversation) - 1, -1, -1)
                              if isinstance(conversation[i], HumanMessage)), 0)
         protected_inputs: set[str] = set()
-        if getattr(context, "adapter", None) is not None:
-            pending = await context.adapter.repository.task_inputs(
+        if isinstance(context, (RunContext, ChildContext)):
+            pending = await context.repository.task_inputs(
                 context.request.workspace_id, context.request.task_id, pending=True,
             )
             protected_inputs = {item["id"] for item in pending}

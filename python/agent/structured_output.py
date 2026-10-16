@@ -14,8 +14,7 @@ from agent.data_contracts import JSON_OBJECT, JSONObject
 from agent.errors import UserFacingError
 
 if TYPE_CHECKING:
-    from agent.runtime.run_context import RunContext
-    from agent.runtime.subagents import ChildContext
+    from agent.runtime.run_context import ChildContext, RunContext
 
 OUTPUT_TOOL_NAME = "maigokite_structured_result"
 SCHEMA_MAX_BYTES = 16 * 1024

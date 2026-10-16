@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { api, type PermissionMode } from '@/api/client'
 import RailGlyph from '@/components/rail/RailGlyph.vue'
@@ -8,7 +8,13 @@ const settings = useSettingsStore()
 const draft = reactive({ default_mode: 'workspace' as PermissionMode })
 const feedback = ref(''),
   error = ref('')
-const supportsBoundary = ref(false), acknowledged = ref(false)
+const supportsBoundary = ref(false),
+  acknowledged = ref(false)
+const needsFullAccessAcknowledgement = computed(
+  () =>
+    draft.default_mode === 'danger_full_access' &&
+    settings.permissions.default_mode !== 'danger_full_access',
+)
 let disposed = false
 onMounted(async () => {
   try {
@@ -18,7 +24,9 @@ onMounted(async () => {
     if (!disposed) error.value = reason instanceof Error ? reason.message : String(reason)
   }
 })
-onUnmounted(() => { disposed = true })
+onUnmounted(() => {
+  disposed = true
+})
 const modes = [
   {
     id: 'read_only',
@@ -30,7 +38,8 @@ const modes = [
     id: 'workspace',
     label: '工作区',
     kind: 'act',
-    behavior: '工作区内常规操作自动执行；命令在沙箱中运行，联网、工作区外文件与敏感操作可能需要批准。',
+    behavior:
+      '工作区内常规操作自动执行；命令在沙箱中运行，联网、工作区外文件与敏感操作可能需要批准。',
   },
   {
     id: 'danger_full_access',
@@ -56,8 +65,11 @@ watch(
 )
 async function save() {
   if (settings.saving) return
-  if (draft.default_mode === 'danger_full_access' && settings.permissions.default_mode !== 'danger_full_access'
-      && (!supportsBoundary.value || !acknowledged.value)) {
+  if (
+    draft.default_mode === 'danger_full_access' &&
+    settings.permissions.default_mode !== 'danger_full_access' &&
+    (!supportsBoundary.value || !acknowledged.value)
+  ) {
     error.value = t('请先确认完全访问的风险。')
     return
   }
@@ -95,8 +107,12 @@ async function save() {
           :disabled="settings.saving || (mode.id === 'danger_full_access' && !supportsBoundary)"
           @click="draft.default_mode = mode.id"
         >
-          <RailGlyph :kind="mode.kind" /><span><strong>{{ $t(mode.label) }}</strong><small v-if="mode.id === 'workspace'">{{ $t('推荐') }}</small>
-            <p>{{ $t(mode.behavior) }}</p></span>
+          <RailGlyph :kind="mode.kind" />
+          <span>
+            <strong>{{ $t(mode.label) }}</strong>
+            <small v-if="mode.id === 'workspace'">{{ $t('推荐') }}</small>
+            <p>{{ $t(mode.behavior) }}</p>
+          </span>
         </button>
       </div>
     </section>
@@ -110,14 +126,14 @@ async function save() {
       {{ $t('当前使用受限自动模式，可在上方选择新对话的默认权限。') }}
     </p>
     <label
-      v-if="draft.default_mode === 'danger_full_access' && settings.permissions.default_mode !== 'danger_full_access'"
+      v-if="needsFullAccessAcknowledgement"
       class="panel-copy"
     >
       <input
         v-model="acknowledged"
         type="checkbox"
         :disabled="settings.saving"
-      >
+      />
       {{ $t('我理解风险，同意新对话默认使用完全访问。') }}
     </label>
     <footer class="permission-actions">
@@ -128,19 +144,22 @@ async function save() {
         @click="save"
       >
         {{ settings.saving ? $t('正在保存…') : $t('保存权限设置') }}
-      </button><span
+      </button>
+      <span
         v-if="feedback"
         class="field-saved"
         role="status"
-      >{{ feedback }}</span>
+      >
+        {{ feedback }}
+      </span>
     </footer>
     <p
       v-if="error"
       class="field-error"
       role="alert"
     >
-      {{ error
-      }}<button
+      {{ error }}
+      <button
         class="text-button"
         :disabled="settings.saving"
         @click="save"

@@ -7,7 +7,9 @@ defineProps<{ verdict: Verdict }>()
     class="seal-mark"
     :class="{ denied: verdict === 'deny' }"
     :title="verdict === 'deny' ? $t('已驳回') : $t('已批准')"
-  >{{ verdict === 'deny' ? $t('驳') : $t('准') }}</span>
+  >
+    {{ verdict === 'deny' ? $t('驳') : $t('准') }}
+  </span>
 </template>
 <style scoped lang="scss">
 .seal-mark {

@@ -51,11 +51,18 @@ const shortcuts = computed(() => [
   [mod + '+/', '快捷键表'],
   ['Alt+S', session.isSending ? '加入队列' : '发送消息'],
   [mod + '+Enter', session.isSending ? '加入队列' : '发送消息'],
-  ['Enter', ui.appearance.enterBehavior === 'send'
-    ? ui.appearance.confirmEnterSend
-      ? session.isSending ? '确认加入队列' : '确认发送'
-      : session.isSending ? '加入队列' : '发送消息'
-    : '换行'],
+  [
+    'Enter',
+    ui.appearance.enterBehavior === 'send'
+      ? ui.appearance.confirmEnterSend
+        ? session.isSending
+          ? '确认加入队列'
+          : '确认发送'
+        : session.isSending
+          ? '加入队列'
+          : '发送消息'
+      : '换行',
+  ],
   ['Shift+Enter', '换行'],
   ['[ / ]', '跳转墨线节点'],
   ['Y / N', '允许 / 驳回'],
@@ -109,7 +116,10 @@ const entries = computed<Entry[]>(() => [
   })),
   { id: 'settings', label: t('设置'), to: '/settings', keywords: 'sz settings', group: 'settings' },
   {
-    id: 'desk-background', label: t('切换案头背景'), keywords: 'atbj background wallpaper', group: 'settings',
+    id: 'desk-background',
+    label: t('切换案头背景'),
+    keywords: 'atbj background wallpaper',
+    group: 'settings',
     perform: () => {
       if (desk.image) desk.change({ on: !desk.preferences.on })
       else void router.push('/settings?tab=general&field=desk-background')
@@ -284,7 +294,8 @@ function onKey(event: KeyboardEvent) {
           aria-autocomplete="list"
           aria-expanded="true"
           :aria-activedescendant="items[selected] ? 'command-' + items[selected].id : undefined"
-        ><Kbd keys="Esc" />
+        />
+        <Kbd keys="Esc" />
       </header>
       <div
         id="palette-results"
@@ -310,10 +321,15 @@ function onKey(event: KeyboardEvent) {
             @pointermove="selected = items.findIndex((entry) => entry.id === item.id)"
             @click="choose(item)"
           >
-            <span class="result-label"><template
-              v-for="(part, index) in segments(item.label, item.hits)"
-              :key="index"
-            ><mark v-if="part.hit">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+            <span class="result-label">
+              <template
+                v-for="(part, index) in segments(item.label, item.hits)"
+                :key="index"
+              >
+                <mark v-if="part.hit">{{ part.text }}</mark>
+                <template v-else>{{ part.text }}</template>
+              </template>
+            </span>
             <small v-if="recent.includes(item.id)">{{ $t('最近使用') }}</small>
             <IconSymbol
               v-if="items[selected]?.id === item.id"
@@ -336,8 +352,8 @@ function onKey(event: KeyboardEvent) {
       class="palette shortcut-sheet"
     >
       <header>
-        {{ $t('快捷键')
-        }}<button
+        {{ $t('快捷键') }}
+        <button
           class="icon-button"
           :aria-label="$t('关闭快捷键表')"
           @click="close"
@@ -352,7 +368,8 @@ function onKey(event: KeyboardEvent) {
         v-for="[keys, label] in shortcuts"
         :key="keys"
       >
-        <span>{{ $t(label) }}</span><Kbd :keys="keys" />
+        <span>{{ $t(label) }}</span>
+        <Kbd :keys="keys" />
       </p>
     </section>
   </dialog>

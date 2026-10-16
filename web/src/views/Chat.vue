@@ -11,6 +11,7 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { useInboxStore } from '@/stores/inbox'
 import type { AwaitItem, Turn } from '@/api/events'
 import { useAutoFollow } from '@/composables/useAutoFollow'
+import { useChatPosition } from '@/composables/useChatPosition'
 import { presentationNodes, pendingItem, pendingOrder } from '@/utils/rail-presentation'
 import { remainingMessages } from '@/stores/session-projection'
 import { revealRailNode } from '@/utils/rail-navigation'
@@ -36,6 +37,7 @@ import WelcomeSheet from '@/components/chat-area/WelcomeSheet.vue'
 import PendingReminder from '@/components/chat-area/PendingReminder.vue'
 import QueuedMessages from '@/components/chat-area/QueuedMessages.vue'
 import AppIcon from '@/components/common/AppIcon.vue'
+import ReadingWidth from '@/components/chat-area/ReadingWidth.vue'
 const route = useRoute(),
   router = useRouter(),
   session = useSessionStore(),
@@ -51,6 +53,7 @@ const pending = computed(() =>
     .sort(pendingOrder),
 )
 const scroll = ref<HTMLElement | null>(null),
+  paper = ref<HTMLElement | null>(null),
   composer = ref<InstanceType<typeof InputBox> | null>(null),
   visibleCount = ref(20),
   sending = ref(false),
@@ -263,7 +266,6 @@ watch(
     controlGeneration++
     controlError = ''
     controls = Promise.resolve()
-    visibleCount.value = 20
     highlightedTurn.value = ''
     if (ui.chatTurnRequest && ui.chatTurnRequest.sessionId !== id)
       ui.clearChatTurnRequest(ui.chatTurnRequest.serial)
@@ -276,7 +278,6 @@ watch(
       draftSubagents.value = copySubagentSettings(settings.subagentDefaults)
       mode.value = settings.permissions.default_mode
     }
-    resume()
     void nextTick(() => {
       if (
         !timeline.value.length &&
@@ -287,6 +288,7 @@ watch(
   },
   { immediate: true },
 )
+useChatPosition(sessionId, scroll, visibleCount, { following, resume, pause })
 onMounted(() => {
   if (!settings.loaded) void settings.loadSettings()
   void settings.loadPermissionSettings()
@@ -526,6 +528,7 @@ watch(
 </script>
 <template>
   <div
+    id="chat-page"
     class="chat-page inkline-preview"
     :class="{ empty: !timeline.length }"
   >
@@ -585,6 +588,7 @@ watch(
     </Teleport>
     <!-- Stable wrapper and one InputBox: a paper composition, not a second composer. -->
     <div
+      ref="paper"
       v-desk-paper="!timeline.length"
       class="chat-body"
       :class="{ workpaper: !timeline.length, 'first-welcome': !timeline.length && firstWelcome }"
@@ -593,6 +597,7 @@ watch(
       @focusin="welcomeSettled = true"
       @animationend="finishWelcome"
     >
+      <ReadingWidth :host="paper" />
       <div class="conversation">
         <div
           ref="scroll"

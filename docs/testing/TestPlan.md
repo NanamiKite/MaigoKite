@@ -38,6 +38,23 @@ Agent 的任务结果与重复运行稳定性由独立 [个人 Agent 行为评�
 
 ### 功能验收入口
 
+#### 背景 GUI 脚本与静态契约
+
+背景滑块以当前设计的 0–100% 直接透明度为准；不再检查已移除的自动求限或 `--plate-a`。
+截图对比度门禁检查不透明纸面基线，自由透明度另验 0/50/100 与刷新持久化，不宣称任意图片下都满足对比度阈值。
+`gui_desk_background.py`、`gui_desk_runtime.py`、`gui_desk_electron.py` 会将必检项缺失/为假、空截图文字清单及页面异常计入失败，写出报告后返回非零退出码。滚动耗时是测量值，不是性能通过结论。
+文字令牌按每个元素实际继承的作用域读取，包含设置预览的局部覆盖；未定义令牌不能借 CSS 继承冒充已登记颜色。真实 Chromium 反向用例验证嵌套覆盖和任意未登记色，仍保留 7:1 / 4.5:1 门禁。脚本在 `finally` 写报告时保留原始异常，不能只留下“缺少检查项”而丢失失败原因。
+
+三个脚本均要求显式 `--output <独立目录>`。Web 脚本支持 `--url` 和 `--chromium`，未指定浏览器时使用已经安装的 Playwright Chromium，不自动下载；图片默认使用生成的 PNG，`--photo` 可指定本地素材。Electron 使用本项目 Electron 包公开导出的平台路径，也可指定 `--electron`，配置目录临时创建并清理。仍需预先提供隔离的 `VITE_MOCK=1` Vite 服务或对应桌面构建；不能指向正在使用的客户端。
+
+验收脚本的反向控制检查不启动浏览器、后端或模型，已纳入默认 pytest 收集；也可独立运行：
+
+```bash
+uv run --no-sync python -m unittest discover -s scripts/acceptance -p test_desk_checks.py -v
+```
+
+CI 对上述脚本、共享检查与文字色报告运行 Ruff/strict mypy，并通过 `vue-tsc --noEmit -p tsconfig.json --incremental false` 检查前端测试契约。反向控制、静态检查和 jsdom 通过不代表真实 GUI、Electron 安装包或 Windows 已验收。
+
 安装锁定的 `dev` 检查依赖后，可运行完整后端测试及产品验收；显式排除真实付费模型入口：
 
 ```bash
@@ -69,6 +86,7 @@ PYTHONPATH=python MAIGOKITE_ACCEPTANCE_WEB_DIR="$PWD/web/dist" \
 PowerShell 可先设置 `$env:PYTHONPATH = "python"`，再运行同样的 `uv run --no-sync python -m pytest ...` 后端命令；这不代表 Windows 原生验收已通过。GUI 用例的当前运行证据为 Linux，不能外推为 Electron 安装包验收。
 
 新增产品验收只替代模型 HTTP/SSE 输出，Core、LangGraph、PermissionPolicy、Repository、工具、MCP 与 GUI 保持真实；沿用现有进程恢复测试的启动入口。子 Core 使用独立工作区/SQLite/checkpoint，剥离继承的模型/Tracing 密钥。真实浏览器测试访问公开测试页面，Cookie 为自建 canary，不包含真实登录；命令 stdin/stop 使用测试自己启动的进程及显式完全访问，不视为 OS 沙箱隔离验收。
+`gui_personal_agent.py` 还通过真实 API/页面验证会话标签切换、重命名、关闭不删除、重开草稿保留与不落 localStorage，以及正文鼠标/键盘调宽、释放后保存、刷新恢复、双击还原和窄屏溢出。文字测量辅助程序的独立反向用例不替换产品方法，也不计入 Agent 能力验收。
 
 模型配置/凭证单测在本模块的元数据 HTTP 边界固定公共目录响应，避免假模型触发额外公网依赖；不替换目录解析或回退业务逻辑。独立 `test_model_catalog.py` 保留原生 TLS 错误的回归断言，先复现失败、再验证产品修复，不能用模块夹具屏蔽。2026-10-16 首轮曾实际访问公共 `models.dev` 并暴露该缺陷，不是付费模型调用；后续修复定向通过与全量历史分别记录，最终回归结果和仍开放的失败只在 Roadmap 记录。
 

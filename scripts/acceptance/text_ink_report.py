@@ -3,12 +3,38 @@
 from __future__ import annotations
 
 import csv
-import json
 from html import escape
 from pathlib import Path
+from typing import TypedDict
+
+from pydantic import JsonValue, TypeAdapter
 
 
-def write_report(root: Path):
+class InkRow(TypedDict):
+    text: str
+    selector: str
+    color: list[float]
+    background: list[float]
+    tokens: list[str]
+    opacity: float
+    disabled: bool
+    ratio: float
+    surface: str
+
+
+class InkSnapshot(TypedDict):
+    palette: dict[str, list[float]]
+    matrix: dict[str, list[float]]
+    rows: list[InkRow]
+    decorations: list[dict[str, JsonValue]]
+
+
+class ChangedFile(TypedDict):
+    file: str
+    reason: str
+
+
+def write_report(root: Path) -> None:
     parts = [
         '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Inkline 文字色审计</title>',
         "<style>body{font:15px/1.6 system-ui;margin:24px;color:#222;background:#faf8f4}"
@@ -30,7 +56,7 @@ def write_report(root: Path):
         source = root / phase / "inventory.json"
         if not source.exists():
             continue
-        report = json.loads(source.read_text())
+        report = TypeAdapter(dict[str, InkSnapshot]).validate_json(source.read_text(encoding="utf-8"))
         keys = [
             f"{theme}-{accent}-chat"
             for theme in ("light", "dark")
@@ -73,7 +99,7 @@ def write_report(root: Path):
                     )
             parts.append("</tr>")
         parts.append("</tbody></table></div>")
-        with (root / phase / "matrix.csv").open("w") as stream:
+        with (root / phase / "matrix.csv").open("w", encoding="utf-8", newline="") as stream:
             writer = csv.writer(stream)
             writer.writerow(["token"] + [f"{key}/{paper}" for key in keys for paper in ("paper", "paper-2", "paper-3")])
             for token in tokens:
@@ -85,7 +111,7 @@ def write_report(root: Path):
                         for ratio in report[key]["matrix"][token]
                     ]
                 )
-        inventory = {}
+        inventory: dict[tuple[float, ...], set[str]] = {}
         for data in report.values():
             for row in data["rows"]:
                 inventory.setdefault(tuple(row["color"]), set()).update(
@@ -97,11 +123,12 @@ def write_report(root: Path):
             f'<a href="{phase}/matrix.csv">36 列 CSV</a>',
         ]
         if phase == "after":
-            failures = json.loads((root / phase / "failures.json").read_text())
+            failures = TypeAdapter(list[JsonValue]).validate_json(
+                (root / phase / "failures.json").read_text(encoding="utf-8")
+            )
             nodes = sum(len(data["rows"]) for data in report.values())
             parts.append(
-                f'<p>{nodes} 个可见文本节点；{len(failures)} 项失败。'
-                '<a href="after/failures.json">最终断言结果</a></p>'
+                f'<p>{nodes} 个可见文本节点；{len(failures)} 项失败。<a href="after/failures.json">最终断言结果</a></p>'
             )
         else:
             parts.append(
@@ -140,20 +167,19 @@ def write_report(root: Path):
     if (root / "after/light-earth-waiting-reminder.png").exists():
         parts.append(
             "<h2>补充：待处理项滚出视口</h2><p>以下仅为 after 补充检查，未采集同状态的 before，"
-            "不冒充前后对照。实际等待文字对纸面为浅色 6.108:1、深色 9.018:1。</p><div class=\"pair\">"
+            '不冒充前后对照。实际等待文字对纸面为浅色 6.108:1、深色 9.018:1。</p><div class="pair">'
         )
         for theme in ("light", "dark"):
             name = f"after/{theme}-earth-waiting-reminder.png"
             parts.append(
-                f'<figure><figcaption>{theme}</figcaption>'
-                f'<img loading="lazy" src="{name}" alt="待处理提示"></figure>'
+                f'<figure><figcaption>{theme}</figcaption><img loading="lazy" src="{name}" alt="待处理提示"></figure>'
             )
         parts.append('</div><a href="after/waiting-reminder-inventory.json">补充 computed 记录</a>')
     manifest = root / "changed-files.json"
     if manifest.exists():
         parts.append("<h2>改动文件与理由</h2><ul>")
-        for item in json.loads(manifest.read_text()):
+        for item in TypeAdapter(list[ChangedFile]).validate_json(manifest.read_text(encoding="utf-8")):
             parts.append(f"<li><code>{escape(item['file'])}</code>：{escape(item['reason'])}</li>")
         parts.append("</ul>")
     parts.append("</html>")
-    (root / "report.html").write_text("\n".join(parts))
+    (root / "report.html").write_text("\n".join(parts), encoding="utf-8")

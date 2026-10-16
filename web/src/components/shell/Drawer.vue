@@ -96,9 +96,12 @@ async function moveTab(event: KeyboardEvent) {
         <IconSymbol
           :name="ui.drawerTab === 'pending' ? 'pending' : 'folder'"
           :size="16"
-        /><span>{{
-          ui.drawerTab === 'pending' ? $t('所有对话') : workspace.current?.name || $t('工作区')
-        }}</span>
+        />
+        <span>
+          {{
+            ui.drawerTab === 'pending' ? $t('所有对话') : workspace.current?.name || $t('工作区')
+          }}
+        </span>
       </div>
       <div class="drawer-controls">
         <button
@@ -147,12 +150,14 @@ async function moveTab(event: KeyboardEvent) {
         <IconSymbol
           :name="tab.icon"
           :size="15"
-        /><span>{{ $t(tab.label) }}</span><small
+        />
+        <span>{{ $t(tab.label) }}</span>
+        <small
           v-if="tab.id === 'pending' && pendingCount"
           class="tab-count"
-        >{{
-          pendingCount
-        }}</small>
+        >
+          {{ pendingCount }}
+        </small>
       </button>
     </nav>
     <div

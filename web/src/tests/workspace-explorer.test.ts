@@ -33,6 +33,8 @@ describe('workspace explorer', () => {
       truncated: false,
       size: 18,
       modified_at: '2026-01-01T00:00:00Z',
+      mime_type: 'text/plain',
+      data_url: '',
     })
     useWorkspaceStore().select('folder-a')
     const scope = effectScope()

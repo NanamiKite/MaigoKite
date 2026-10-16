@@ -11,6 +11,8 @@ export interface DeskPreferences {
   on: boolean
   imageId: string | null
   visibility: number
+  // Optional for older v1 records; visibility supplies the initial slider value.
+  paperTransparency?: number
   focal: { x: number; y: number }
 }
 export const emptyDesk = (): DeskPreferences => ({
@@ -31,6 +33,7 @@ export function deskPreferences(value: unknown): DeskPreferences | null {
     p.v !== 1 ||
     typeof p.on !== 'boolean' ||
     !unit(p.visibility) ||
+    (p.paperTransparency !== undefined && !unit(p.paperTransparency)) ||
     !(p.imageId === null || (typeof p.imageId === 'string' && /^[\w-]{1,80}$/.test(p.imageId))) ||
     (p.on && !p.imageId) ||
     !focal ||
@@ -44,6 +47,7 @@ export function deskPreferences(value: unknown): DeskPreferences | null {
     on: p.on,
     imageId: p.imageId,
     visibility: p.visibility,
+    ...(p.paperTransparency === undefined ? {} : { paperTransparency: p.paperTransparency }),
     focal: { x: focal.x, y: focal.y },
   }
 }

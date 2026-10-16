@@ -37,7 +37,8 @@ const emit = defineEmits<{
         <IconSymbol
           name="plus"
           :size="14"
-        />{{ $t('添加一条') }}
+        />
+        {{ $t('添加一条') }}
       </button>
     </header>
     <MemoryEditor
@@ -84,7 +85,8 @@ const emit = defineEmits<{
         <IconSymbol
           name="plus"
           :size="14"
-        />{{ $t('添加一条') }}
+        />
+        {{ $t('添加一条') }}
       </button>
     </div>
   </section>

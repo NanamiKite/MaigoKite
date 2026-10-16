@@ -1,6 +1,6 @@
 """Real Chromium text inventory and visual evidence. Requires an isolated VITE_MOCK=1 server.
 
-Usage: .venv/bin/python scripts/acceptance/gui_text_ink.py --phase before
+Usage: .venv/bin/python scripts/acceptance/gui_text_ink.py --phase before --output PATH
 No backend, existing fixtures, preferences or Git index are modified.
 """
 
@@ -11,9 +11,11 @@ import asyncio
 import csv
 import json
 from pathlib import Path
+from typing import Literal
 
 from playwright.async_api import async_playwright
-from text_ink_report import write_report
+from pydantic import JsonValue, TypeAdapter
+from text_ink_report import InkSnapshot, write_report
 
 ACCENTS = ("stone", "blue", "green", "earth", "lotus", "ink")
 SCENES = (
@@ -55,12 +57,25 @@ TOKENS = (
 )
 
 
-async def run(args):
+class InkOptions(argparse.Namespace):
+    phase: Literal["before", "after"]
+    resume: bool
+    url: str
+    chromium: str | None
+    output: Path
+
+
+async def run(args: InkOptions) -> None:
     output = Path(args.output) / args.phase
     output.mkdir(parents=True, exist_ok=True)
-    scan = Path(__file__).with_name("text_ink_dom.js").read_text()
-    report = json.loads((output / "inventory.json").read_text()) if args.resume else {}
-    failures = []
+    scan = Path(__file__).with_name("text_ink_dom.js").read_text(encoding="utf-8")
+    report = (
+        TypeAdapter(dict[str, InkSnapshot]).validate_json((output / "inventory.json").read_text(encoding="utf-8"))
+        if args.resume
+        else {}
+    )
+    failures: list[dict[str, JsonValue]] = []
+    errors: list[str] = []
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(executable_path=args.chromium, chromium_sandbox=True)
         try:
@@ -81,6 +96,7 @@ async def run(args):
                             viewport={"width": 1440, "height": 1100}, reduced_motion="reduce"
                         )
                         page = await context.new_page()
+                        page.on("pageerror", lambda error: errors.append(str(error)))
                         await page.goto(args.url + "/chat")
                         await page.wait_for_selector(".composer")
                         await page.wait_for_load_state("networkidle")
@@ -105,20 +121,24 @@ async def run(args):
                             await page.locator(".model-trigger").click()
                         elif scene == "settings-select":
                             await page.locator('[data-settings-field="theme"] .ink-select-trigger').click()
-                        data = await page.evaluate(scan, {"tokens": TOKENS})
+                        data = TypeAdapter(InkSnapshot).validate_python(await page.evaluate(scan, {"tokens": TOKENS}))
                         report[key] = data
-                        (output / "inventory.json").write_text(json.dumps(report, ensure_ascii=False, indent=2))
+                        (output / "inventory.json").write_text(
+                            json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+                        )
                         await page.screenshot(path=str(output / f"{key}.png"))
                         if scene in ("chat", "failure"):
                             await page.locator(".receipt").scroll_into_view_if_needed()
-                            report[key + "-receipt"] = await page.evaluate(scan, {"tokens": TOKENS})
+                            report[key + "-receipt"] = TypeAdapter(InkSnapshot).validate_python(
+                                await page.evaluate(scan, {"tokens": TOKENS})
+                            )
                             await page.screenshot(path=str(output / f"{key}-receipt.png"))
                         print(key, len(data["rows"]), "text nodes", flush=True)
             await context.close()
         finally:
             await browser.close()
-    (output / "inventory.json").write_text(json.dumps(report, ensure_ascii=False, indent=2))
-    with (output / "matrix.csv").open("w") as stream:
+    (output / "inventory.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    with (output / "matrix.csv").open("w", encoding="utf-8", newline="") as stream:
         writer = csv.writer(stream)
         keys = [f"{theme}-{accent}-chat" for theme in ("light", "dark") for accent in ACCENTS]
         writer.writerow(
@@ -135,11 +155,21 @@ async def run(args):
                 ]
             )
     for key, data in report.items():
+        if not data["rows"]:
+            failures.append({"scene": key, "reason": "no visible text was measured"})
         for row in data["rows"]:
             if not row["tokens"]:
-                failures.append({"scene": key, "reason": "unregistered text color", **row})
+                failures.append(
+                    TypeAdapter(dict[str, JsonValue]).validate_python(
+                        {"scene": key, "reason": "unregistered text color", **row}
+                    )
+                )
             if row["ratio"] < 4.5 and not row["disabled"]:
-                failures.append({"scene": key, "reason": "text contrast below 4.5", **row})
+                failures.append(
+                    TypeAdapter(dict[str, JsonValue]).validate_python(
+                        {"scene": key, "reason": "text contrast below 4.5", **row}
+                    )
+                )
         if args.phase == "after":
             if data["matrix"]["--accent-ink"][1] < 5:
                 failures.append({"scene": key, "reason": "accent-ink below 5 on paper-2"})
@@ -160,7 +190,8 @@ async def run(args):
             ):
                 if min(data["matrix"][token]) < (7 if token == "--ink" else 4.5):
                     failures.append({"scene": key, "reason": f"{token} below its paper contrast target"})
-    (output / "failures.json").write_text(json.dumps(failures, ensure_ascii=False, indent=2))
+    failures.extend({"reason": "page error", "message": error} for error in errors)
+    (output / "failures.json").write_text(json.dumps(failures, ensure_ascii=False, indent=2), encoding="utf-8")
     write_report(Path(args.output))
     print(f"{len(report)} snapshots; {len(failures)} findings; {output}", flush=True)
     if args.phase == "after" and failures:
@@ -172,6 +203,8 @@ if __name__ == "__main__":
     parser.add_argument("--phase", choices=("before", "after"), required=True)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--url", default="http://127.0.0.1:5197")
-    parser.add_argument("--chromium", default="/usr/bin/google-chrome")
-    parser.add_argument("--output", default="/tmp/maigokite-text-ink")
-    asyncio.run(run(parser.parse_args()))
+    parser.add_argument("--chromium", help="Existing browser executable; defaults to Playwright's installed Chromium")
+    parser.add_argument("--output", type=Path, required=True)
+    options = InkOptions()
+    parser.parse_args(namespace=options)
+    asyncio.run(run(options))

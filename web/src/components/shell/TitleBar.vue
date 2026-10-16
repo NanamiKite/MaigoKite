@@ -10,6 +10,7 @@ import IconSymbol from '@/components/common/IconSymbol.vue'
 import SessionTitle from '@/components/common/SessionTitle.vue'
 import Pulse from './Pulse.vue'
 import SidebarToggle from './SidebarToggle.vue'
+import ConversationTabs from './ConversationTabs.vue'
 defineProps<{ desktop?: boolean; sidebarOverlay?: boolean }>()
 const session = useSessionStore(),
   ui = useUIStore(),
@@ -79,7 +80,9 @@ function toggleDrawer() {
         )
       }}
     </span>
+    <ConversationTabs v-if="route.name === 'Chat'" />
     <SessionTitle
+      v-else
       :title="title"
       :serif="route.name === 'Chat'"
       :session-id="currentId && session.activeSession?.id === currentId ? currentId : undefined"

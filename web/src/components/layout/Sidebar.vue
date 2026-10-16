@@ -68,23 +68,25 @@ function closeOnNarrowScreen() {
         v-if="ui.layout.sidebarCollapsed"
         class="brand-button"
       >
-        <AppIcon v-if="ui.appearance.avatar === '助'" /><span
+        <AppIcon v-if="ui.appearance.avatar === '助'" />
+        <span
           v-else
           class="avatar"
-        >{{
-          ui.appearance.avatar
-        }}</span>
+        >
+          {{ ui.appearance.avatar }}
+        </span>
       </span>
       <template v-else>
-        <AppIcon v-if="ui.appearance.avatar === '助'" /><span
+        <AppIcon v-if="ui.appearance.avatar === '助'" />
+        <span
           v-else
           class="avatar"
-        >{{
-          ui.appearance.avatar
-        }}</span>
-        <strong :title="settings.profile.assistantName">{{
-          settings.profile.assistantName
-        }}</strong>
+        >
+          {{ ui.appearance.avatar }}
+        </span>
+        <strong :title="settings.profile.assistantName">
+          {{ settings.profile.assistantName }}
+        </strong>
       </template>
     </div>
     <button
@@ -98,9 +100,9 @@ function closeOnNarrowScreen() {
       <IconSymbol
         name="compose"
         :size="18"
-      /><span v-if="!ui.layout.sidebarCollapsed">{{
-        creating ? $t('正在新建…') : $t('新页')
-      }}</span><kbd v-if="!ui.layout.sidebarCollapsed">{{ mod }} N</kbd>
+      />
+      <span v-if="!ui.layout.sidebarCollapsed">{{ creating ? $t('正在新建…') : $t('新页') }}</span>
+      <kbd v-if="!ui.layout.sidebarCollapsed">{{ mod }} N</kbd>
     </button>
     <button
       class="sidebar-action"
@@ -113,9 +115,8 @@ function closeOnNarrowScreen() {
       <IconSymbol
         name="search"
         :size="18"
-      /><span v-if="!ui.layout.sidebarCollapsed">{{
-        $t('搜索')
-      }}</span>
+      />
+      <span v-if="!ui.layout.sidebarCollapsed">{{ $t('搜索') }}</span>
     </button>
     <button
       v-if="ui.layout.sidebarCollapsed"
@@ -144,7 +145,7 @@ function closeOnNarrowScreen() {
           :aria-label="$t('搜索工作区和对话')"
           :placeholder="$t('搜索工作区和对话')"
           @keydown.esc.stop="closeSearch"
-        >
+        />
         <button
           class="sidebar-icon"
           :aria-label="$t('关闭搜索')"
@@ -208,9 +209,8 @@ function closeOnNarrowScreen() {
         <IconSymbol
           name="review"
           :size="18"
-        /><span v-if="!ui.layout.sidebarCollapsed">{{
-          $t('工作记录')
-        }}</span>
+        />
+        <span v-if="!ui.layout.sidebarCollapsed">{{ $t('工作记录') }}</span>
       </router-link>
       <router-link
         to="/integrations"
@@ -221,9 +221,8 @@ function closeOnNarrowScreen() {
         <IconSymbol
           name="cube"
           :size="18"
-        /><span v-if="!ui.layout.sidebarCollapsed">{{
-          $t('扩展')
-        }}</span>
+        />
+        <span v-if="!ui.layout.sidebarCollapsed">{{ $t('扩展') }}</span>
       </router-link>
       <router-link
         to="/memory"
@@ -234,7 +233,10 @@ function closeOnNarrowScreen() {
         <span
           class="memory-mark"
           aria-hidden="true"
-        >✦</span><span v-if="!ui.layout.sidebarCollapsed">{{ $t('它记得') }}</span>
+        >
+          ✦
+        </span>
+        <span v-if="!ui.layout.sidebarCollapsed">{{ $t('它记得') }}</span>
       </router-link>
       <router-link
         to="/settings"
@@ -245,9 +247,8 @@ function closeOnNarrowScreen() {
         <IconSymbol
           name="settings"
           :size="18"
-        /><span v-if="!ui.layout.sidebarCollapsed">{{
-          $t('设置')
-        }}</span>
+        />
+        <span v-if="!ui.layout.sidebarCollapsed">{{ $t('设置') }}</span>
       </router-link>
     </footer>
     <ResizeHandle

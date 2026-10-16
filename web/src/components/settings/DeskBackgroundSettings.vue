@@ -9,9 +9,7 @@ import InkLoader from '@/components/common/InkLoader.vue'
 const desk = useDeskStore(),
   picker = ref<HTMLInputElement | null>(null)
 const panel = ref<HTMLElement | null>(null)
-const valueText = computed(() =>
-  t('{0}% · 正文至少 7:1，次要文字至少 4.5:1', [Math.round(desk.preferences.visibility * 100)]),
-)
+const valueText = computed(() => t('纸张透明度 {0}%', [Math.round(desk.paperTransparency * 100)]))
 async function choose(event: Event) {
   const input = event.target as HTMLInputElement,
     file = input.files?.[0]
@@ -40,9 +38,6 @@ async function choose(event: Event) {
         />
       </label>
     </header>
-    <p class="panel-copy">
-      {{ $t('图片留在案头，文字落在纸上。') }}
-    </p>
     <div class="desk-actions">
       <input
         ref="picker"
@@ -80,23 +75,39 @@ async function choose(event: Event) {
     </p>
     <template v-if="desk.image">
       <DeskFocalPreview />
-      <label class="setting-row">
-        <span>{{ $t('显现度') }}</span>
-        <input
-          type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          :value="desk.preferences.visibility"
-          :aria-valuetext="valueText"
-          @input="desk.change({ visibility: Number(($event.target as HTMLInputElement).value) })"
-        />
+      <label class="setting-row desk-opacity">
+        <span>{{ $t('纸张透明度') }}</span>
+        <span class="desk-opacity-control">
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            :value="Math.round(desk.paperTransparency * 100)"
+            :disabled="desk.busy"
+            :aria-valuetext="valueText"
+            aria-describedby="desk-readability"
+            @input="
+              desk.change({
+                paperTransparency: Number(($event.target as HTMLInputElement).value) / 100,
+              })
+            "
+          />
+          <output>{{ Math.round(desk.paperTransparency * 100) }}%</output>
+          <span
+            class="desk-opacity-scale"
+            aria-hidden="true"
+          >
+            <span>{{ $t('不透明') }}</span>
+            <span>{{ $t('更通透') }}</span>
+          </span>
+        </span>
       </label>
       <p
+        id="desk-readability"
         class="desk-readability"
-        role="status"
       >
-        {{ valueText }}
+        {{ $t('文字看不清时，请调低透明度。') }}
       </p>
     </template>
     <div
@@ -141,6 +152,28 @@ async function choose(event: Event) {
   font-size: var(--text-xs);
   color: var(--ink-2);
   font-variant-numeric: tabular-nums;
+}
+.desk-opacity-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  min-width: 0;
+  input {
+    width: 100%;
+    min-width: 0;
+  }
+  output {
+    min-width: var(--space-9);
+    text-align: end;
+    font-variant-numeric: tabular-nums;
+  }
+}
+.desk-opacity-scale {
+  display: flex;
+  justify-content: space-between;
+  color: var(--ink-2);
+  font-size: var(--text-xs);
 }
 .desk-preview {
   margin-top: var(--space-5);

@@ -34,7 +34,8 @@ async function submit() {
     :data-await="item.id"
   >
     <p class="question-caption">
-      <span>{{ $t('待回答') }}</span>{{ caption }}
+      <span>{{ $t('待回答') }}</span>
+      {{ caption }}
     </p>
     <form @submit.prevent="submit">
       <div
@@ -54,14 +55,15 @@ async function submit() {
           {{ option.label }}{{ option.recommended ? $t(' · 推荐') : '' }}
         </button>
       </div>
-      <label>{{ $t('你的回答')
-      }}<textarea
-        v-model="answer"
-        rows="3"
-        maxlength="10000"
-        :disabled="inbox.busy.includes(item.id)"
-        :placeholder="$t('选择建议答案，或输入自己的回答')"
-      />
+      <label>
+        {{ $t('你的回答') }}
+        <textarea
+          v-model="answer"
+          rows="3"
+          maxlength="10000"
+          :disabled="inbox.busy.includes(item.id)"
+          :placeholder="$t('选择建议答案，或输入自己的回答')"
+        />
       </label>
       <p
         v-if="failure"

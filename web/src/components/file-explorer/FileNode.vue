@@ -36,13 +36,16 @@ function select() {
         :size="12"
         class="chevron"
         :class="{ expanded: node.expanded }"
-      /><span
+      />
+      <span
         v-else
         class="spacer"
-      /><IconSymbol
+      />
+      <IconSymbol
         :name="node.type === 'directory' ? 'folder' : 'file'"
         :size="15"
-      /><span>{{ node.name }}</span>
+      />
+      <span>{{ node.name }}</span>
     </button>
     <div
       v-if="node.type === 'directory' && node.expanded"

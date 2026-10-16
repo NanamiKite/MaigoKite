@@ -21,7 +21,7 @@ const categories: Record<UserMemory['category'], string> = {
 }
 async function remove(item: UserMemory) {
   if (memory.saving) return
-  if (await confirmAction(t('遗忘这条记忆？')) && !memory.saving && props.item.id === item.id)
+  if ((await confirmAction(t('遗忘这条记忆？'))) && !memory.saving && props.item.id === item.id)
     await memory.remove(item.id)
 }
 </script>
@@ -43,7 +43,10 @@ async function remove(item: UserMemory) {
         :aria-valuemax="100"
         :aria-valuenow="confidence"
         :aria-valuetext="$t('置信度 {0}%', [confidence])"
-      ><i :style="{ '--memory-confidence': confidence / 100 }" /><small>{{ confidence }}%</small></span>
+      >
+        <i :style="{ '--memory-confidence': confidence / 100 }" />
+        <small>{{ confidence }}%</small>
+      </span>
       <router-link
         v-if="session.sessions.some((record) => record.id === item.source_id)"
         :to="'/chat/' + item.source_id"
@@ -62,9 +65,8 @@ async function remove(item: UserMemory) {
         <IconSymbol
           name="target"
           :size="14"
-        />{{
-          memory.pinnedIds.includes(item.id) ? $t('已置顶') : $t('置顶')
-        }}
+        />
+        {{ memory.pinnedIds.includes(item.id) ? $t('已置顶') : $t('置顶') }}
       </button>
       <button
         v-if="!editing"
@@ -74,7 +76,8 @@ async function remove(item: UserMemory) {
         <IconSymbol
           name="compose"
           :size="14"
-        />{{ $t('编辑') }}
+        />
+        {{ $t('编辑') }}
       </button>
       <button
         class="danger"

@@ -9,23 +9,29 @@
   }
   const tokens = ['--ink', '--ink-2', '--ink-3', '--accent-ink', '--accent-ink-action', '--wait-ink', '--seal', '--seal-ink-action', '--stone-ink', '--code-addition-ink', '--code-deletion-ink', '--on-accent', '--desk-seal-ink']
   const readPalette = parent => {
+    // Missing custom properties make color inherit. They are not registered
+    // colors and must not accidentally authorize arbitrary text ink.
+    const defined = tokens.filter(token => getComputedStyle(parent).getPropertyValue(token).trim())
     const probe = document.createElement('span'); probe.hidden = true; parent.append(probe)
-    const palette = Object.fromEntries(tokens.map(token => {
+    const palette = Object.fromEntries(defined.map(token => {
       probe.style.color = `var(${token})`; return [token, rgb(getComputedStyle(probe).color)]
     }))
     probe.remove(); return palette
   }
-  // Scope matters: the chat sheet has stronger text inks; the shell is unchanged.
+  // Keep overview palettes in the report, but match each text against its actual
+  // inherited tokens. Settings previews and nested panels can override them too.
   const palette = readPalette(root), chat = root.querySelector('.chat-body')
   const chatPalette = chat ? readPalette(chat) : palette
+  const scopedPalettes = new WeakMap()
   const rows = [], surfaces = '.chat-body,.messages-inner,.workpaper,.sidebar,.drawer,.composer,.titlebar,.windowbar,.appearance-preview'
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const el = node.parentElement
     if (!el || !node.textContent.trim() || !el.closest(surfaces) || el.closest('svg,script,style,.sr-only,[aria-hidden="true"],:disabled,[aria-disabled="true"]')) continue
     const css = getComputedStyle(el), range = document.createRange(); range.selectNodeContents(node)
-    const scoped = el.closest('.chat-body') ? chatPalette : palette
-    const color = rgb(css.color), matches = tokens.filter(token => scoped[token].every((v, i) => v === color[i]))
+    if (!scopedPalettes.has(el)) scopedPalettes.set(el, readPalette(el))
+    const scoped = scopedPalettes.get(el)
+    const color = rgb(css.color), matches = tokens.filter(token => scoped[token]?.every((v, i) => v === color[i]))
     for (const rect of range.getClientRects()) {
       let left = Math.max(0, rect.left), right = Math.min(innerWidth, rect.right)
       let top = Math.max(0, rect.top), bottom = Math.min(innerHeight, rect.bottom), visible = true

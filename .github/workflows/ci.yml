@@ -51,7 +51,11 @@ jobs:
         shell: bash
         run: |
           mkdir -p test-results
-          uv run --no-sync ruff check python/ --output-format github | tee test-results/ruff.log
+          uv run --no-sync ruff check python/ \
+            scripts/acceptance/gui_desk_*.py scripts/acceptance/desk_checks.py \
+            scripts/acceptance/gui_text_ink.py scripts/acceptance/text_ink_report.py \
+            scripts/acceptance/test_desk_checks.py \
+            --output-format github | tee test-results/ruff.log
       - name: Mypy
         id: mypy
         # Preserve every check's failure while still collecting the other results.
@@ -59,7 +63,11 @@ jobs:
         shell: bash
         run: |
           mkdir -p test-results
-          uv run --no-sync mypy python/agent --junit-xml test-results/mypy.xml | tee test-results/mypy.log
+          uv run --no-sync mypy python/agent \
+            scripts/acceptance/gui_desk_*.py scripts/acceptance/desk_checks.py \
+            scripts/acceptance/gui_text_ink.py scripts/acceptance/text_ink_report.py \
+            scripts/acceptance/test_desk_checks.py \
+            --junit-xml test-results/mypy.xml | tee test-results/mypy.log
       - name: Python tests and runtime acceptance
         id: tests
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
@@ -148,6 +156,9 @@ jobs:
             npm run lint:check -- "${files[@]}"
             npm run format:check -- "${files[@]}"
           fi
+      - name: TypeScript including test contracts
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: npx --no-install vue-tsc --noEmit -p tsconfig.json --incremental false
       - name: Vitest
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         timeout-minutes: 10

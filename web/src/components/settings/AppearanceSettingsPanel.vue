@@ -66,13 +66,20 @@ async function saveShortcut() {
       <label
         class="setting-row"
         data-settings-field="language"
-      ><span>{{ $t('语言') }}</span><InkSelect
-        :value="ui.appearance.language || 'zh-CN'"
-        :options="[{ value: 'zh-CN', label: $t('简体中文') }, { value: 'en', label: 'English' }, { value: 'system', label: $t('跟随系统') }]"
-        @change="
-          ui.setAppearance({ language: ($event.target as HTMLSelectElement).value as Language })
-        "
-      /></label>
+      >
+        <span>{{ $t('语言') }}</span>
+        <InkSelect
+          :value="ui.appearance.language || 'zh-CN'"
+          :options="[
+            { value: 'zh-CN', label: $t('简体中文') },
+            { value: 'en', label: 'English' },
+            { value: 'system', label: $t('跟随系统') },
+          ]"
+          @change="
+            ui.setAppearance({ language: ($event.target as HTMLSelectElement).value as Language })
+          "
+        />
+      </label>
       <div
         class="setting-row"
         data-settings-field="assistant-name"
@@ -84,7 +91,8 @@ async function saveShortcut() {
               id="assistant-name"
               v-model="name"
               maxlength="32"
-            ><button
+            />
+            <button
               class="secondary-button"
               :disabled="settings.saving || !name.trim()"
               :aria-busy="settings.saving || undefined"
@@ -98,8 +106,8 @@ async function saveShortcut() {
             class="field-error"
             role="alert"
           >
-            {{ nameError
-            }}<button
+            {{ nameError }}
+            <button
               class="text-button"
               :disabled="settings.saving"
               @click="saveName"
@@ -119,36 +127,49 @@ async function saveShortcut() {
       <label
         class="setting-row"
         data-settings-field="greeting-name"
-      ><span>{{ $t('怎么称呼你') }}</span><input
-        :value="ui.appearance.greetingName"
-        maxlength="32"
-        @input="ui.setAppearance({ greetingName: ($event.target as HTMLInputElement).value })"
-      ></label>
+      >
+        <span>{{ $t('怎么称呼你') }}</span>
+        <input
+          :value="ui.appearance.greetingName"
+          maxlength="32"
+          @input="ui.setAppearance({ greetingName: ($event.target as HTMLInputElement).value })"
+        />
+      </label>
       <label
         class="setting-row"
         data-settings-field="avatar"
-      ><span>{{ $t('头像字') }}</span><input
-        class="avatar-input"
-        :value="ui.appearance.avatar"
-        @input="
-          ui.setAppearance({
-            avatar: Array.from(($event.target as HTMLInputElement).value)[0] || '助',
-          })
-        "
-      ></label>
+      >
+        <span>{{ $t('头像字') }}</span>
+        <input
+          class="avatar-input"
+          :value="ui.appearance.avatar"
+          @input="
+            ui.setAppearance({
+              avatar: Array.from(($event.target as HTMLInputElement).value)[0] || '助',
+            })
+          "
+        />
+      </label>
     </section>
     <section class="setting-group">
       <h3>{{ $t('纸面与文字') }}</h3>
       <label
         class="setting-row"
         data-settings-field="theme"
-      ><span>{{ $t('纸页') }}</span><InkSelect
-        :value="ui.appearance.theme"
-        :options="[{ value: 'system', label: $t('跟随系统') }, { value: 'light', label: $t('宣纸') }, { value: 'dark', label: $t('松烟') }]"
-        @change="
-          ui.setAppearance({ theme: ($event.target as HTMLSelectElement).value as ThemeMode })
-        "
-      /></label>
+      >
+        <span>{{ $t('纸页') }}</span>
+        <InkSelect
+          :value="ui.appearance.theme"
+          :options="[
+            { value: 'system', label: $t('跟随系统') },
+            { value: 'light', label: $t('宣纸') },
+            { value: 'dark', label: $t('松烟') },
+          ]"
+          @change="
+            ui.setAppearance({ theme: ($event.target as HTMLSelectElement).value as ThemeMode })
+          "
+        />
+      </label>
       <div
         class="setting-row"
         data-settings-field="accent"
@@ -163,28 +184,39 @@ async function saveShortcut() {
             :style="{ '--swatch': 'var(' + swatches[accent.id] + ')' }"
             @click="ui.setAppearance({ accent: accent.id })"
           >
-            <i /><span>{{ $t(accent.label) }}</span>
+            <i />
+            <span>{{ $t(accent.label) }}</span>
           </button>
         </div>
       </div>
       <label
         class="setting-row"
         data-settings-field="text-size"
-      ><span>{{ $t('字号') }}</span><InkSelect
-        :value="ui.appearance.textSize || 'default'"
-        :options="[{ value: 'small', label: $t('紧凑') }, { value: 'default', label: $t('标准') }, { value: 'large', label: $t('舒展') }]"
-        @change="
-          ui.setAppearance({ textSize: ($event.target as HTMLSelectElement).value as TextSize })
-        "
-      /></label>
+      >
+        <span>{{ $t('字号') }}</span>
+        <InkSelect
+          :value="ui.appearance.textSize || 'default'"
+          :options="[
+            { value: 'small', label: $t('紧凑') },
+            { value: 'default', label: $t('标准') },
+            { value: 'large', label: $t('舒展') },
+          ]"
+          @change="
+            ui.setAppearance({ textSize: ($event.target as HTMLSelectElement).value as TextSize })
+          "
+        />
+      </label>
       <label
         class="setting-row"
         data-settings-field="texture"
-      ><span>{{ $t('纸纹') }}</span><input
-        type="checkbox"
-        :checked="ui.appearance.texture"
-        @change="ui.setAppearance({ texture: ($event.target as HTMLInputElement).checked })"
-      ></label>
+      >
+        <span>{{ $t('纸纹') }}</span>
+        <input
+          type="checkbox"
+          :checked="ui.appearance.texture"
+          @change="ui.setAppearance({ texture: ($event.target as HTMLInputElement).checked })"
+        />
+      </label>
     </section>
     <DeskBackgroundSettings />
     <section class="setting-group">
@@ -193,13 +225,16 @@ async function saveShortcut() {
       <label
         class="setting-row"
         data-settings-field="context-usage"
-      ><span>{{ $t('显示模型上下文窗口用量') }}</span><input
-        type="checkbox"
-        :checked="ui.appearance.showContextUsage !== false"
-        @change="
-          ui.setAppearance({ showContextUsage: ($event.target as HTMLInputElement).checked })
-        "
-      ></label>
+      >
+        <span>{{ $t('显示模型上下文窗口用量') }}</span>
+        <input
+          type="checkbox"
+          :checked="ui.appearance.showContextUsage !== false"
+          @change="
+            ui.setAppearance({ showContextUsage: ($event.target as HTMLInputElement).checked })
+          "
+        />
+      </label>
       <div
         v-if="desktopEffects"
         class="setting-row"
@@ -213,7 +248,8 @@ async function saveShortcut() {
               v-model="shortcut"
               maxlength="80"
               placeholder="Alt+Space"
-            ><button
+            />
+            <button
               class="secondary-button"
               :disabled="savingShortcut || !shortcut.trim()"
               @click="saveShortcut"

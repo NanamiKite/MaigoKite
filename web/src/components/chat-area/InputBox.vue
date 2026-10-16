@@ -6,6 +6,8 @@ import { useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
 import { useMentions } from '@/composables/useMentions'
 import { useComposerKeyboard } from '@/composables/useComposerKeyboard'
+import { useChatDraft } from '@/composables/useChatDraft'
+import { useWorkspaceStore } from '@/stores/workspace'
 import type { Mention } from '@/components/inkwell/MentionMenu.vue'
 import type { SlashCommand } from '@/components/inkwell/SlashMenu.vue'
 import {
@@ -37,6 +39,11 @@ const guideDisabled = computed(() => Boolean(props.waiting || props.guideReason)
 const showGuideHelp = ref(false)
 let draftRevision = 0
 const mode = ref<'ask' | 'plan' | 'auto'>(props.permissionMode === 'read_only' ? 'ask' : 'auto')
+const workspace = useWorkspaceStore()
+const draftKey = computed(() => props.sessionId || 'draft:' + workspace.selectedId)
+const draftCache = useChatDraft(draftKey, inputValue, images, mode, () =>
+  props.permissionMode === 'read_only' ? 'ask' : 'auto',
+)
 const ui = useUIStore(),
   router = useRouter(),
   mentions = useMentions(inputValue)
@@ -67,8 +74,8 @@ watch(
 watch(
   () => props.sessionId,
   () => {
-    inputValue.value = ''
-    images.value = []
+    submitError.value = ''
+    toolbar.value?.closeMenu()
     uploading.value = false
   },
 )
@@ -101,6 +108,7 @@ async function send(later = props.isSending) {
     return
   }
   const id = props.sessionId,
+    key = draftKey.value,
     draft = inputValue.value,
     revision = draftRevision
   submitting.value = true
@@ -121,9 +129,11 @@ async function send(later = props.isSending) {
       images.value.map((image) => ({ ...image })),
     )
     sent.value++
+    draftCache.clearSent(key, draft)
     if (props.sessionId === id && inputValue.value === draft && draftRevision === revision) {
       inputValue.value = ''
       images.value = []
+      draftCache.save(key)
     }
   } catch (reason) {
     if (props.sessionId === id)
@@ -217,7 +227,7 @@ const handleKeydown = useComposerKeyboard({
       />
       <ComposerHint ref="hint" />
       <ImageAttachments
-        :key="sessionId"
+        :key="draftKey + ':' + workspace.selectedId"
         v-model="images"
         :disabled="busy || isSending || !props.submit"
         @busy="uploading = $event"

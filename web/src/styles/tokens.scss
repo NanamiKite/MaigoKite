@@ -5,9 +5,7 @@
   --desk-focus-height: 180px;
   --desk-position: 50% 50%;
   --desk-clear: none;
-  --desk-soft: none;
-  --plate-a: 1;
-  --chat-plate-a: 1;
+  --desk-paper-a: 1;
   // Background-only reading inks. Decorative accents keep their original hue.
   --desk-ink-2: #394038;
   --desk-ink-3: #4d534b;
@@ -114,6 +112,14 @@
   --breakpoint-drawer: #{breakpoints.$drawer-overlay};
   --breakpoint-sidebar: #{breakpoints.$sidebar-overlay};
   --chat-min-width: 420px;
+  --chat-reading-min: 640px;
+  --chat-reading-default-max: 1040px;
+  --chat-reading-share: 0.78;
+  --chat-page-gutter: var(--space-5);
+  --chat-reading-gutter: var(--space-8);
+  --chat-tab-min: 112px;
+  --chat-tab-max: 220px;
+  --chat-tab-height: 36px;
   --panel-edge-gap: var(--space-5);
   --shadow-raised: var(--elevation-raised);
   --motion-reduced: 80ms;

@@ -86,11 +86,14 @@ async function resend(id: string) {
       :aria-expanded="expanded"
       @click="expanded = !expanded"
     >
-      <span class="node-glyph"><RailGlyph
-        :kind="node.kind"
-        :waiting="pending"
-        :running="node.running && !pending"
-      /></span><span class="node-title">{{ title }}</span>
+      <span class="node-glyph">
+        <RailGlyph
+          :kind="node.kind"
+          :waiting="pending"
+          :running="node.running && !pending"
+        />
+      </span>
+      <span class="node-title">{{ title }}</span>
       <SealMark
         v-if="node.await?.verdict"
         :verdict="node.await.verdict"
@@ -99,7 +102,9 @@ async function resend(id: string) {
         v-else
         class="disclosure"
         aria-hidden="true"
-      >{{ expanded ? '−' : '+' }}</span>
+      >
+        {{ expanded ? '−' : '+' }}
+      </span>
     </button>
     <div
       v-if="expanded"

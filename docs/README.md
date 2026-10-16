@@ -36,6 +36,7 @@ MaigoKite 是面向个人工作流的本地 Agent。本目录按读者和职责�
 | 数据备份与恢复 | [备份与恢复](ops-security/Backup.md) |
 | 开发环境、命令与贡献约束 | [开发指南](development/DevelopmentGuide.md) |
 | 场景与验证口径 | [测试与验收](testing/TestPlan.md) |
+| Agent 任务集、评分与重复试验 | [个人 Agent 行为评测](testing/AgentEvals.md) |
 | 构建、打包和发布门禁 | [构建与发布指南](deployment/ReleaseGuide.md) |
 | 用户首次使用 / 设置 | [安装与首次使用](user-guide/Installation.md)、[配置指南](user-guide/Configuration.md) |
 | 取舍历史 / 术语 | [架构决策](reference/Decisions.md)、[术语表](reference/Glossary.md) |

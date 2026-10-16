@@ -21,6 +21,8 @@
 
 最近修复的 SVG 预览和模型目录 TLS 问题已通过针对性测试。TLS 修复后还没有重新跑完整套测试，不能据此宣布所有检查都已通过。
 
+已新增 [个人 Agent 行为评测](../testing/AgentEvals.md)：10 个任务的独立重复试验、实际产物评分、轨迹与本地报告。当前仅评测装配及本地协议验证通过；没有运行真实模型，不能将参考脚本的通过率算作模型能力或第五批完整验收。
+
 <details>
 <summary>各项功能做到了哪里，还有哪些问题</summary>
 
@@ -55,6 +57,15 @@
 
 <details>
 <summary>10 月 15–16 日的详细测试记录</summary>
+
+### 2026-10-16 Agent 评测基础设施验收
+
+- 基线 `4985820` 加本轮评测文件；没有修改 `python/agent`、前端或产品行为。Inspect AI 作为可选 `eval` extra 接入，锁定版本为 0.3.281；不要求线上平台、账户或付费裁判。
+- `python -m pytest evals/tests -q`：**34 passed（8.51s）**。包括参考解、错误解、审批前不得写入、拒绝后继续、独立会话/目录、超时取消清理，以及本机合成 OpenAI-compatible HTTP/SSE 的真实工具回注和第二轮生成。后者只计 **PROTOCOL PASS**。
+- `python scripts/run_agent_evals.py --epochs 3 --log-dir <本轮临时目录>/acceptance`：10 项任务 × 3 次，**30/30 HARNESS_ONLY，0 errors**；Inspect 的 mean、pass_at_3、pass_k_3 均为 1。模型为固定脚本参考解，此结果只证明评测装配和这些生产执行链能运行，**不代表模型能力**。
+- 评测代码 Ruff、5 个入口/评测模块 mypy（`--follow-imports=silent`）、锁文件离线一致性与 `git diff --check` 通过；新增独立 `Agent eval harness` CI 工作流，只运行无模型凭据的评测装配。远程 Actions 尚未运行，不宣称远程 CI 已绿。
+- 首轮修复了评测侧的审批主体、浅拷贝后脚本游标及工具集预期：生产 `TodoListMiddleware` 还提供 `write_todos`，协议断言明确保留它，没有修改生产图来迁就 fixture。安全/结果断言不删除、不放宽。
+- OpenAI、Anthropic、Ollama 和真实 OpenAI-compatible 模型能力均 **UNVERIFIED**。本轮未读取应用凭据、调用付费 API，也未跑全量前端/后端/桌面验收。本轮临时环境、数据库、报告、缓存与本地协议服务清理后移除，不改用户现有环境和客户端。
 
 ### 2026-10-16 公共模型目录 TLS 修复复验
 

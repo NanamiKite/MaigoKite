@@ -47,6 +47,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+eval = [
+    # Offline trials, graders and local reports; not part of the desktop runtime.
+    "inspect-ai>=0.3.281,<0.4",
+]
 dev = [
     "build>=1.2.0",
     "pytest>=8.0.0",

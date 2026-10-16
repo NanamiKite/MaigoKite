@@ -1,0 +1,60 @@
+name: Agent eval harness
+
+on:
+  pull_request:
+    paths: ["python/**", "evals/**", "scripts/run_agent_evals.py", "pyproject.toml", "uv.lock", ".github/workflows/agent-evals.yml"]
+  push:
+    branches: [main, master]
+    paths: ["python/**", "evals/**", "scripts/run_agent_evals.py", "pyproject.toml", "uv.lock", ".github/workflows/agent-evals.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-evals-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  harness:
+    name: Offline harness (not model capability)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: python:.
+      MYPYPATH: python
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHON_DOTENV_DISABLED: "1"
+      LANGSMITH_TRACING: "false"
+      LANGCHAIN_TRACING_V2: "false"
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.16"
+          python-version: "3.14"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install optional evaluation dependencies
+        run: uv sync --locked --extra dev --extra eval --no-default-groups
+      - name: Check evaluation code
+        run: |
+          uv run --no-sync ruff check evals scripts/run_agent_evals.py
+          uv run --no-sync mypy evals/cases.py evals/driver.py evals/reference_model.py evals/suite.py scripts/run_agent_evals.py --follow-imports=silent
+      - name: Grader negative controls and Core isolation
+        run: uv run --no-sync python -m pytest evals/tests -q --junitxml=test-results/eval-tests.xml
+      - name: Repeat offline reference trials
+        # No secrets or remote-model options. The entry point denies networking.
+        run: uv run --no-sync python scripts/run_agent_evals.py --mode reference --epochs 3
+      - name: Upload local evaluation evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: agent-eval-harness
+          path: |
+            test-results/agent-evals/
+            test-results/eval-tests.xml
+          retention-days: 7
+          if-no-files-found: warn

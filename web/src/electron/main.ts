@@ -14,6 +14,7 @@ import { trayImage } from './tray-icons'
 import { i18n, resolveLanguage, t } from '../i18n'
 import type { Appearance } from '../stores/ui'
 import type { PulseState } from '../api/events'
+import type { GraphicsStatus } from './graphics-status'
 app.setName('MaigoKite')
 
 let mainWindow: BrowserWindow | null = null,
@@ -25,6 +26,58 @@ if (!singleInstance) app.quit()
 let quitting = false,
   appearance: Appearance | null = null,
   shortcut = ''
+const appearancePath = path.join(app.getPath('userData'), 'inkline-ui.json')
+try {
+  const value: unknown = JSON.parse(readFileSync(appearancePath, 'utf8'))
+  if (appearanceValue(value)) appearance = value
+} catch {
+  /* Missing or invalid preferences keep Electron's default acceleration policy. */
+}
+// Electron requires this choice before ready; changing preferences cannot alter this run.
+const hardwareAccelerationAtStartup = appearance?.hardwareAcceleration !== false
+if (singleInstance && !hardwareAccelerationAtStartup) app.disableHardwareAcceleration()
+let graphicsState: GraphicsStatus['state'] = 'pending'
+let graphicsFeatures: GraphicsStatus['features'] = {
+  compositing: null,
+  rasterization: null,
+  webgl: null,
+}
+function graphicsStatus(): GraphicsStatus {
+  return {
+    state: graphicsState,
+    enabledAtStartup: hardwareAccelerationAtStartup,
+    preferredEnabled: appearance?.hardwareAcceleration !== false,
+    features: { ...graphicsFeatures },
+  }
+}
+function publishGraphicsStatus() {
+  for (const window of [mainWindow, capsuleWindow]) {
+    if (window && !window.isDestroyed() && !window.webContents.isDestroyed())
+      window.webContents.send('graphics:changed', graphicsStatus())
+  }
+}
+app.on('gpu-info-update', () => {
+  // Before this event Chromium may return provisional software-only values.
+  try {
+    const features = app.getGPUFeatureStatus()
+    graphicsFeatures = {
+      compositing: features.gpu_compositing ?? null,
+      rasterization: features.rasterization ?? null,
+      webgl: features.webgl ?? null,
+    }
+    graphicsState = 'ready'
+  } catch {
+    graphicsFeatures = { compositing: null, rasterization: null, webgl: null }
+    graphicsState = 'unavailable'
+  }
+  publishGraphicsStatus()
+})
+app.on('child-process-gone', (_event, details) => {
+  if (details.type !== 'GPU') return
+  graphicsFeatures = { compositing: null, rasterization: null, webgl: null }
+  graphicsState = 'unavailable'
+  publishGraphicsStatus()
+})
 let pulseState: PulseState = 'idle'
 const children: ChildProcess[] = []
 const runtimeStartup = new AbortController()
@@ -35,7 +88,9 @@ const builtUI = app.isPackaged || process.env.MAIGOKITE_DESKTOP_BUILT === '1'
 const developmentURL = 'http://127.0.0.1:5173'
 const appIconPath = path.resolve(
   __dirname,
-  app.isPackaged ? '../dist/brand/app-icon-cat-ribbon-v1.png' : '../public/brand/app-icon-cat-ribbon-v1.png',
+  app.isPackaged
+    ? '../dist/brand/app-icon-cat-ribbon-v1.png'
+    : '../public/brand/app-icon-cat-ribbon-v1.png',
 )
 export function secureWebPreferences() {
   return {
@@ -78,7 +133,13 @@ function reportRuntimeFailure(message: string) {
   void stopRuntime().finally(() => app.exit(1))
   dialog.showErrorBox(t('应用服务无法启动'), message)
 }
-function startProcess(name: string, command: string, args: string[], cwd: string, configPath?: string) {
+function startProcess(
+  name: string,
+  command: string,
+  args: string[],
+  cwd: string,
+  configPath?: string,
+) {
   runtimeStartup.signal.throwIfAborted()
   const env = createRuntimeEnvironment()
   env.MAIGOKITE_INSTALL_DIR = installationRoot()
@@ -99,13 +160,15 @@ function startProcess(name: string, command: string, args: string[], cwd: string
   // Forward logs; `close` waits for inherited pipes before cleanup is considered finished.
   child.stdout?.on('data', (chunk: Buffer) => process.stdout.write(chunk))
   child.stderr?.on('data', (chunk: Buffer) => process.stderr.write(chunk))
-  child.stdin?.on('error', () => { /* The child may fail before its owner closes stdin. */ })
-  child.on('error', (error) =>
-    reportRuntimeFailure(t('{0} 启动失败：{1}', [name, error.message])),
-  )
+  child.stdin?.on('error', () => {
+    /* The child may fail before its owner closes stdin. */
+  })
+  child.on('error', (error) => reportRuntimeFailure(t('{0} 启动失败：{1}', [name, error.message])))
   child.on('exit', (code, signal) => {
     if (!quitting && !runtimeShutdown)
-      reportRuntimeFailure(t('{0} 已退出（{1}）。请查看终端日志后重新启动。', [name, signal || String(code)]))
+      reportRuntimeFailure(
+        t('{0} 已退出（{1}）。请查看终端日志后重新启动。', [name, signal || String(code)]),
+      )
   })
   child.once('close', () => {
     const index = children.indexOf(child)
@@ -129,7 +192,9 @@ async function waitForService(service: 'Backend' | 'Web') {
         signal: AbortSignal.any([signal, AbortSignal.timeout(1_000)]),
       })
       ready = response.ok && (!backend || (await response.json()).status === 'ok')
-    } catch { /* Retry while initialization is still in progress. */ }
+    } catch {
+      /* Retry while initialization is still in progress. */
+    }
     signal.throwIfAborted()
     if (ready) return
     await delay(250, undefined, { signal })
@@ -139,17 +204,24 @@ async function waitForService(service: 'Backend' | 'Web') {
 async function startRuntime() {
   if (process.env.MAIGOKITE_EXTERNAL_RUNTIME === '1' || process.env.VITE_MOCK === '1') return
   // Do not attach to a previous instance's open TCP port or mutate its database.
-  for (const port of [8080]) await new Promise<void>((resolve, reject) => {
-    const server = createServer()
-    server.once('error', () => reject(new Error(t('端口 {0} 已被占用，请先退出已有应用服务。', [port]))))
-    server.listen({ host: '127.0.0.1', port, exclusive: true }, () => server.close(() => resolve()))
-  })
+  for (const port of [8080])
+    await new Promise<void>((resolve, reject) => {
+      const server = createServer()
+      server.once('error', () =>
+        reject(new Error(t('端口 {0} 已被占用，请先退出已有应用服务。', [port]))),
+      )
+      server.listen({ host: '127.0.0.1', port, exclusive: true }, () =>
+        server.close(() => resolve()),
+      )
+    })
   const root = projectRoot()
   const bundledConfig = path.join(process.resourcesPath, 'config', 'config.prod.yaml')
   const configPath = process.env.MAIGOKITE_CONFIG
     ? absoluteHostPath(process.env.MAIGOKITE_CONFIG)
     : app.isPackaged
-      ? (existsSync(bundledConfig) ? bundledConfig : undefined)
+      ? existsSync(bundledConfig)
+        ? bundledConfig
+        : undefined
       : path.join(root, 'config', 'config.dev.yaml')
   if (app.isPackaged) {
     const executableSuffix = process.platform === 'win32' ? '.exe' : ''
@@ -167,12 +239,7 @@ async function startRuntime() {
     startProcess(
       'Backend',
       python,
-      [
-        path.join(root, 'python', 'main.py'),
-        'run',
-        '--port',
-        '8080',
-      ],
+      [path.join(root, 'python', 'main.py'), 'run', '--port', '8080'],
       root,
       configPath,
     )
@@ -183,33 +250,41 @@ async function startRuntime() {
 function stopRuntime(): Promise<void> {
   if (runtimeShutdown) return runtimeShutdown
   runtimeStartup.abort()
-  runtimeShutdown = Promise.all(children.splice(0).map((child) => new Promise<void>((resolve) => {
-    const pid = child.pid
-    if (!pid) {
-      resolve()
-      return
-    }
-    function terminate(processId: number, signal: NodeJS.Signals) {
-      try {
-        if (process.platform === 'win32') {
-          const killer = spawn('taskkill', ['/PID', String(processId), '/T', '/F'], {
-            shell: false, stdio: 'ignore', env: createRuntimeEnvironment(),
+  runtimeShutdown = Promise.all(
+    children.splice(0).map(
+      (child) =>
+        new Promise<void>((resolve) => {
+          const pid = child.pid
+          if (!pid) {
+            resolve()
+            return
+          }
+          function terminate(processId: number, signal: NodeJS.Signals) {
+            try {
+              if (process.platform === 'win32') {
+                const killer = spawn('taskkill', ['/PID', String(processId), '/T', '/F'], {
+                  shell: false,
+                  stdio: 'ignore',
+                  env: createRuntimeEnvironment(),
+                })
+                killer.once('error', () => child.kill(signal))
+              } else process.kill(-processId, signal)
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== 'ESRCH')
+                console.error('[MaigoKite] Runtime shutdown:', error)
+            }
+          }
+          const timeout = setTimeout(() => terminate(pid, 'SIGKILL'), 15_000)
+          child.once('close', () => {
+            clearTimeout(timeout)
+            resolve()
           })
-          killer.once('error', () => child.kill(signal))
-        } else process.kill(-processId, signal)
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') console.error('[MaigoKite] Runtime shutdown:', error)
-      }
-    }
-    const timeout = setTimeout(() => terminate(pid, 'SIGKILL'), 15_000)
-    child.once('close', () => {
-      clearTimeout(timeout)
-      resolve()
-    })
-    // EOF works on Windows too; SIGTERM there would immediately terminate Python.
-    child.stdin?.end()
-    if (process.platform !== 'win32') terminate(pid, 'SIGTERM')
-  }))).then(() => undefined)
+          // EOF works on Windows too; SIGTERM there would immediately terminate Python.
+          child.stdin?.end()
+          if (process.platform !== 'win32') terminate(pid, 'SIGTERM')
+        }),
+    ),
+  ).then(() => undefined)
   return runtimeShutdown
 }
 export function isAllowedNavigation(target: string, development: boolean) {
@@ -315,32 +390,32 @@ function setAppearance(value: Appearance) {
     }
   }
   if (JSON.stringify(value) === JSON.stringify(appearance)) return
+  // A failed disk write must not appear saved in either window or the next request.
+  writeFileSync(appearancePath, JSON.stringify(value), 'utf8')
   appearance = value
   i18n.global.locale.value = resolveLanguage(value.language, app.getLocale())
   updateTrayMenu()
   setPulse(pulseState)
   capsuleWindow?.setTitle(`MaigoKite · ${t('速记')}`)
-  writeFileSync(
-    path.join(app.getPath('userData'), 'inkline-ui.json'),
-    JSON.stringify(value),
-    'utf8',
-  )
   for (const window of [mainWindow, capsuleWindow])
     window?.webContents.send('appearance:changed', value)
+  publishGraphicsStatus()
 }
 function setPulse(state: PulseState) {
   pulseState = state
   tray?.setImage(trayImage(state))
   tray?.setToolTip(
     'MaigoKite · ' +
-      t({
-        idle: '静息',
-        thinking: '思考',
-        acting: '行动',
-        waiting: '等待确认',
-        error: '出错',
-        offline: '离线',
-      }[state]),
+      t(
+        {
+          idle: '静息',
+          thinking: '思考',
+          acting: '行动',
+          waiting: '等待确认',
+          error: '出错',
+          offline: '离线',
+        }[state],
+      ),
   )
 }
 function createTray() {
@@ -369,47 +444,43 @@ function updateTrayMenu() {
     ]),
   )
 }
-app.whenReady().then(async () => {
-  if (!singleInstance || quitting) return
-  if (process.platform === 'darwin') app.dock?.setIcon(appIconPath)
-  try {
-    const value: unknown = JSON.parse(
-      readFileSync(path.join(app.getPath('userData'), 'inkline-ui.json'), 'utf8'),
-    )
-    if (appearanceValue(value)) appearance = value
-  } catch {
-    /* First launch uses saved renderer appearance. */
-  }
-  i18n.global.locale.value = resolveLanguage(appearance?.language, app.getLocale())
-  registerIPC({
-    main: () => mainWindow,
-    capsule: () => capsuleWindow,
-    allowed: (url) => isAllowedNavigation(url, !builtUI),
-    workspace: (folderId = '') => registeredWorkspaceRoot(folderId),
-    appearance: () => appearance,
-    setAppearance,
-    pulse: setPulse,
+app
+  .whenReady()
+  .then(async () => {
+    if (!singleInstance || quitting) return
+    if (process.platform === 'darwin') app.dock?.setIcon(appIconPath)
+    i18n.global.locale.value = resolveLanguage(appearance?.language, app.getLocale())
+    registerIPC({
+      main: () => mainWindow,
+      capsule: () => capsuleWindow,
+      allowed: (url) => isAllowedNavigation(url, !builtUI),
+      workspace: (folderId = '') => registeredWorkspaceRoot(folderId),
+      appearance: () => appearance,
+      setAppearance,
+      pulse: setPulse,
+      graphics: graphicsStatus,
+    })
+    await startRuntime()
+    if (!builtUI) await waitForService('Web')
+    if (quitting) return
+    createWindow()
+    createTray()
+    try {
+      setShortcut(appearance?.capsuleShortcut || 'Alt+Space')
+    } catch {
+      /* Settings can choose a free shortcut. */
+    }
+    app.on('activate', () => {
+      if (!mainWindow) createWindow()
+      mainWindow?.show()
+    })
   })
-  await startRuntime()
-  if (!builtUI) await waitForService('Web')
-  if (quitting) return
-  createWindow()
-  createTray()
-  try {
-    setShortcut(appearance?.capsuleShortcut || 'Alt+Space')
-  } catch {
-    /* Settings can choose a free shortcut. */
-  }
-  app.on('activate', () => {
-    if (!mainWindow) createWindow()
-    mainWindow?.show()
+  .catch(async (error: unknown) => {
+    reportRuntimeFailure(error instanceof Error ? error.message : String(error))
+    await stopRuntime()
+    if (quitting) app.quit()
+    else app.exit(1)
   })
-}).catch(async (error: unknown) => {
-  reportRuntimeFailure(error instanceof Error ? error.message : String(error))
-  await stopRuntime()
-  if (quitting) app.quit()
-  else app.exit(1)
-})
 app.on('before-quit', (event) => {
   if (shutdownComplete || !singleInstance) return
   event.preventDefault()
@@ -421,7 +492,10 @@ app.on('before-quit', (event) => {
     app.quit()
   })
 })
-app.on('second-instance', () => { mainWindow?.show(); mainWindow?.focus() })
+app.on('second-instance', () => {
+  mainWindow?.show()
+  mainWindow?.focus()
+})
 process.on('SIGINT', () => app.quit())
 process.on('SIGTERM', () => app.quit())
 process.on('SIGHUP', () => app.quit())

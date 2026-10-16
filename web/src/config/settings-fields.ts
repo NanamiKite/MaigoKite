@@ -1,4 +1,5 @@
 import { t } from '@/i18n'
+import { desktopEffects } from '@/composables/useElectron'
 export interface SettingsField {
   id: string
   tab: string
@@ -125,6 +126,16 @@ export const settingsFields: SettingsField[] = [
     label: '运行状态',
     keywords: 'backend core version 工作区 路径',
   },
+  ...(desktopEffects
+    ? [
+        {
+          id: 'hardware-acceleration',
+          tab: 'workspace',
+          label: '使用硬件加速',
+          keywords: 'GPU graphics acceleration desktop 图形 显卡 桌面 渲染',
+        },
+      ]
+    : []),
 ]
 export function searchSettings(query: string, fields = settingsFields) {
   const words = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)

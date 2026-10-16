@@ -4,6 +4,8 @@ import { useSettingsStore } from '@/stores/settings'
 import { useWorkspaceStore } from '@/stores/workspace'
 import Pulse from '@/components/shell/Pulse.vue'
 import InkLoader from '@/components/common/InkLoader.vue'
+import DesktopGraphicsSettings from './DesktopGraphicsSettings.vue'
+import { desktopEffects } from '@/composables/useElectron'
 const settings = useSettingsStore(),
   workspace = useWorkspaceStore()
 const status = computed(() => settings.runtimeStatus)
@@ -28,13 +30,14 @@ watch(
         {{ settings.runtimeLoading ? $t('刷新中…') : $t('刷新') }}
       </button>
     </header>
+    <DesktopGraphicsSettings v-if="desktopEffects" />
     <div
       v-if="settings.runtimeError"
       class="field-error"
       role="alert"
     >
-      {{ settings.runtimeError
-      }}<button
+      {{ settings.runtimeError }}
+      <button
         class="secondary-button"
         @click="settings.loadRuntimeStatus(workspace.selectedId)"
       >
@@ -45,7 +48,9 @@ watch(
       v-else-if="settings.runtimeLoading"
       class="runtime-loading"
     >
-      <InkLoader /><InkLoader /><span class="sr-only">{{ $t('正在读取运行状态…') }}</span>
+      <InkLoader />
+      <InkLoader />
+      <span class="sr-only">{{ $t('正在读取运行状态…') }}</span>
     </div>
     <template v-else-if="status">
       <section class="setting-group">
@@ -55,15 +60,14 @@ watch(
       <section class="setting-group">
         <h3>{{ $t('服务与版本') }}</h3>
         <article
-          v-for="service in [
-            { label: '应用服务', value: status.backend },
-          ]"
+          v-for="service in [{ label: '应用服务', value: status.backend }]"
           :key="service.label"
           class="runtime-service"
         >
-          <Pulse :state="service.value.status === 'serving' ? 'idle' : 'offline'" /><strong>{{
-            $t(service.label)
-          }}</strong><code>{{ service.value.version || $t('版本未知') }}</code><span>{{ service.value.status === 'serving' ? $t('运行中') : $t('不可用') }}</span>
+          <Pulse :state="service.value.status === 'serving' ? 'idle' : 'offline'" />
+          <strong>{{ $t(service.label) }}</strong>
+          <code>{{ service.value.version || $t('版本未知') }}</code>
+          <span>{{ service.value.status === 'serving' ? $t('运行中') : $t('不可用') }}</span>
         </article>
       </section>
       <p
@@ -77,8 +81,8 @@ watch(
       v-else
       class="panel-copy"
     >
-      {{ $t('尚未读取运行状态。')
-      }}<button
+      {{ $t('尚未读取运行状态。') }}
+      <button
         class="secondary-button"
         @click="settings.loadRuntimeStatus(workspace.selectedId)"
       >

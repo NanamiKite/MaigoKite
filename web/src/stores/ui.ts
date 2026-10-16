@@ -20,6 +20,7 @@ export interface Appearance {
   avatar: string
   capsuleShortcut: string
   showContextUsage?: boolean
+  hardwareAcceleration?: boolean
 }
 export const accents: Array<{ id: Accent; label: string }> = [
   { id: 'stone', label: '石青' },
@@ -37,10 +38,13 @@ export function validAppearance(value: unknown): value is Appearance {
     accents.some((a) => a.id === p.accent) &&
     typeof p.texture === 'boolean' &&
     (p.textSize === undefined || ['small', 'default', 'large'].includes(String(p.textSize))) &&
-    (p.enterBehavior === undefined || p.enterBehavior === 'send' || p.enterBehavior === 'newline') &&
+    (p.enterBehavior === undefined ||
+      p.enterBehavior === 'send' ||
+      p.enterBehavior === 'newline') &&
     (p.confirmEnterSend === undefined || typeof p.confirmEnterSend === 'boolean') &&
     (p.language === undefined || ['zh-CN', 'en', 'system'].includes(String(p.language))) &&
     (p.showContextUsage === undefined || typeof p.showContextUsage === 'boolean') &&
+    (p.hardwareAcceleration === undefined || typeof p.hardwareAcceleration === 'boolean') &&
     typeof p.greetingName === 'string' &&
     p.greetingName.length <= 32 &&
     typeof p.avatar === 'string' &&
@@ -63,7 +67,8 @@ export const useUIStore = defineStore('ui', () => {
     enterBehavior: 'newline',
     confirmEnterSend: false,
   }
-  const storageKey = import.meta.env.VITE_MOCK === '1' ? 'maigokite_inkline_demo' : 'maigokite_inkline'
+  const storageKey =
+    import.meta.env.VITE_MOCK === '1' ? 'maigokite_inkline_demo' : 'maigokite_inkline'
   let stored: unknown
   try {
     stored = JSON.parse(localStorage.getItem(storageKey) || 'null')
@@ -100,6 +105,12 @@ export const useUIStore = defineStore('ui', () => {
     if (!validAppearance(next)) throw new Error(t('快捷键格式不正确'))
     if (desktop) await desktop.setAppearance(next)
     appearance.value = next
+  }
+  async function setHardwareAcceleration(value: boolean) {
+    if (!desktop) throw new Error(t('硬件加速仅适用于桌面客户端。'))
+    // Do not report success until the main process has persisted the startup preference.
+    await desktop.setAppearance({ ...appearance.value, hardwareAcceleration: value })
+    appearance.value = { ...appearance.value, hardwareAcceleration: value }
   }
   function openDrawer(tab = drawerTab.value) {
     drawerTab.value = tab
@@ -183,6 +194,7 @@ export const useUIStore = defineStore('ui', () => {
     shortcutsOpen,
     setAppearance,
     setCapsuleShortcut,
+    setHardwareAcceleration,
     openDrawer,
     openFilePreview,
     locateChatTurn,

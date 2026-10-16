@@ -1,7 +1,8 @@
 import type { Appearance } from '../stores/ui'
 import type { DesktopNotification, CapsuleRequest } from './preload'
 export const pulseStates = ['idle', 'thinking', 'acting', 'waiting', 'error', 'offline'] as const
-const string = (value: unknown, max: number): value is string => typeof value === 'string' && value.length <= max
+const string = (value: unknown, max: number): value is string =>
+  typeof value === 'string' && value.length <= max
 export function appearanceValue(value: unknown): value is Appearance {
   if (!value || typeof value !== 'object') return false
   const p = value as Record<string, unknown>
@@ -11,13 +12,18 @@ export function appearanceValue(value: unknown): value is Appearance {
     typeof p.texture === 'boolean' &&
     (p.language === undefined || ['zh-CN', 'en', 'system'].includes(String(p.language))) &&
     (p.showContextUsage === undefined || typeof p.showContextUsage === 'boolean') &&
-    (p.enterBehavior === undefined || p.enterBehavior === 'send' || p.enterBehavior === 'newline') &&
+    (p.hardwareAcceleration === undefined || typeof p.hardwareAcceleration === 'boolean') &&
+    (p.enterBehavior === undefined ||
+      p.enterBehavior === 'send' ||
+      p.enterBehavior === 'newline') &&
     (p.confirmEnterSend === undefined || typeof p.confirmEnterSend === 'boolean') &&
     string(p.greetingName, 32) &&
     string(p.avatar, 4) &&
     Array.from(p.avatar).length === 1 &&
     string(p.capsuleShortcut, 80) &&
-    /^(?:(?:Alt|CommandOrControl|Command|Control|Shift|Super)\+)+(?:Space|[A-Z0-9]|F\d{1,2})$/.test(p.capsuleShortcut)
+    /^(?:(?:Alt|CommandOrControl|Command|Control|Shift|Super)\+)+(?:Space|[A-Z0-9]|F\d{1,2})$/.test(
+      p.capsuleShortcut,
+    )
   )
 }
 export function capsuleValue(value: unknown): value is CapsuleRequest {

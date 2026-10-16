@@ -1,6 +1,6 @@
 # MaigoKite 前端
 
-基于现有 Vue 3、Pinia、Vue Router、Vite 5、Electron 28 和 Python FastAPI 后端，采用「墨线」视觉语言。
+基于现有 Vue 3、Pinia、Vue Router、Vite 5、Electron 44 和 Python FastAPI 后端，采用「墨线」视觉语言。
 桌面应用名为 MaigoKite，使用同名桌面配置目录与 `maigokite_` 缓存键，不保留旧标识兼容层；助手称呼仍可单独设置。
 Chat、Memory、Settings 等页面通过既有 HTTP API 读写产品数据，不在前端维护另一套执行状态机。
 首页进入空白对话；原 Overview 保留为 `/overview`，扩展、审计、数据和知识库路由继续保留，均可从万能面板打开。
@@ -10,6 +10,7 @@ Chat、Memory、Settings 等页面通过既有 HTTP API 读写产品数据，不
 ```sh
 cd web
 npm ci
+npm run electron:install
 npm run dev
 ```
 
@@ -63,7 +64,7 @@ Web 编译：`npm run build:web`；Web + Electron 编译：`npm run build`。Web
 - 上下文窗口未知时不显示占用百分比，不用输出长度估算容量；缺少权威文件变更记录时，不伪造回合新增/删除行数。
 - 计划只消费任务所属的结构化事件，不用工作区 TODO 代替。自动记忆事件仍未交付，Mock 节点不代表生产能力。
 - 进程操作只针对 Core 持有的真实命令句柄，不提供任意后台进程管理或终端恢复。
-- Electron 28 的 macOS 通知可提供“允许”动作；其他平台通过点击通知打开会话处理，不假定已有同等系统能力。
+- macOS 通知可提供“允许”动作，但 Electron 42+ 要求应用签名；未签名或系统拒绝通知时仍从应用内处理。其他平台通过点击通知打开会话，不假定已有同等系统能力。
 
 ## 首批 UI 检查记录
 

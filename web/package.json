@@ -28,6 +28,7 @@
     "generate:contracts": "node scripts/generate-contracts.mjs",
     "electron:dev": "node ../scripts/local.cjs start desktop dev",
     "electron:compile": "node ../scripts/lib/web-build.cjs electron",
+    "electron:install": "node --use-env-proxy node_modules/electron/install.js",
     "electron:build": "npm run build && electron-builder",
     "electron:preview": "node ../scripts/local.cjs start desktop built",
     "test:run": "vitest run"
@@ -40,15 +41,10 @@
     "vue-i18n": "11.4.14",
     "vue-router": "^4.2.0"
   },
-  "overrides": {
-    "extract-zip": {
-      "yauzl": "3.3.1"
-    }
-  },
   "devDependencies": {
     "ajv": "^8.17.1",
     "openapi-typescript": "^7.10.1",
-    "@types/node": "^20.0.0",
+    "@types/node": "^24.9.0",
     "@vitejs/plugin-vue": "^5.0.0",
     "@vitest/ui": "^1.1.0",
     "@vue/eslint-config-typescript": "^13.0.0",
@@ -56,8 +52,8 @@
     "@vue/tsconfig": "^0.5.0",
     "autoprefixer": "^10.4.16",
     "concurrently": "^8.2.0",
-    "electron": "^28.0.0",
-    "electron-builder": "^24.0.0",
+    "electron": "^44.8.0",
+    "electron-builder": "^26.17.0",
     "esbuild": "^0.21.5",
     "eslint": "^8.56.0",
     "eslint-plugin-vue": "^9.20.0",

@@ -65,13 +65,13 @@ from agent.data_contracts import (
     available_approval_scopes,
 )
 from agent.errors import UserFacingCancellation, UserFacingError, public_error
-from agent.event_contracts import event_payload
 from agent.media import IMAGE_LIMIT, ImageReference
 from agent.models.context_capacity import ContextCapacity
-from agent.models.reasoning import ThinkTagStream, split_thinking, visible_reasoning
+from agent.models.reasoning import message_text
 from agent.repository import ConversationBusyError, SQLiteRepository
 from agent.runtime.context import ContextBudgetMiddleware, SafeSummarizationMiddleware
 from agent.runtime.images import image_message
+from agent.runtime.projection import END_OF_EVENTS, EventPublisher, MaigoKiteEvent, RunProjection, publish_event
 from agent.runtime.subagents import CHILD_TAG, ChildContext, DelegateTool, ListSubagentModelsTool, create_readonly_agent
 from agent.safety import SafetyReviewer, SafetyReviewError, SafetyReviewInput, SafetyReviewResult, skipped_review
 from agent.structured_output import (
@@ -99,15 +99,6 @@ def _tool_call_id(call: NativeToolCall) -> str:
     return call_id
 
 
-@dataclass(frozen=True, slots=True)
-class MaigoKiteEvent:
-    """A stable product event that does not expose LangGraph event classes."""
-
-    type: str
-    payload: JSONObject
-
-
-EventPublisher = Callable[[str, Mapping[str, object]], Awaitable[None]]
 ModelResolver = Callable[[str, str, str], Awaitable[tuple[str, BaseChatModel]]]
 
 
@@ -132,9 +123,6 @@ class ProductToolSpec:
     runtime_tool: StructuredTool
 
 
-_END = object()
-
-
 class RunHandle:
     """One run owns one root asyncio task and an event queue."""
 
@@ -153,7 +141,7 @@ class RunHandle:
     async def events(self) -> AsyncIterator[MaigoKiteEvent]:
         while True:
             item = await self._queue.get()
-            if item is _END:
+            if item is END_OF_EVENTS:
                 return
             assert isinstance(item, MaigoKiteEvent)
             yield item
@@ -184,19 +172,10 @@ class RunHandle:
 class _RunContext:
     adapter: LangGraphRuntime
     request: RuntimeRunRequest
-    queue: asyncio.Queue[MaigoKiteEvent | object]
+    projection: RunProjection
     execution_metadata: ExecutionMetadata = field(default_factory=ExecutionMetadata)
     latest_tool_calls: list[NativeToolCall] = field(default_factory=list)
-    finished_tool_calls: set[str] = field(default_factory=set)
-    terminal_emitted: bool = False
-    reasoning_parts: list[str] = field(default_factory=list)
-    reasoning_started: bool = False
-    reasoning_completed: bool = False
-    reasoning_streamed: bool = False
-    text_stream: ThinkTagStream = field(default_factory=ThinkTagStream)
-    final_saved: bool = False
     tool_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    event_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     started: asyncio.Event = field(default_factory=asyncio.Event)
     direct_tool: NativeToolCall | None = None
     review_call_ids: set[str] = field(default_factory=set)
@@ -212,6 +191,10 @@ class _RunContext:
     result_budget: tuple[int, int] | None = None
     # Pending UI metrics only; the summary itself belongs to LangGraph state.
     compaction_receipt: tuple[str, dict[str, Any]] | None = None
+
+    @property
+    def terminal_emitted(self) -> bool:
+        return self.projection.terminal_delivered
 
 
 class _ProductToolMiddleware(AgentMiddleware[AgentState[object], _RunContext]):
@@ -1041,7 +1024,9 @@ class LangGraphRuntime:
                          and call["name"] == pending["tool_name"]), None)
             if call is None:
                 raise ValueError("approval no longer matches the runtime checkpoint")
-            review_context = _RunContext(self, request, asyncio.Queue())
+            review_context = _RunContext(
+                self, request, RunProjection(self.repository, self._event_publisher, request, asyncio.Queue()),
+            )
             if self._execution_metadata is not None:
                 review_context.execution_metadata = await self._execution_metadata(request)
             policy = self._policy_decision(call["name"], call["args"], review_context)
@@ -1272,7 +1257,7 @@ class LangGraphRuntime:
         ))
         cancelled = product_task["status"] == "cancelled"
         queue: asyncio.Queue[MaigoKiteEvent | object] = asyncio.Queue()
-        context = _RunContext(self, request, queue)
+        context = _RunContext(self, request, RunProjection(self.repository, self._event_publisher, request, queue))
         context.direct_tool = (
             None if cancelled else self._direct_tool_call(str(product_task["input_text"]), request.task_id)
         )
@@ -1402,7 +1387,7 @@ class LangGraphRuntime:
             snapshot = await graph.aget_state(config)
             if snapshot.interrupts:
                 return
-            await self._complete_reasoning(context)
+            await context.projection.complete_reasoning()
             task = await self.repository.get_task(
                 context.request.workspace_id, context.request.task_id
             )
@@ -1413,7 +1398,6 @@ class LangGraphRuntime:
                     context.request.workspace_id, context.request.task_id, snapshot.values["structured_response"],
                 )
                 if saved is not None:
-                    context.final_saved = True
                     await self._emit(
                         context, "message.completed", {"content": saved["content"], "message_id": saved["id"]}
                     )
@@ -1481,7 +1465,7 @@ class LangGraphRuntime:
                     },
                 )
         finally:
-            await context.queue.put(_END)
+            await context.projection.queue.put(END_OF_EVENTS)
 
     async def _settle_compaction(
         self, graph: Any, config: dict[str, Any], context: _RunContext, *, cancelled: bool,
@@ -1542,7 +1526,9 @@ class LangGraphRuntime:
                 conversation_id=str(cancelled["conversation_id"]),
                 task_id=task_id,
             )
-            await self._publish_event(
+            await publish_event(
+                self.repository,
+                self._event_publisher,
                 request,
                 "task.cancelled",
                 {"message": "Cancelled by user"},
@@ -1603,101 +1589,15 @@ class LangGraphRuntime:
                     continue
                 if not isinstance(message, AIMessage):
                     continue
-                # Non-streaming integrations expose reasoning only on the final
-                # message. Streaming updates contain the same text: don't repeat it.
-                if not context.reasoning_streamed and (reasoning := self._reasoning_text(message)):
-                    await self._append_reasoning(reasoning, context)
-                await self._project_text_delta("", context, final=True)
-                if not context.text_stream.reasoning_emitted:
-                    _, reasoning = split_thinking(self._raw_message_text(message))
-                    if reasoning:
-                        await self._append_reasoning(reasoning, context, separate=True)
-                # Each model turn has its own leading prefix, including turns
-                # before/after a tool batch. Never carry parsing state across it.
-                context.text_stream = ThinkTagStream()
-                context.reasoning_streamed = False
-                await self._complete_reasoning(context)
+                await context.projection.model_message(message)
                 if message.tool_calls:
                     await self._record_tool_proposals(message, context)
-                else:
-                    content = self._message_text(message)
-                    if content and not context.final_saved and context.request.output_schema is None:
-                        saved = await self.repository.append_message(
-                            context.request.conversation_id,
-                            "assistant",
-                            content,
-                        )
-                        await self._emit(
-                            context,
-                            "message.completed",
-                            {"content": content, "message_id": saved["id"]},
-                        )
-                        context.final_saved = True
 
     async def _map_message(self, message: BaseMessage, context: _RunContext) -> None:
         if isinstance(message, AIMessageChunk):
-            reasoning = self._reasoning_text(message)
-            if reasoning:
-                context.reasoning_streamed = True
-                await self._append_reasoning(reasoning, context)
-            await self._project_text_delta(self._raw_message_text(message), context)
-            return
-        if isinstance(message, ToolMessage):
-            if context.request.output_schema is not None and message.name == OUTPUT_TOOL_NAME:
-                return
-            call_id = str(message.tool_call_id or "")
-            if not call_id or call_id in context.finished_tool_calls:
-                return
-            failed = getattr(message, "status", "success") == "error"
-            content = self._message_text(message)
-            product = message.artifact if isinstance(message.artifact, dict) else {}
-            summary = str(product.get("summary") or content)[:500]
-            stored = await self.repository.get_tool_call(call_id)
-            tool_name = str(message.name or stored["tool_name"])
-            status = "failed" if failed else "succeeded"
-            if failed and stored["status"] == "denied":
-                status = "denied"
-            error_code = product.get("error_code")
-            if status == "denied" and not error_code:
-                error_code = "APPROVAL_REJECTED"
-            policy_denied = status == "denied" and error_code == "TOOL_DENIED"
-            await self.repository.update_tool_call(
-                call_id,
-                status,
-                result=product.get("data", {"content": content}),
-                summary=summary,
-            )
-            await self.repository.record_audit(
-                context.request.workspace_id,
-                context.request.principal_id,
-                "tool.denied" if policy_denied else "tool.failed" if failed else "tool.completed",
-                tool_name,
-                "denied" if status == "denied" else "failed" if failed else "success",
-                {"tool_call_id": call_id, "risk": stored["risk_level"], "summary": summary},
-            )
-            await self._emit(
-                context,
-                "tool.failed" if failed else "tool.completed",
-                {
-                    "tool_call_id": call_id,
-                    "tool_name": tool_name,
-                    **({"message": content} if not product else {}),
-                    "summary": summary,
-                    "data": product.get("data", {"content": content}),
-                    "result": product.get("data", {"content": content}),
-                    "error_code": error_code,
-                    **({"denied": True} if status == "denied" else {}),
-                    "user_hint": (
-                        "该操作已驳回，未执行；继续处理任务的其他部分。"
-                        if error_code == "APPROVAL_REJECTED" else product.get("user_hint")
-                    ),
-                    "action": product.get("action"),
-                },
-            )
-            context.finished_tool_calls.add(call_id)
-            change = product.get("file_change")
-            if not failed and isinstance(change, dict):
-                await self._emit(context, "file.changed", {**change, "tool_call_id": call_id})
+            await context.projection.stream_message(message)
+        elif isinstance(message, ToolMessage):
+            await context.projection.tool_message(message)
 
     async def _record_tool_proposals(
         self, message: AIMessage, context: _RunContext
@@ -1728,7 +1628,7 @@ class LangGraphRuntime:
                     context.request.task_id,
                     call["name"],
                     call["args"],
-                    self._message_text(message),
+                    message_text(message),
                 )
                 await self._emit(
                     context,
@@ -1747,7 +1647,7 @@ class LangGraphRuntime:
                     raise ValueError("tool call ID already belongs to a different product operation")
                 if call["name"] == "delegate" and (
                     stored["arguments_json"] != json.dumps(call["args"], ensure_ascii=False, sort_keys=True)
-                    or _tool_call_id(call) in context.finished_tool_calls
+                    or _tool_call_id(call) in context.projection.projected_tool_calls
                 ):
                     raise ValueError("delegate call IDs cannot be reused for another dispatch")
 
@@ -2079,13 +1979,7 @@ class LangGraphRuntime:
         event_type: str,
         payload: Mapping[str, object],
     ) -> None:
-        async with context.event_lock:
-            if context.terminal_emitted:
-                return
-            enriched = await self._publish_event(context.request, event_type, payload)
-            if event_type in {"task.cancelled", "task.failed", "task.succeeded", "task.interrupted"}:
-                context.terminal_emitted = True
-            await context.queue.put(MaigoKiteEvent(event_type, enriched))
+        await context.projection.emit(event_type, payload)
 
     async def _publish_event(
         self,
@@ -2093,81 +1987,8 @@ class LangGraphRuntime:
         event_type: str,
         payload: Mapping[str, object],
     ) -> JSONObject:
-        base = event_payload(event_type, {
-            "task_id": request.task_id,
-            "conversation_id": request.conversation_id,
-            **payload,
-        })
-        if self._event_publisher is not None:
-            await self._event_publisher(event_type, base)
-            return base
-        return await self.repository.append_task_event(event_type, base)
+        return await publish_event(self.repository, self._event_publisher, request, event_type, payload)
 
     @staticmethod
     def _approval_payload(approval: ApprovalRecord) -> ApprovalNotice:
         return approval_notice(approval)
-
-    @classmethod
-    def _message_text(cls, message: Any) -> str:
-        text = cls._raw_message_text(message)
-        # Tool output is user data, not provider thinking. A file containing a
-        # leading <think> must remain intact in the tool result.
-        return split_thinking(text)[0] if isinstance(message, AIMessage) else text
-
-    @staticmethod
-    def _raw_message_text(message: Any) -> str:
-        value = getattr(message, "content", message)
-        if isinstance(value, str):
-            return value
-        if not isinstance(value, list):
-            return ""
-        parts: list[str] = []
-        for block in value:
-            if isinstance(block, str):
-                parts.append(block)
-            elif (
-                isinstance(block, dict)
-                and block.get("type") not in {"reasoning", "thinking"}
-                and isinstance(block.get("text"), str)
-            ):
-                parts.append(block["text"])
-        return "".join(parts)
-
-    async def _project_text_delta(self, text: str, context: _RunContext, *, final: bool = False) -> None:
-        separate = not context.text_stream.reasoning_emitted
-        answer, reasoning = context.text_stream.feed(text, final=final)
-        if reasoning:
-            await self._append_reasoning(reasoning, context, separate=separate)
-        if answer:
-            await self._emit(context, "message.delta", {"content": answer})
-
-    async def _append_reasoning(self, text: str, context: _RunContext, *, separate: bool = False) -> None:
-        if not context.reasoning_started or context.reasoning_completed:
-            await self._emit(context, "reasoning.started", {})
-            if context.reasoning_parts:
-                text = "\n\n" + text
-            context.reasoning_started = True
-            context.reasoning_completed = False
-        elif separate:
-            text = "\n\n" + text
-        context.reasoning_parts.append(text)
-        await self._emit(context, "reasoning.delta", {"content": text})
-
-    async def _complete_reasoning(self, context: _RunContext) -> None:
-        if context.reasoning_started and not context.reasoning_completed:
-            await self._emit(context, "reasoning.completed", {"summary": "".join(context.reasoning_parts)})
-            context.reasoning_completed = True
-
-    @staticmethod
-    def _reasoning_text(message: Any) -> str:
-        # Prefer LangChain's public normalized blocks (including Responses API
-        # summaries and Anthropic thinking); aliases are a compatible fallback.
-        parts = [visible_reasoning(block) for block in getattr(message, "content_blocks", [])
-                 if isinstance(block, dict) and block.get("type") in {"reasoning", "thinking"}]
-        if text := "".join(parts):
-            return text
-        additional = getattr(message, "additional_kwargs", {}) or {}
-        for key in ("reasoning_content", "reasoning", "thinking", "reasoning_details"):
-            if text := visible_reasoning(additional.get(key)):
-                return text
-        return ""

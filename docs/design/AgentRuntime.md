@@ -18,7 +18,9 @@ ExecutionEngine、TaskManager、IChatProvider/ChatAdapter 和执行后端开关�
 2026-10-10 按用户要求先完成源码切换，随后获准补做前四批定向后端验收；实际范围与结果见
 [交付路线与状态](../project/Roadmap.md)，不外推为全量发布验收。
 
-生产适配层只承担四类桥接代码：运行调用、界面事件映射、审批桥接、产品持久投影。模型协议、工具调度、检查点、暂停恢复和上下文摘要优先复用成熟组件，不在适配层内重建状态机、续接数据、事件总线或插件框架。
+运行时集成按四类职责维护：运行调用、界面事件映射、审批桥接、产品持久投影。`langgraph_runtime.py` 保留 graph 创建、准入/恢复、产品 middleware 与权限桥接；`runtime/projection.py` 持有单次运行的流式文本解析、推理展示、工具结果投影和事件去重。后者的终态标志仅表示 UI 终态已投递，不作为任务状态或恢复依据。模型协议、工具调度、检查点、暂停恢复和上下文摘要仍由现有成熟组件承担。
+
+`_RunContext` 引用同一份投影对象；工具权限快照不再复制展示标志。推理展示只保留一个“当前段是否打开”的标志，模型轮次结束后重置文本解析器；子 Agent 通过 `models/reasoning.py` 的公开文本提取函数生成活动内容，不调用父 Runtime 的私有文本函数。聊天和工具事件字段不变，结构化结果仍由 Repository 的原有事务提交。
 
 Core 保留 ToolRegistry、PermissionPolicy、Repository 等产品能力；ToolRegistry 只做发现和元数据，不再提供另一个 invoke 执行入口。
 

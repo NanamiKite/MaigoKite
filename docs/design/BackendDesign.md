@@ -32,6 +32,8 @@ Vue Web / Electron Renderer
 
 协议层不能运行第二套 Agent Loop、审批状态机、续接数据或事件仓库。`AgentCore` 与 Repository 的现有命令被直接复用，不为去掉 RPC 再造 Service/Manager 框架。
 
+Core 的扩展数据归入 `extensions.ExtensionCatalog`：已应用配置、ToolRegistry、Skill 目录、MCP 连接及临时凭证由同一个快照持有。Core 仍负责运行准入、准备候选快照、同时切换目录与 graph，以及按顺序关闭旧资源；失败时只清理候选新建的连接，不关闭复用的现有连接。已有 Core 公共方法保持兼容，不通过动态转发或新增通用插件生命周期替换它们。
+
 ## 3. 凭证与访问边界
 
 HTTP 与 WebSocket 均检查直接连接的 loopback 地址、Host 和浏览器 Origin，不信任代理头。客户端不能覆盖 `local-user` 主体；工作区归属来自 Repository。精确的 `null` / `file://` 来源只在本机连接时接受。这不是设备认证，远程配对仍未实现。

@@ -16,6 +16,8 @@
 
 Electron packaged 分支会查找 `resources/bin/agent-core`，Windows 使用 `.exe` 后缀。尚未验证源码构建产物是否满足这些路径和跨平台执行要求。打包时不能假定用户机器上已经安装开发机使用的 Python、依赖或浏览器。
 
+当前桌面依赖锁定 Electron 44.8.0 / electron-builder 26.17.0。升级不改变 appId、用户数据目录、IPC 或后端启动参数，但有上游平台边界：Electron 44 不再提供 Windows ia32 / Linux armv7l 二进制，macOS 至少为 13；macOS 原生通知需要签名。Linux 图形栈、窗口定位/快捷键及 Windows 实机启停仍须重新验收，不能沿用 Electron 28 的通过记录。参见 [Electron breaking changes](https://www.electronjs.org/docs/latest/breaking-changes)。
+
 Linux/Windows 的 `start desktop built` 从源码目录启动，使用本地 Python 环境运行后端，不进入 Electron `app.isPackaged` 分支。Web `built` 由同一 Python 后端在 8080 提供页面和 API，仅支持本机 loopback，不提供远程认证。
 
 构建和启动脚本不会自动安装浏览器或运行软件测试。Linux 下的 Core HTTP/WS、进程恢复和 Chromium 已完成部分实际运行测试；这不代表桌面安装版已经验证。Windows 整套启停、桌面安装包及其运行资源仍需在目标系统上测试，已完成和未覆盖的范围见 [路线图](../project/Roadmap.md#当前验收状态)。

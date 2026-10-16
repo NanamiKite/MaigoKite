@@ -1,14 +1,21 @@
-"""Validated personal extension settings; no plugin or execution framework."""
+"""Personal extension configuration and the catalog prepared for an atomic reload."""
 from __future__ import annotations
 
+import asyncio
+import os
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from threading import Event
+from typing import Annotated, Any, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from agent.mcp import MCPClient
+from agent.observability import Observability
 from agent.skill_registry import SkillRegistry
 from agent.tools.mcp_wrapper import mcp_tool_prefix
+from agent.tools.tool_registry import ToolRegistry
 
 Name = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]{0,47}$")]
 EnvName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
@@ -110,3 +117,155 @@ def startup_config(config: Any) -> ExtensionConfig:
         "mcp_servers": [{**value, "namespace": name} for name, value in servers.items()],
         "skill_directories": config.get("skills.scan_directories", []),
     })
+
+
+class MCPServerStatus(TypedDict):
+    namespace: str
+    status: Literal[
+        "disabled", "invalid_cwd", "needs_credentials", "connecting", "timeout", "error", "running", "disconnected"
+    ]
+    transport: Literal["stdio"]
+    tool_names: list[str]
+
+
+async def close_mcp_clients(clients: dict[str, MCPClient]) -> None:
+    """Retain clients whose cleanup failed so their owner can retry on shutdown."""
+    errors: list[Exception] = []
+    for namespace, client in reversed(list(clients.items())):
+        try:
+            await client.stop()
+        except Exception as exc:
+            errors.append(exc)
+        else:
+            clients.pop(namespace, None)
+    if errors:
+        raise ExceptionGroup("MCP cleanup failed", errors)
+
+
+@dataclass(eq=False, repr=False)
+class ExtensionCatalog:
+    """Keep tool discovery, credentials and its live connections in one reload snapshot.
+
+    Core stages this catalog before replacing the active catalog and graph together.
+    It must drain graph runs before closing their catalog's MCP connections.
+    """
+
+    config: ExtensionConfig = field(default_factory=ExtensionConfig)
+    registry: ToolRegistry = field(default_factory=ToolRegistry)
+    skills: SkillRegistry = field(default_factory=SkillRegistry)
+    inventory: list[dict[str, Any]] = field(default_factory=list)
+    skill_errors: list[str] = field(default_factory=list)
+    clients: dict[str, MCPClient] = field(default_factory=dict)
+    servers: list[MCPServerStatus] = field(default_factory=list)
+    env: dict[str, dict[str, str]] = field(default_factory=dict)
+
+    async def load_skills(self, workspace_root: Path) -> None:
+        stop = Event()
+        worker = asyncio.create_task(asyncio.to_thread(self._scan_skills, workspace_root, stop))
+        try:
+            self.skills, self.inventory, self.skill_errors = await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            stop.set()
+            await asyncio.shield(worker)
+            raise
+
+    def _scan_skills(
+        self, workspace_root: Path, stop: Event,
+    ) -> tuple[SkillRegistry, list[dict[str, Any]], list[str]]:
+        # Only return a complete private catalog; cancelled workers cannot mutate live tools.
+        skills = SkillRegistry()
+        try:
+            errors = skills.load_directories(self.config.skill_directories, workspace_root, stop=stop)
+        except ValueError as exc:
+            errors = [str(exc)]
+        disabled = set(self.config.disabled_skills)
+        for item in self.config.skills:
+            if stop.is_set():
+                break
+            if skills.get_skill(item.name) is not None:
+                disabled.add(item.name)
+                errors.append(f"Skill {item.name}: name also exists in a scan directory; rename or remove a duplicate")
+                continue
+            try:
+                skills.register(SkillRegistry.parse_content(item.content, f"managed:{item.name}/SKILL.md"))
+                if item.enabled:
+                    disabled.discard(item.name)
+                else:
+                    disabled.add(item.name)
+            except ValueError:
+                errors.append(f"Skill {item.name}: duplicate name or invalid content")
+        inventory = [{**item.to_dict(), "enabled": item.name not in disabled} for item in skills.list_skills()]
+        for name in disabled:
+            skills.unregister(name)
+        return skills, inventory, errors
+
+    async def connect_servers(
+        self, servers: list[MCPSettings], workspace_root: Path, observability: Observability,
+    ) -> None:
+        for server in servers:
+            namespace = server.namespace
+            state: MCPServerStatus = {
+                "namespace": namespace, "status": "disabled", "transport": "stdio", "tool_names": [],
+            }
+            self.servers.append(state)
+            if not server.enabled:
+                continue
+            try:
+                cwd = server.resolve_cwd(workspace_root)
+            except (OSError, ValueError):
+                state["status"] = "invalid_cwd"
+                continue
+            secret_env = self.env.get(namespace, {})
+            if any(not secret_env.get(name) for name in server.secret_env):
+                state["status"] = "needs_credentials"
+                continue
+            client = MCPClient(
+                server.command,
+                [argument.replace("{workspace}", str(workspace_root)) for argument in server.args],
+                env={
+                    **{name: os.environ[name] for name in server.env_allowlist if name in os.environ},
+                    **{name: secret_env[name] for name in server.secret_env},
+                },
+                cwd=cwd,
+            )
+            # Own the connection before awaiting discovery, including failed/cancelled startup.
+            self.clients[namespace] = client
+            state["status"] = "connecting"
+            try:
+                async with asyncio.timeout(30):
+                    await client.start()
+                    server_registry = ToolRegistry()
+                    discovered = await server_registry.discover_mcp(
+                        client, namespace, enabled_tools=server.enabled_tools, disabled_tools=server.disabled_tools,
+                    )
+            except BaseException as exc:
+                state["status"] = "timeout" if isinstance(exc, TimeoutError) else "error"
+                try:
+                    await client.stop()
+                except Exception:
+                    await observability.log("warning", f"MCP {namespace} cleanup failed")
+                else:
+                    self.clients.pop(namespace, None)
+                if not isinstance(exc, Exception):
+                    raise
+                continue
+            for tool in discovered:
+                self.registry.register(tool)
+            state.update({"status": "running", "tool_names": [tool.name for tool in discovered]})
+            await observability.log("info", f"MCP server {namespace} registered {len(discovered)} tool(s)")
+
+    def server_status(self) -> list[MCPServerStatus]:
+        result: list[MCPServerStatus] = []
+        for server in self.servers:
+            value: MCPServerStatus = {**server, "tool_names": list(server["tool_names"])}
+            client = self.clients.get(server["namespace"])
+            if value["status"] == "running" and (client is None or not client.is_running):
+                value["status"] = "disconnected"
+            result.append(value)
+        return result
+
+    async def close(self) -> None:
+        for state in self.servers:
+            if state["namespace"] in self.clients:
+                state.update({"status": "disconnected", "tool_names": []})
+        await close_mcp_clients(self.clients)

@@ -102,16 +102,26 @@ function needWebDependencies() {
 
 function needElectron() {
   try {
-    const executable = requireWeb('electron')
+    // Electron 42+ downloads on require('electron'). Startup must remain offline;
+    // only setup invokes the official installer, then we read its installed path.
+    const packagePath = requireWeb.resolve('electron/package.json')
+    const directory = path.dirname(packagePath)
+    const expected = requireWeb('electron/package.json').version
+    const locked = JSON.parse(readFileSync(path.join(web, 'package-lock.json'), 'utf8'))
+      .packages['node_modules/electron'].version
+    if (expected !== locked) throw new Error(`Electron dependency is outdated: expected ${locked}, found ${expected}`)
+    const platformPath = process.platform === 'darwin' ? 'Electron.app/Contents/MacOS/Electron'
+      : windows ? 'electron.exe' : 'electron'
+    const executable = process.env.ELECTRON_OVERRIDE_DIST_PATH
+      ? path.join(process.env.ELECTRON_OVERRIDE_DIST_PATH, platformPath)
+      : path.join(directory, 'dist', readFileSync(path.join(directory, 'path.txt'), 'utf8').trim())
     const info = statSync(executable)
     if (!info.isFile() || !info.size) throw new Error(`Not a non-empty executable: ${executable}`)
     accessSync(executable, constants.X_OK)
     // Custom distributions are explicitly owned by the caller. For the npm
     // installation, also reject stale binaries left over from another version.
     if (!process.env.ELECTRON_OVERRIDE_DIST_PATH) {
-      const packagePath = requireWeb.resolve('electron/package.json')
-      const expected = requireWeb('electron/package.json').version
-      const installed = readFileSync(path.join(path.dirname(packagePath), 'dist/version'), 'utf8').trim().replace(/^v/, '')
+      const installed = readFileSync(path.join(directory, 'dist/version'), 'utf8').trim().replace(/^v/, '')
       if (installed !== expected) throw new Error(`Electron version mismatch: expected ${expected}, found ${installed}`)
     }
     return executable
@@ -121,18 +131,17 @@ function needElectron() {
       `Cause: ${error.message}`,
       'Repair from the project root (no Python reinstall):',
       windows ? '.\\scripts\\setup.ps1 electron' : 'bash scripts/setup.sh electron',
-      'Unset ELECTRON_SKIP_BINARY_DOWNLOAD if set. Rebuilding application code will not install the runtime.',
+      'Rebuilding application code will not install the Electron runtime.',
       'See docs/development/DevelopmentGuide.md (Electron installation).',
     ].join('\n'))
   }
 }
 
 function checkElectronInstallEnvironment() {
-  if (process.env.ELECTRON_SKIP_BINARY_DOWNLOAD) {
-    const command = windows ? 'Remove-Item Env:ELECTRON_SKIP_BINARY_DOWNLOAD' : 'unset ELECTRON_SKIP_BINARY_DOWNLOAD'
-    throw new Error(`Electron installation was disabled. Run: ${command}. Even a value of 0 skips installation.`)
-  }
-  for (const [key, host] of [['npm_config_platform', process.platform], ['npm_config_arch', process.arch]]) {
+  for (const [key, host] of [
+    ['ELECTRON_INSTALL_PLATFORM', process.platform], ['ELECTRON_INSTALL_ARCH', process.arch],
+    ['npm_config_platform', process.platform], ['npm_config_arch', process.arch],
+  ]) {
     if (process.env[key] && process.env[key] !== host)
       throw new Error(`Unset ${key}: local desktop dependencies must match this computer (${host}).`)
   }
@@ -153,12 +162,11 @@ async function setup(target) {
   }
   if (target !== 'python') checkElectronInstallEnvironment()
   if (target === 'electron') {
-    // npm applies the checked-in overrides; Electron owns download/checksum/
-    // extraction; repairing Electron does not touch the Python environment.
-    needFile(path.join(web, 'node_modules/electron/package.json'))
+    // Restore the locked dependency tree, then let Electron own download and
+    // checksum verification. The Python environment is not involved.
     console.info('[MaigoKite] Repairing Electron: refreshing Web dependencies, then running its official installer.')
-    npm(['install', '--ignore-scripts', '--include=dev', '--engine-strict', '--no-audit', '--no-fund'])
-    npm(['rebuild', 'electron', '--foreground-scripts', '--ignore-scripts=false'])
+    npm(['ci', '--ignore-scripts', '--include=dev', '--engine-strict', '--no-audit', '--no-fund'])
+    npm(['run', 'electron:install'])
     console.info(`[MaigoKite] Electron ready: ${needElectron()}`)
     return
   }
@@ -182,6 +190,7 @@ async function setup(target) {
     // Vite, TypeScript and Electron are needed to build/run the source checkout;
     // npm's devDependencies are separate from the optional Python dev tools.
     npm(['ci', '--include=dev', '--engine-strict', '--foreground-scripts', '--ignore-scripts=false'])
+    npm(['run', 'electron:install'])
     console.info(`[MaigoKite] Electron ready: ${needElectron()}`)
     if (windows) {
       npm(['ci', '--ignore-scripts', '--engine-strict', '--no-audit', '--no-fund'], path.join(root, 'scripts/windows-sandbox'))

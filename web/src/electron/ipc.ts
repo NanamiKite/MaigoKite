@@ -25,6 +25,9 @@ export interface DesktopHost {
   graphics: () => GraphicsStatus
 }
 export function registerIPC(host: DesktopHost) {
+  // Electron 43 defaults dialogs to Downloads instead of the last used folder.
+  // Keep workspace selection anchored to the user's previous choice.
+  let lastWorkspaceDirectory: string | undefined
   function trust(event: IpcMainInvokeEvent) {
     const window = BrowserWindow.fromWebContents(event.sender)
     if (
@@ -48,12 +51,22 @@ export function registerIPC(host: DesktopHost) {
   ipcMain.handle('workspace:choose-folder', async (event) => {
     const window = trust(event)
     if (window !== host.main()) throw new Error(t('请从主窗口选择工作区。'))
+    if (!lastWorkspaceDirectory) {
+      try {
+        lastWorkspaceDirectory = await host.workspace()
+      } catch {
+        // A missing workspace/backend must not prevent selecting a replacement folder.
+        lastWorkspaceDirectory = app.getPath('home')
+      }
+    }
     const result = await dialog.showOpenDialog(window, {
       title: t('选择工作区文件夹'),
+      defaultPath: lastWorkspaceDirectory,
       properties: ['openDirectory'],
     })
     if (result.canceled || !result.filePaths[0]) return null
-    return realpathSync(result.filePaths[0])
+    lastWorkspaceDirectory = realpathSync(result.filePaths[0])
+    return lastWorkspaceDirectory
   })
   ipcMain.handle('window:control', (event, action: unknown) => {
     const window = trust(event)
@@ -109,6 +122,10 @@ export function registerIPC(host: DesktopHost) {
         process.platform === 'darwin' && value.approvalId
           ? [{ type: 'button', text: t('允许') }]
           : [],
+    })
+    notification.on('failed', () => {
+      // macOS 42+ requires signing; denial by the OS leaves the in-app approval intact.
+      console.warn('[MaigoKite] Native notification unavailable; use the in-app conversation.')
     })
     notification.on('click', () => {
       host.main()?.show()

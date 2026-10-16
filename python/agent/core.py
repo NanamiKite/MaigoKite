@@ -5,12 +5,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import os
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from pathlib import Path
-from threading import Event
 from typing import Any, TypeVar
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -32,7 +30,7 @@ from agent.data_contracts import (
     approval_notice,
 )
 from agent.event_bus import EventBus
-from agent.extensions import ExtensionConfig, startup_config
+from agent.extensions import ExtensionCatalog, ExtensionConfig, MCPServerStatus, close_mcp_clients, startup_config
 from agent.mcp import MCPClient
 from agent.media import ImageReference
 from agent.models.image_generation import IMAGE_SETTING_KEY, ImageSettings
@@ -104,9 +102,8 @@ class AgentCore:
         self.repository = repository or SQLiteRepository(db_path)
         self.models = ChatModelRuntime(config, self.repository)
         self._context_max_tokens = int(config.get("context.max_tokens", 32000))
-        self._registry = ToolRegistry()
+        self._extensions = ExtensionCatalog()
         workspace_root = config.workspace_root
-        self._skills = SkillRegistry()
         self._browser: BrowserRuntime | None = None
         if bool(config.get("browser.enabled", True)):
             executable_path = str(config.get("browser.executable_path", "")).strip()
@@ -156,19 +153,13 @@ class AgentCore:
         self._initialized = False
         self._shutdown_task: asyncio.Task[None] | None = None
         self._max_tool_iterations = int(config.get("tools.max_iterations", 8))
-        self._mcp_clients: dict[str, MCPClient] = {}
-        self._mcp_runtime: list[dict[str, Any]] = []
-        self._extension_config = ExtensionConfig()
         self._extension_lock = asyncio.Lock()
         self._extension_reload_task: asyncio.Task[dict[str, Any]] | None = None
         self._extensions_reloading = False
-        self._extension_env: dict[str, dict[str, str]] = {}
         self._extension_error = ""
         # Failed cleanup remains owned until a later apply/shutdown drains it.
         self._retired_runtimes: list[LangGraphRuntime] = []
         self._retired_mcp_clients: dict[str, MCPClient] = {}
-        self._skill_inventory: list[dict[str, Any]] = []
-        self._skill_errors: list[str] = []
         self._applied_extension_revision = -1
         self._tool_credentials: dict[tuple[str, str], str] = {}
         self._safety_credential_provider: Callable[[str], Awaitable[str]] | None = None
@@ -193,14 +184,12 @@ class AgentCore:
         self.event_bus.set_sink(self.repository.append_task_event)
         try:
             applied = await self.repository.get_workspace_setting("personal", "extensions.applied_config")
-            self._extension_config = (
+            extension_config = (
                 ExtensionConfig.model_validate(applied) if applied is not None else await self._read_extension_config()
             )
-            registry, self._skills, self._skill_inventory, self._skill_errors = await self._load_tool_registry(
-                self._extension_config
-            )
-            await self._initialize_mcp_servers(
-                registry, self._extension_config, self._extension_env, self._mcp_clients, self._mcp_runtime,
+            self._extensions = await self._prepare_extension_catalog(extension_config)
+            await self._extensions.connect_servers(
+                extension_config.mcp_servers, self._policy.workspace_root, self.observability,
             )
         except BaseException as exc:
             try:
@@ -208,14 +197,15 @@ class AgentCore:
             except Exception as cleanup:
                 raise BaseExceptionGroup("Core startup and cleanup failed", [exc, cleanup]) from None
             raise
-        self._registry = registry
         try:
             self._configured_tool_selection()
-            self._langgraph_runtime = await self._create_langgraph_runtime(registry, self._skills)
-            await self.repository.save_workspace_setting(
-                "personal", "extensions.applied_config", self._extension_config.model_dump(),
+            self._langgraph_runtime = await self._create_langgraph_runtime(
+                self._extensions.registry, self._extensions.skills,
             )
-            self._applied_extension_revision = self._extension_config.revision
+            await self.repository.save_workspace_setting(
+                "personal", "extensions.applied_config", self._extensions.config.model_dump(),
+            )
+            self._applied_extension_revision = self._extensions.config.revision
             self._initialized = True
             await self.reconcile_interrupted_tasks()
             await self.observability.log("info", "Agent Core initialized")
@@ -271,7 +261,7 @@ class AgentCore:
         closers = []
         if self._langgraph_runtime is not None:
             closers.append(self._langgraph_runtime.close)
-        closers.append(self._stop_mcp_servers)
+        closers.append(self._extensions.close)
         closers.append(self._close_retired_extensions)
         if self._browser is not None:
             closers.append(self._browser.close)
@@ -284,146 +274,34 @@ class AgentCore:
                 errors.append(exc)
         self._langgraph_runtime = None
         self.event_bus.clear()
-        self._registry = ToolRegistry()
+        self._extensions.registry = ToolRegistry()
         self._tool_credentials.clear()
-        self._extension_env.clear()
-        self._mcp_runtime.clear()
+        self._extensions.env.clear()
+        self._extensions.servers.clear()
         self._initialized = False
         if errors:
             raise ExceptionGroup("Agent Core cleanup failed", errors)
 
-    async def _load_tool_registry(
+    async def _prepare_extension_catalog(
         self, config: ExtensionConfig, *, restore_only: bool = False,
-    ) -> tuple[ToolRegistry, SkillRegistry, list[dict[str, Any]], list[str]]:
-        registry = ToolRegistry()
+    ) -> ExtensionCatalog:
+        catalog = ExtensionCatalog(config=config)
+        registry = catalog.registry
         for tool_type in (FileReadTool, FileWriteTool, FileEditTool, BashTool, ExecCommandTool,
                           WebSearchTool, WebFetchTool, GlobTool, GrepTool, SleepTool):
             registry.register(tool_type())
         registry.register(TodoWriteTool(self.repository))
         registry.register(ImageGenerateTool(self.repository, self._get_image_credential))
         if restore_only:
-            skills, inventory, errors = self._skills, self._skill_inventory, self._skill_errors
+            catalog.skills = self._extensions.skills
+            catalog.inventory = self._extensions.inventory
+            catalog.skill_errors = self._extensions.skill_errors
         else:
-            stop = Event()
-            worker = asyncio.create_task(asyncio.to_thread(self._load_skill_catalog, config, stop))
-            try:
-                skills, inventory, errors = await asyncio.shield(worker)
-            except asyncio.CancelledError:
-                stop.set()
-                await asyncio.shield(worker)
-                raise
-        registry.register(SkillTool(skills))
+            await catalog.load_skills(self._policy.workspace_root)
+        registry.register(SkillTool(catalog.skills))
         if self._browser is not None:
             registry.register(BrowserTool(self._browser))
-        return registry, skills, inventory, errors
-
-    def _load_skill_catalog(
-        self, config: ExtensionConfig, stop: Event,
-    ) -> tuple[SkillRegistry, list[dict[str, Any]], list[str]]:
-        # This worker only mutates a private catalog, never Core/shared state.
-        skills = SkillRegistry()
-        try:
-            errors = skills.load_directories(config.skill_directories, self._policy.workspace_root, stop=stop)
-        except ValueError as exc:
-            errors = [str(exc)]  # A bounded scan discards its partial discoveries.
-        disabled = set(config.disabled_skills)
-        for item in config.skills:
-            if stop.is_set():
-                break
-            if skills.get_skill(item.name) is not None:
-                # Never silently substitute a disk Skill for a managed one.
-                disabled.add(item.name)
-                errors.append(f"Skill {item.name}: name also exists in a scan directory; rename or remove a duplicate")
-                continue
-            try:
-                skills.register(SkillRegistry.parse_content(item.content, f"managed:{item.name}/SKILL.md"))
-                if item.enabled:
-                    disabled.discard(item.name)
-                else:
-                    disabled.add(item.name)
-            except ValueError:
-                errors.append(f"Skill {item.name}: duplicate name or invalid content")
-        inventory = [
-            {**item.to_dict(), "enabled": item.name not in disabled}
-            for item in skills.list_skills()
-        ]
-        for name in disabled:
-            skills.unregister(name)
-        return skills, inventory, errors
-
-    async def _initialize_mcp_servers(
-        self, registry: ToolRegistry, config: ExtensionConfig, env: dict[str, dict[str, str]],
-        clients: dict[str, MCPClient], states: list[dict[str, Any]],
-    ) -> None:
-        workspace_root = self._policy.workspace_root
-        for server in config.mcp_servers:
-            namespace = server.namespace
-            state: dict[str, Any] = {
-                "namespace": namespace, "status": "disabled", "transport": "stdio", "tool_names": [],
-            }
-            states.append(state)
-            if not server.enabled:
-                continue
-            try:
-                cwd = server.resolve_cwd(workspace_root)
-            except (OSError, ValueError):
-                state["status"] = "invalid_cwd"
-                continue
-            secret_env = env.get(namespace, {})
-            if any(not secret_env.get(name) for name in server.secret_env):
-                state["status"] = "needs_credentials"
-                continue
-            client = MCPClient(
-                server.command,
-                [argument.replace("{workspace}", str(workspace_root)) for argument in server.args],
-                env={**{name: os.environ[name] for name in server.env_allowlist if name in os.environ},
-                     **{name: secret_env[name] for name in server.secret_env}},
-                cwd=cwd,
-            )
-            # Retain ownership before the first await, including discovery cancellation.
-            clients[namespace] = client
-            state["status"] = "connecting"
-            try:
-                async with asyncio.timeout(30):
-                    await client.start()
-                    # No half-registered server when discovery fails.
-                    server_registry = ToolRegistry()
-                    discovered = await server_registry.discover_mcp(
-                        client, namespace, enabled_tools=server.enabled_tools,
-                        disabled_tools=server.disabled_tools,
-                    )
-            except BaseException as exc:
-                state["status"] = "timeout" if isinstance(exc, TimeoutError) else "error"
-                try:
-                    await client.stop()
-                except Exception:
-                    await self.observability.log("warning", f"MCP {namespace} cleanup failed")
-                else:
-                    clients.pop(namespace, None)
-                if not isinstance(exc, Exception):
-                    raise
-                continue
-            for tool in discovered:
-                registry.register(tool)
-            state.update(status="running", tool_names=[tool.name for tool in discovered])
-            await self.observability.log("info", f"MCP server {namespace} registered {len(discovered)} tool(s)")
-
-    async def _stop_mcp_servers(self, clients: dict[str, MCPClient] | None = None) -> None:
-        clients = self._mcp_clients if clients is None else clients
-        errors: list[Exception] = []
-        for namespace, client in reversed(list(clients.items())):
-            if clients is self._mcp_clients:
-                for state in self._mcp_runtime:
-                    if state["namespace"] == namespace:
-                        state.update(status="disconnected", tool_names=[])
-            try:
-                await client.stop()
-            except Exception as exc:
-                errors.append(exc)
-            else:
-                clients.pop(namespace, None)
-        if errors:
-            raise ExceptionGroup("MCP cleanup failed", errors)
+        return catalog
 
     async def _close_retired_extensions(self) -> None:
         errors: list[Exception] = []
@@ -435,7 +313,7 @@ class AgentCore:
             else:
                 self._retired_runtimes.remove(runtime)
         try:
-            await self._stop_mcp_servers(self._retired_mcp_clients)
+            await close_mcp_clients(self._retired_mcp_clients)
         except Exception as exc:
             errors.append(exc)
         if errors:
@@ -526,7 +404,7 @@ class AgentCore:
                 raise ValueError(f"tools.{key} must be a string array")
         defaults = ["exec_command" if name == "bash" else name for name in defaults]
         disabled = ["exec_command" if name == "bash" else name for name in disabled]
-        available = {tool.name for tool in self._registry.list_tools()}
+        available = {tool.name for tool in self._extensions.registry.list_tools()}
         known = available | set(ToolRegistry.DEFAULT_TOOLS) | {"sleep", "todo_write"}
         known |= {"ask_user_question", "delegate", "list_subagent_models"}
         # A stopped/removed MCP server must not make all native tools unusable.
@@ -552,7 +430,7 @@ class AgentCore:
                 "configurable": tool.name not in disabled,
                 "default_enabled": tool.name in defaults and tool.name not in disabled,
             }
-            for tool in self._registry.list_tools() if tool.name != "bash"
+            for tool in self._extensions.registry.list_tools() if tool.name != "bash"
         ]}
 
     async def update_tool_settings(self, workspace_id: str, enabled: dict[str, bool]) -> dict[str, Any]:
@@ -1211,8 +1089,13 @@ class AgentCore:
         )
 
     @property
+    def _mcp_clients(self) -> Mapping[str, MCPClient]:
+        """Expose the active catalog's connections to existing lifecycle diagnostics."""
+        return self._extensions.clients
+
+    @property
     def tool_registry(self) -> ToolRegistry:
-        return self._registry
+        return self._extensions.registry
 
     async def get_chat_model_settings(self, workspace_id: str) -> ChatModelSettings:
         return await self.models.get_settings(workspace_id)
@@ -1341,18 +1224,11 @@ class AgentCore:
     async def get_workspace_data_summary(self, workspace_id: str) -> dict[str, Any]:
         return await self.repository.get_workspace_data_summary(workspace_id)
 
-    async def list_mcp_servers(self) -> list[dict[str, Any]]:
-        result = []
-        for server in self._mcp_runtime:
-            value = {**server, "tool_names": list(server.get("tool_names", []))}
-            client = self._mcp_clients.get(server["namespace"])
-            if value["status"] == "running" and (client is None or not client.is_running):
-                value["status"] = "disconnected"
-            result.append(value)
-        return result
+    async def list_mcp_servers(self) -> list[MCPServerStatus]:
+        return self._extensions.server_status()
 
     async def list_skills(self) -> list[dict[str, Any]]:
-        return [item.to_dict() for item in self._skills.list_skills()]
+        return [item.to_dict() for item in self._extensions.skills.list_skills()]
 
     async def _read_extension_config(self) -> ExtensionConfig:
         saved = await self.repository.get_workspace_setting("personal", "extensions.config")
@@ -1370,13 +1246,13 @@ class AgentCore:
         config = await self._read_extension_config()
         return {
             "config": config.model_dump(), "applied_revision": self._applied_extension_revision,
-            "active_config": self._extension_config.model_dump(include={"revision", "mcp_servers"}),
+            "active_config": self._extensions.config.model_dump(include={"revision", "mcp_servers"}),
             "extension_error": self._extension_error,
             "reload_required": config.revision != self._applied_extension_revision,
             "reloading": self._extensions_reloading,
             "runtime_ready": self._langgraph_runtime is not None,
-            "servers": await self.list_mcp_servers(), "skills": self._skill_inventory,
-            "skill_errors": self._skill_errors,
+            "servers": await self.list_mcp_servers(), "skills": self._extensions.inventory,
+            "skill_errors": self._extensions.skill_errors,
         }
 
     async def update_extensions(self, workspace_id: str, value: dict[str, Any]) -> dict[str, Any]:
@@ -1418,7 +1294,7 @@ class AgentCore:
             # No await between blocking admission and checking persisted tasks.
             self._extensions_reloading = True
             try:
-                candidate = self._extension_config if restore_only else await self._read_extension_config()
+                candidate = self._extensions.config if restore_only else await self._read_extension_config()
                 if candidate.revision != revision:
                     raise ConversationBusyError("Extension settings changed; reload before applying")
                 if await self.repository.has_unfinished_tasks(include_waiting=not restore_only):
@@ -1429,7 +1305,7 @@ class AgentCore:
                     # Restoring a missing connection must not erase credentials
                     # owned by an unchanged, healthy connection we will reuse.
                     values = credentials.get(
-                        server.namespace, self._extension_env.get(server.namespace, {}) if restore_only else {}
+                        server.namespace, self._extensions.env.get(server.namespace, {}) if restore_only else {}
                     )
                     if not isinstance(values, dict):
                         raise ValueError("MCP credentials must be named environment values")
@@ -1451,18 +1327,19 @@ class AgentCore:
         # Stage replacements without stopping the live catalog. Admission is
         # blocked by the caller; failed staging only releases newly owned clients.
         previous = self._langgraph_runtime
-        previous_clients = self._mcp_clients
-        previous_servers = {server.namespace: server for server in self._extension_config.mcp_servers}
-        previous_states = {state["namespace"]: state for state in self._mcp_runtime}
-        clients: dict[str, MCPClient] = {}
-        states: list[dict[str, Any]] = []
+        previous_clients = self._extensions.clients
+        previous_servers = {server.namespace: server for server in self._extensions.config.mcp_servers}
+        previous_states = {state["namespace"]: state for state in self._extensions.servers}
+        staged: ExtensionCatalog | None = None
         runtime: LangGraphRuntime | None = None
         self._extension_error = ""
         try:
             await self._close_retired_extensions()
-            registry, skills, inventory, errors = await self._load_tool_registry(candidate, restore_only=restore_only)
-            if errors and not restore_only:
-                raise ValueError("Skill 扫描有错误，未应用新配置：" + "; ".join(errors[:5]))
+            staged = await self._prepare_extension_catalog(candidate, restore_only=restore_only)
+            staged.env = env
+            registry, clients, states = staged.registry, staged.clients, staged.servers
+            if staged.skill_errors and not restore_only:
+                raise ValueError("Skill 扫描有错误，未应用新配置：" + "; ".join(staged.skill_errors[:5]))
             pending = []
             for server in candidate.mcp_servers:
                 namespace = server.namespace
@@ -1495,7 +1372,7 @@ class AgentCore:
                     # of another server must not rediscover or replace these tools.
                     names = previous_states[namespace]["tool_names"]
                     for name in names:
-                        tool = self._registry.get(name)
+                        tool = self._extensions.registry.get(name)
                         if tool is None:
                             raise ValueError("Applied MCP tool catalog is incomplete")
                         registry.register(tool)
@@ -1509,15 +1386,13 @@ class AgentCore:
                 states.append(
                     {"namespace": namespace, "status": "running", "transport": "stdio", "tool_names": list(names)}
                 )
-            await self._initialize_mcp_servers(
-                registry, candidate.model_copy(update={"mcp_servers": pending}), env, clients, states,
-            )
+            await staged.connect_servers(pending, self._policy.workspace_root, self.observability)
             order = {server.namespace: index for index, server in enumerate(candidate.mcp_servers)}
             states.sort(key=lambda state: order[state["namespace"]])
             unavailable = [state["namespace"] for state in states if state["status"] not in {"running", "disabled"}]
             if unavailable and not restore_only:
                 raise ValueError("MCP 未全部连接，未应用新配置；请检查服务与凭证后重试。")
-            runtime = await self._create_langgraph_runtime(registry, skills)
+            runtime = await self._create_langgraph_runtime(registry, staged.skills)
             # This is last-applied product configuration, NOT execution state.
             # Unapplied edits must not silently replace a pending approval's server after restart.
             await self.repository.save_workspace_setting(
@@ -1527,20 +1402,20 @@ class AgentCore:
             self._extension_error = "扩展未能应用，保留原配置、聊天入口及已有连接；请检查失败服务后重试。"
             if runtime is not None:
                 self._retired_runtimes.append(runtime)
-            self._retired_mcp_clients.update(
-                {name: client for name, client in clients.items() if client is not previous_clients.get(name)}
-            )
+            if staged is not None:
+                self._retired_mcp_clients.update(
+                    {
+                        name: client for name, client in staged.clients.items()
+                        if client is not previous_clients.get(name)
+                    }
+                )
             try:
                 await self._close_retired_extensions()
             except Exception:
                 self._extension_error += " 部分资源尚未完成清理，请重试或重启服务。"
             raise
         # No await between committing the prepared catalog and its execution entry.
-        self._registry, self._skills = registry, skills
-        self._skill_inventory, self._skill_errors = inventory, errors
-        self._mcp_clients, self._mcp_runtime = clients, states
-        self._extension_config, self._extension_env = candidate, env
-        self._langgraph_runtime = runtime
+        self._extensions, self._langgraph_runtime = staged, runtime
         self._applied_extension_revision = candidate.revision
         self._retired_mcp_clients.update({name: client for name, client in previous_clients.items()
                                          if client is not clients.get(name)})

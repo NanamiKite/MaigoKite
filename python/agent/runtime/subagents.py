@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 
 from agent.errors import UserFacingError, public_error
 from agent.models.context_capacity import ContextCapacity
-from agent.models.reasoning import split_thinking
+from agent.models.reasoning import raw_message_text, reasoning_text, split_thinking
 from agent.runtime.context import ContextBudgetMiddleware, summary_target_tokens
 from agent.tools.base import BaseTool, ExecutionContext, ToolResult
 from agent.tools.execution_context import ExecutionMetadata
@@ -123,8 +123,8 @@ class _ReadOnlyTools(AgentMiddleware[AgentState[object], ChildContext]):
         for message in result.result:
             if not isinstance(message, AIMessage):
                 continue
-            content, tagged_reasoning = split_thinking(child.adapter._raw_message_text(message))
-            reasoning = child.adapter._reasoning_text(message) or tagged_reasoning
+            content, tagged_reasoning = split_thinking(raw_message_text(message))
+            reasoning = reasoning_text(message) or tagged_reasoning
             if not content and not reasoning:
                 continue
             await child.adapter._emit(child.parent, "subagent.message", {
@@ -150,7 +150,7 @@ class _ReadOnlyTools(AgentMiddleware[AgentState[object], ChildContext]):
             except Exception as exc:
                 result = ToolMessage(content=public_error(exc), tool_call_id=request.tool_call["id"], status="error")
             if isinstance(result, ToolMessage):
-                output = child.adapter._raw_message_text(result)
+                output = raw_message_text(result)
                 await child.adapter._emit(child.parent, "subagent.tool.completed", {
                     "subagent_id": child.subagent_id,
                     "tool_call_id": request.tool_call["id"],

@@ -1,7 +1,7 @@
 # 个人 Agent 前端设计文档 · 「墨线 Inkline」
 
 > 核心隐喻：对话是工作纸上的正文，执行过程沉成页边的墨线。常用交互复用成熟产品的惯例，不为视觉身份发明新的操作语义。
-> 技术基线：Vue 3 + TS + Vite 5 · Pinia · Vue Router 4 · SCSS + CSS 变量 · Electron 28 · fetch + WebSocket（Python FastAPI；Go Gateway 已移除）。
+> 技术基线：Vue 3 + TS + Vite 5 · Pinia · Vue Router 4 · SCSS + CSS 变量 · Electron 44 · fetch + WebSocket（Python FastAPI；Go Gateway 已移除）。历史验收中的 Electron 28 记录不覆盖当前版本。
 > 2026-10-11：阶段 1–4 已验收；阶段 5+6 已完成本地页面收尾与质量检查，尚待用户验收。当前规范以第 1–7 节为准，第 8 节起保留各阶段历史证据。
 > 2026-10-16 验收对账：上述阶段号为本页 UI 实施阶段，不等于项目六批交付。真实 GUI 已覆盖子 Agent 页签/刷新、默认设置、图片上传/生成/预览；SVG 本地符号引用缺陷经单测和真实渲染复验关闭。准确的通过/失败/未覆盖见 [当前验收状态](../project/Roadmap.md#当前验收状态)，历史“当次未运行”不作为当前完成度。
 

@@ -3,6 +3,41 @@ from __future__ import annotations
 
 from typing import Any
 
+from langchain_core.messages import AIMessage, BaseMessage
+
+
+def raw_message_text(message: BaseMessage) -> str:
+    """Join visible text blocks without exposing reasoning signatures or image data."""
+    if isinstance(message.content, str):
+        return message.content
+    parts: list[str] = []
+    for block in message.content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif block.get("type") not in {"reasoning", "thinking"} and isinstance(block.get("text"), str):
+            parts.append(block["text"])
+    return "".join(parts)
+
+
+def message_text(message: BaseMessage) -> str:
+    text = raw_message_text(message)
+    # Tool output may itself be a file containing <think>; only model replies are filtered.
+    return split_thinking(text)[0] if isinstance(message, AIMessage) else text
+
+
+def reasoning_text(message: BaseMessage) -> str:
+    """Prefer SDK-normalized visible reasoning, then compatible provider fields."""
+    parts = [
+        visible_reasoning(block) for block in message.content_blocks
+        if isinstance(block, dict) and block.get("type") in {"reasoning", "thinking"}
+    ]
+    if text := "".join(parts):
+        return text
+    for key in ("reasoning_content", "reasoning", "thinking", "reasoning_details"):
+        if text := visible_reasoning(message.additional_kwargs.get(key)):
+            return text
+    return ""
+
 
 class ThinkTagStream:
     """Separate leading, provider-emitted <think> blocks from visible text.

@@ -5,7 +5,7 @@
 > **检查记录**：2026-09-18 的结果保留为历史记录；后续改动的测试范围见 [路线图](../project/Roadmap.md#当前验收状态)。
 > **权威范围**：当前持久化事实、归属、事务债务和目标演进
 
-具体字段和 SQL 以 `python/agent/repository.py` 为当前实现事实；本文不把目标表写成已经存在的迁移。
+建表和旧库增量升级 SQL 见 `python/agent/sqlite_schema.py`，业务查询和事务见 `python/agent/repository.py`；本文不把目标表写成已经存在的迁移。
 
 ## 1. 当前存储边界
 
@@ -17,6 +17,8 @@
 - 原始文档、FTS、向量嵌入、向量索引、PostgreSQL 和对象存储尚未接入。
 
 当前 Repository 采用单进程写入模型。不能仅凭接口抽象，就推断它已支持多实例并发或 PostgreSQL。
+
+Schema helper 使用 Repository 创建的同一个连接，不自行 commit、close 或持有锁。连接参数、升级语句顺序、提交点与 Repository 业务方法不变；审批决定、授权复用、任务与审计更新没有拆成独立 Store。本次整理不改变表结构或迁移已有用户数据。
 
 会话级子 Agent 存储增量（新库设置/调用已验收，旧库迁移/子图恢复未覆盖）：启动迁移为 conversations 增加
 `max_subagent_calls DEFAULT 0`、`max_concurrent_subagents DEFAULT 1`、`subagent_model_ids_json DEFAULT '[]'`；新任务准入事务复制三项设置到 tasks，

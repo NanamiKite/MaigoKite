@@ -1,4 +1,14 @@
-import { app, BrowserWindow, dialog, globalShortcut, Menu, screen, shell, Tray } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  globalShortcut,
+  Menu,
+  screen,
+  shell,
+  Tray,
+  type WebPreferences,
+} from 'electron'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -92,7 +102,7 @@ const appIconPath = path.resolve(
     ? '../dist/brand/app-icon-cat-ribbon-v1.png'
     : '../public/brand/app-icon-cat-ribbon-v1.png',
 )
-export function secureWebPreferences() {
+export function secureWebPreferences(): WebPreferences {
   return {
     preload: path.join(__dirname, 'preload.cjs'),
     contextIsolation: true,

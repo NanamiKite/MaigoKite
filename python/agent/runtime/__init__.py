@@ -2,11 +2,11 @@
 
 from agent.runtime.langgraph_runtime import (
     LangGraphRuntime,
-    MaigoKiteEvent,
     ProductToolSpec,
     RunHandle,
     RuntimeRunRequest,
 )
+from agent.runtime.projection import MaigoKiteEvent
 
 __all__ = [
     "LangGraphRuntime",

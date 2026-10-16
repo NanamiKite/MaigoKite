@@ -122,9 +122,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: Install locked frontend dependencies
         id: dependencies
-        env:
-          # This job uses jsdom; the build matrix installs the real Electron binary.
-          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        # Electron 42+ does not download at npm ci; only the build matrix installs it.
         run: npm ci --include=dev --ignore-scripts=false --engine-strict
       - name: ESLint (zero warnings)
         # The full source tree must pass, including files outside the current diff.
@@ -199,7 +197,9 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: Install locked Web and Electron dependencies
         working-directory: web
-        run: npm ci --include=dev --foreground-scripts --ignore-scripts=false --engine-strict
+        run: |
+          npm ci --include=dev --foreground-scripts --ignore-scripts=false --engine-strict
+          npm run electron:install
       - name: Build Web and check production TypeScript
         run: ${{ matrix.build-command }} web
       - name: Build Electron main and preload

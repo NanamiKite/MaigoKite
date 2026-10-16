@@ -46,6 +46,7 @@ bash scripts/setup.sh
 ```bash
 cd web
 npm ci --include=dev --foreground-scripts --ignore-scripts=false --engine-strict
+npm run electron:install
 ```
 
 默认 `setup`（与 `setup all` 相同）和 `setup dev` 会执行以上 Web 安装步骤。`setup python` 只同步 Python 运行依赖，不修改 `node_modules`，也不检查 Electron 是否安装完整。
@@ -116,12 +117,11 @@ Core 解释器顺序：`MAIGOKITE_PYTHON` → `UV_PROJECT_ENVIRONMENT` 或根 .v
 `electron:compile` 只编译主进程和 preload 的 JavaScript，不负责安装 Electron 可执行文件。
 若启动报告 `Electron failed to install correctly`，不要反复构建，也不必先删除整个 node_modules。
 
-Node.js 24.16.0 / 26.1.0 起，旧 `extract-zip → yauzl 2.x` 可能在解压第一项时静默退出，安装命令返回 0，但没有生成 `dist/electron`（Windows 为 `electron.exe`）和 `path.txt`。
-参见 [Electron #51619](https://github.com/electron/electron/issues/51619) 和 [extract-zip #154](https://github.com/max-mapper/extract-zip/issues/154)。
-项目使用 npm `overrides`，仅将 `extract-zip` 的 `yauzl` 固定为已修复该问题的 `3.3.1`；不替换 Electron 安装器、不手工伪造 path.txt、不关闭校验，也不改变 Electron 主版本。
-未来升级 Electron 安装依赖、确认上游已不受影响后删除此覆盖。
+当前依赖为 Electron 44、electron-builder 26，确切版本由 `web/package-lock.json` 锁定。Electron 42 起不再通过 npm postinstall 下载运行时；`npm ci` 和 `npm rebuild electron` 均不能代替显式安装。
+`npm run electron:install` 通过 Node 的原生环境代理选项调用 Electron 官方 `install-electron` 入口，沿用 HTTP(S)_PROXY / NO_PROXY、TLS 与校验和验证。当前安装器使用 `@electron-internal/extract-zip`；旧 `extract-zip → yauzl` 覆盖已删除。
+参见 [Electron 安装行为变化](https://www.electronjs.org/docs/latest/breaking-changes#behavior-changed-electron-no-longer-downloads-itself-via-postinstall-script)。
 
-首次获取源码时，按 setup → build desktop → start desktop built 的顺序执行即可。依赖覆盖和锁文件随仓库分发，不依赖开发机的缓存，也不需要手工修改 node_modules。
+首次获取源码时，按 setup → build desktop → start desktop built 的顺序执行即可。锁文件随仓库分发，不依赖开发机的缓存，也不需要手工修改 node_modules。
 已安装旧依赖的环境，先更新仓库，再在项目根目录执行：
 
 ```bash
@@ -132,11 +132,13 @@ bash scripts/setup.sh electron
 .\scripts\setup.ps1 electron
 ```
 
-修复入口要求已有 Web 依赖。它先用 npm install 同步项目锁文件和解压依赖覆盖，不删除整个 node_modules，也不执行其他包的安装脚本；随后只重跑 Electron 官方安装脚本。安装器会复用有效缓存，缓存不存在时下载并校验文件。这个过程不安装 Python 依赖，也不重编业务代码。新机器没有依赖时，应执行完整 setup。
+修复入口用 `npm ci --ignore-scripts` 重建锁定的 Web 依赖树，再显式执行官方安装器，不重装 Python。安装器复用有效缓存，缺失时下载并校验文件；不伪造 `path.txt`，不关闭校验。该入口也可用于从 Electron 28 升级；随后仍须重新构建桌面代码。新机器应执行完整 setup。
 
-完整 setup 使用 npm ci 重新安装 Web 依赖，并显式包含 devDependencies、启用安装脚本，避免 NODE_ENV=production 或 ignore-scripts 设置导致桌面工具缺失。
+完整 setup 在 npm ci 后也执行显式 Electron 安装。构建矩阵使用相同步骤；只做前端静态检查的 CI 不下载二进制。
 
-包含 Web/Electron 安装的 setup 入口会检查 `ELECTRON_SKIP_BINARY_DOWNLOAD` 及跨平台、跨架构的 npm 覆盖配置，`setup python` 不做这些无关检查。有冲突时会报错，不会安装另一平台的文件。如果设置过 `ELECTRON_SKIP_BINARY_DOWNLOAD`，请先取消；即使值为 `0`，Electron 28 也会跳过下载。
+setup 检查 `ELECTRON_INSTALL_PLATFORM` / `ELECTRON_INSTALL_ARCH` 及对应 npm 覆盖值，拒绝与本机冲突的目标；`setup python` 不做这些检查。Electron 44 已不使用 `ELECTRON_SKIP_BINARY_DOWNLOAD`，前端 CI 也不再依赖它。
+
+启动检查只读安装器生成的 `path.txt`、实际可执行文件及 `dist/version`，同时核对依赖锁中的版本，不调用可能自动下载的 `require('electron')`。因此依赖缺失或版本过期时，成套启动会要求先 setup，不会在启动中安装软件。
 
 下载使用已有的网络和代理设置。不要通过禁用 TLS 或 checksum 校验来解决网络错误。
 

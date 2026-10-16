@@ -1,0 +1,101 @@
+@use './mixins' as mixins;
+.conversation-tabs {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  position: relative;
+  gap: var(--space-2);
+}
+.conversation-tabs__strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  height: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.conversation-tab {
+  display: flex;
+  align-items: center;
+  position: relative;
+  flex: 0 0 auto;
+  min-width: var(--chat-tab-min);
+  max-width: var(--chat-tab-max);
+  height: var(--chat-tab-height);
+  border-inline-end: var(--hairline) solid var(--rule);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+.conversation-tab.active {
+  background: var(--accent-selected);
+  &::after {
+    content: '';
+    position: absolute;
+    inset: auto var(--space-3) 0;
+    height: var(--hairline);
+    background: var(--accent);
+  }
+}
+.conversation-tab__select,
+.conversation-tab__close,
+.conversation-tabs__new {
+  @include mixins.interactive-row;
+  border: 0;
+  background: var(--transparent);
+  color: var(--ink-2);
+  border-radius: var(--radius-sm);
+  -webkit-app-region: no-drag;
+}
+.conversation-tab__select {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 var(--space-3);
+  font-family: var(--font-serif);
+  font-size: var(--text-sm);
+  text-align: start;
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+.active .conversation-tab__select {
+  color: var(--accent-ink);
+}
+.conversation-tab__close,
+.conversation-tabs__new {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--space-7);
+  height: var(--space-7);
+  padding: 0;
+}
+.conversation-tab__close {
+  margin-inline-end: var(--space-2);
+}
+.conversation-tab__rename {
+  min-width: 0;
+  flex: 1;
+  padding: var(--space-2);
+  input {
+    width: 100%;
+    min-width: 0;
+    font-size: var(--text-sm);
+  }
+}
+.conversation-tabs__error {
+  position: absolute;
+  inset: 100% 0 auto;
+  z-index: var(--z-detail);
+  background: var(--paper-raised);
+  padding: var(--space-3);
+  box-shadow: var(--shadow-float);
+  font-size: var(--text-sm);
+}

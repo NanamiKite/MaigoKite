@@ -15,6 +15,16 @@
 
 敏感凭证不写入普通配置；配置只保存凭证引用。
 
+配置文件的位置取决于启动方式：
+
+| 启动方式 | 读取哪个文件 |
+| --- | --- |
+| 源码脚本或源码桌面入口 | 优先读取 `MAIGOKITE_CONFIG` 指定的文件，否则读取项目内的 `config/config.dev.yaml` |
+| 直接启动 Python CLI | `--config` 优先于 `MAIGOKITE_CONFIG`；两者都不指定时使用代码默认值，不自动加载开发 YAML |
+| Electron 安装版分支 | 优先读取 `MAIGOKITE_CONFIG`；否则尝试读取 `resources/config/config.prod.yaml`，不存在时使用代码默认值 |
+
+每次只读取选中的一份 YAML，不会把开发或生产配置自动叠加到 `config/config.yaml`。编辑前先确认实际启动使用的文件。界面保存的模型、偏好和扩展设置主要进入 SQLite，不回写 YAML；也不会自动在 AppData 生成一份用户 YAML。安装版路径是代码约定，完整安装包仍待验证，见 [发布指南](../deployment/ReleaseGuide.md)。
+
 ### 默认工作区
 
 默认使用 `<安装目录>/.workspace`，源码启动时对应 `<项目根目录>/.workspace`。目录在 Core 启动时创建，不依赖终端当前所在位置，不把应用源码或资源包作为默认文件操作范围。

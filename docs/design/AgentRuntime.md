@@ -129,7 +129,7 @@ flowchart TD
 - 公共 HTTP(S) 导航/资源校验继续保留，禁用 Service Worker 绕过请求路由；这不是完整网络沙箱。可见登录需要桌面显示环境；第三方网站验证码、浏览器限制及断电时登录持久性需要真实网站验收。
 - 命令进程继续由 SandboxExecutor 持有，GUI 查询实时尾部、停止指定进程，并等待退出确认。`exec_command(interactive=true)` 必须审批，才创建标准输入管道；GUI 可发送一行输入或 EOF，4096 字节/次。输入不写对话或审计正文，进程可能自行回显。网络失败不自动重发输入。仍有 1–120 秒超时，不是 PTY、后台任务或任务脱离；停止进程只返回工具结果，停止任务才取消整轮。
 
-复用依据：[Playwright 持久上下文](https://playwright.dev/python/docs/api/class-browsertype#browser-type-launch-persistent-context)、[下载](https://playwright.dev/python/docs/downloads)、[上传](https://playwright.dev/python/docs/input#upload-files)。这些接线仅通过静态检查，尚无本轮运行验收。
+使用 Playwright 的 [持久上下文](https://playwright.dev/python/docs/api/class-browsertype#browser-type-launch-persistent-context)、[下载](https://playwright.dev/python/docs/downloads) 和 [上传](https://playwright.dev/python/docs/input#upload-files) 接口。真实 Chromium 的文件传输、截图、profile Cookie 与取消清理已通过指定场景测试；超时、关闭失败、回收和跨平台等剩余问题见 [路线图](../project/Roadmap.md#当前验收状态)。
 
 ## 4. 用户可见事件
 

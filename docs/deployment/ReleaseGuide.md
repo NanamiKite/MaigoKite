@@ -18,7 +18,7 @@ Electron packaged 分支会查找 `resources/bin/agent-core`，Windows 使用 `.
 
 Linux/Windows 的 `start desktop built` 从源码目录启动，使用本地 Python 环境运行后端，不进入 Electron `app.isPackaged` 分支。Web `built` 由同一 Python 后端在 8080 提供页面和 API，仅支持本机 loopback，不提供远程认证。
 
-构建和启动脚本不会自动安装浏览器或运行软件测试。脚本调整当时仅做了静态检查；Windows 和 Linux 实机的整套启停仍未完成验收。
+构建和启动脚本不会自动安装浏览器或运行软件测试。Linux 下的 Core HTTP/WS、进程恢复和 Chromium 已完成部分实际运行测试；这不代表桌面安装版已经验证。Windows 整套启停、桌面安装包及其运行资源仍需在目标系统上测试，已完成和未覆盖的范围见 [路线图](../project/Roadmap.md#当前验收状态)。
 
 环境安装与构建命令见 [开发指南](../development/DevelopmentGuide.md)。[GitHub Actions CI](../../.github/workflows/ci.yml) 已配置 Python/前端检查与 Linux/Windows 源码构建，结果以对应提交的 Actions 记录为准。具体覆盖范围见 [测试与验收](../testing/TestPlan.md#github-actions)；独立安装包、桌面启动和真实模型仍须按下述要求验收。
 

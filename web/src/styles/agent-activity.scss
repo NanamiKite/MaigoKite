@@ -1,3 +1,4 @@
+@use './mixins';
 @use './breakpoints' as breakpoints;
 .activity-panel {
   margin: var(--space-1) 0 var(--space-6) var(--rail-node-height);
@@ -173,7 +174,7 @@
 }
 .item-hint a {
   flex: none;
-  color: var(--accent);
+  @include mixins.text-ink;
   font-weight: var(--weight-semibold);
 }
 .item-hint a:hover {

@@ -88,7 +88,7 @@ button {
   font-size: var(--text-sm);
 }
 button[aria-pressed='true'] {
-  color: var(--accent);
+  @include mixins.text-ink;
   background: var(--transparent);
   font-weight: var(--weight-semibold);
 }

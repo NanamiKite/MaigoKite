@@ -259,7 +259,7 @@ function childStatus(child: SubagentRun) {
   line-height: var(--leading-body);
 }
 .entry-operation {
-  color: var(--accent);
+  @include mixins.text-ink;
   font-size: var(--text-xs);
 }
 time {

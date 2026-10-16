@@ -167,7 +167,7 @@ button.danger {
   color: var(--seal);
 }
 button[aria-pressed='true'] {
-  color: var(--accent);
+  @include mixins.text-ink;
 }
 @keyframes memory-highlight {
   from {

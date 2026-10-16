@@ -173,6 +173,7 @@ const suggestions = [
 </template>
 
 <style scoped lang="scss">
+@use '@/styles/mixins' as mixins;
 .message-list {
   min-height: 0;
   flex: 1;
@@ -209,7 +210,7 @@ const suggestions = [
 }
 .welcome-eyebrow {
   margin: 0 0 var(--measure-7px);
-  color: var(--accent);
+  @include mixins.text-ink;
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
   letter-spacing: var(--tracking-eyebrow);

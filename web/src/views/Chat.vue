@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vDeskPaper } from '@/utils/desk-paper'
 import { t } from '@/i18n'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -584,6 +585,7 @@ watch(
     </Teleport>
     <!-- Stable wrapper and one InputBox: a paper composition, not a second composer. -->
     <div
+      v-desk-paper="!timeline.length"
       class="chat-body"
       :class="{ workpaper: !timeline.length, 'first-welcome': !timeline.length && firstWelcome }"
       :data-light="lightPeriod"

@@ -92,7 +92,7 @@ function select() {
 }
 .file-node button.selected {
   background: var(--accent-selected);
-  color: var(--accent);
+  @include mixins.text-ink;
 }
 .file-node button span:last-child {
   overflow: hidden;

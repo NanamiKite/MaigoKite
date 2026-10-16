@@ -4,7 +4,7 @@ import { useUIStore, accents, type Accent, type ThemeMode, type TextSize } from 
 import { useSettingsStore } from '@/stores/settings'
 import { desktopEffects } from '@/composables/useElectron'
 import { t, type Language } from '@/i18n'
-import AppearancePreview from './AppearancePreview.vue'
+import DeskBackgroundSettings from './DeskBackgroundSettings.vue'
 import EnterBehaviorField from './EnterBehaviorField.vue'
 import InkSelect from '@/components/common/InkSelect.vue'
 const ui = useUIStore(),
@@ -185,8 +185,8 @@ async function saveShortcut() {
         :checked="ui.appearance.texture"
         @change="ui.setAppearance({ texture: ($event.target as HTMLInputElement).checked })"
       ></label>
-      <AppearancePreview />
     </section>
+    <DeskBackgroundSettings />
     <section class="setting-group">
       <h3>{{ $t('输入与状态') }}</h3>
       <EnterBehaviorField />

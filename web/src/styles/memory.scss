@@ -1,3 +1,4 @@
+@use './mixins';
 @use './breakpoints' as breakpoints;
 .memory-page {
   width: min(var(--record-width), 100%);
@@ -77,7 +78,7 @@ input {
   border: var(--hairline) solid var(--workpaper-edge);
   border-radius: var(--radius-md);
   font-size: var(--type-heading);
-  color: var(--accent);
+  @include mixins.text-ink;
   background: var(--accent-soft);
 }
 .memory-columns {
@@ -101,7 +102,7 @@ input {
 .memory-notice {
   min-height: var(--space-6);
   margin: 0;
-  color: var(--accent);
+  @include mixins.text-ink;
   font-size: var(--type-small);
 }
 .memory-notice:not(:empty) {

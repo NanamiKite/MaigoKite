@@ -86,7 +86,7 @@
   font-size: var(--text-xs);
 }
 .drawer-tabs button.active {
-  color: var(--accent);
+  @include mixins.text-ink;
   border-bottom-color: var(--accent);
   background: var(--accent-selected);
 }

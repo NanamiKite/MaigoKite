@@ -126,7 +126,7 @@ time {
 }
 .receipt-facts > button.active {
   background: var(--accent-selected);
-  color: var(--accent);
+  @include mixins.text-ink;
 }
 .receipt-facts > button.failed-fact,
 .receipt-facts > button.failed-fact strong {

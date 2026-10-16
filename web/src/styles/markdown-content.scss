@@ -1,3 +1,4 @@
+@use './mixins';
 .markdown-content {
   color: var(--ink);
   font-size: var(--type-body);
@@ -49,6 +50,9 @@
   color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
+.markdown-prose :deep(ol > li::marker) {
+  color: var(--accent-ink);
+}
 .markdown-prose :deep(li > p) {
   margin: 0;
 }
@@ -63,12 +67,12 @@
   margin: 0;
 }
 .markdown-prose :deep(a) {
-  color: var(--accent);
+  @include mixins.text-ink;
   text-underline-offset: var(--space-2);
   text-decoration-thickness: var(--hairline);
 }
 .markdown-prose :deep(a:hover) {
-  color: var(--accent-hover);
+  color: var(--accent-ink-action);
 }
 .markdown-prose :deep(code) {
   padding: var(--space-1) var(--space-2);

@@ -23,7 +23,7 @@
 }
 .service-group[open] > .service-heading > .service-chevron { transform: rotate(var(--measure-90deg)); }
 .service-count { color: var(--ink-2); font-size: var(--text-xs); white-space: nowrap; }
-.service-default { color: var(--accent); font-size: var(--text-xs); white-space: nowrap; }
+.service-default { @include mixins.text-ink; font-size: var(--text-xs); white-space: nowrap; }
 .service-models { margin: var(--space-3) 0 0 var(--measure-58px); padding: 0; list-style: none; }
 .profile-row {
   display: flex;
@@ -47,7 +47,7 @@
 .profile-copy strong { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
 .profile-copy small { color: var(--ink-2); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-main .profile-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.profile-copy i { margin-left: var(--space-3); font-size: var(--text-xs); color: var(--accent); font-style: normal; }
+.profile-copy i { margin-left: var(--space-3); font-size: var(--text-xs); @include mixins.text-ink; font-style: normal; }
 .credential-state { color: var(--ink-2); font-size: var(--text-xs); }
 .default-action {
   @include mixins.interactive-row;

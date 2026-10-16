@@ -162,12 +162,15 @@ footer a {
   border-radius: var(--radius-sm);
 }
 footer a.router-link-active {
-  color: var(--accent);
+  @include mixins.text-ink;
   background: var(--accent-selected);
 }
 .memory-mark {
   width: var(--size-18);
   text-align: center;
+}
+footer a.router-link-active .memory-mark {
+  color: var(--accent);
 }
 .collapsed footer a {
   justify-content: center;

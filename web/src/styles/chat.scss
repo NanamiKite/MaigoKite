@@ -230,7 +230,7 @@
   padding: var(--space-3) var(--space-4);
   background: var(--paper);
   box-shadow: var(--shadow-float);
-  color: var(--accent);
+  @include mixins.text-ink;
   font-size: var(--text-xs);
 }
 .chat-error {

@@ -66,6 +66,7 @@ function argumentsText(input: unknown) {
   </div>
 </template>
 <style scoped lang="scss">
+@use '@/styles/mixins' as mixins;
 .node-details {
   margin-block: var(--space-2) var(--space-5);
   padding: var(--space-2) var(--space-4);
@@ -101,6 +102,6 @@ summary {
 }
 .hint a {
   margin-inline-start: var(--space-3);
-  color: var(--accent);
+  @include mixins.text-ink;
 }
 </style>

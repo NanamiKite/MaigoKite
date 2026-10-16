@@ -1,3 +1,4 @@
+@use './mixins';
 @use './tokens';
 @use './settings';
 @use './ink-controls';
@@ -103,11 +104,14 @@ button[aria-busy='true']::before {
   animation: ink-breathe var(--motion-pulse) var(--ease) infinite;
 }
 a {
-  color: var(--accent);
+  color: var(--accent-ink);
   text-decoration: none;
 }
 a:hover {
   text-decoration: underline;
+}
+a:where(:hover, :focus-visible, :active) {
+  color: var(--accent-ink-action);
 }
 button,
 input,
@@ -334,6 +338,8 @@ kbd {
   border-color: var(--accent-pressed);
 }
 .danger-button:not(:disabled):active {
+  color: var(--seal-ink-action);
+  > .icon-symbol { color: var(--seal); }
   background: var(--seal-pressed);
   border-color: var(--seal);
 }
@@ -352,6 +358,8 @@ kbd {
     border-color: var(--accent-hover);
   }
   .danger-button:not(:disabled):hover {
+    color: var(--seal-ink-action);
+    > .icon-symbol { color: var(--seal); }
     background: var(--seal-hover);
     border-color: var(--seal);
   }
@@ -365,6 +373,7 @@ kbd {
     border-color: var(--accent-pressed);
   }
   .danger-button:not(:disabled):hover:active {
+    color: var(--seal-ink-action);
     background: var(--seal-pressed);
   }
 }

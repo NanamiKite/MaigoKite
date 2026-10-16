@@ -23,6 +23,11 @@
 
 已新增 [个人 Agent 行为评测](../testing/AgentEvals.md)：10 个任务的独立重复试验、实际产物评分、轨迹与本地报告。当前仅评测装配及本地协议验证通过；没有运行真实模型，不能将参考脚本的通过率算作模型能力或第五批完整验收。
 
+案头背景分步交付：**静态文字墨色及设置/客户端显示已接入；安装包、压力性能和全目录类型检查仍有未完成项**。
+设置 → 外观与称呼 → 案头背景可直接选图、调整显现度/焦点或移除。六种强调色与浅深主题继续使用静态文字墨色，图形保留原色。
+对话透纸试版已接入，等待视觉确认；侧栏、抽屉与设置预览暂未推广。最新前端全量 **203/203、0 跳过**，构建与全量零警告 ESLint 通过。全目录 vue-tsc 的旧 `workspace-explorer.test.ts` 夹具缺少 `mime_type` / `data_url`，遵守约定未修改；产品构建配置的类型检查通过。详细证据见下节。
+此结果仅覆盖本次前端范围，不替代上面的后端 TLS 全量复验或 Electron 发布门禁。
+
 <details>
 <summary>各项功能做到了哪里，还有哪些问题</summary>
 
@@ -57,6 +62,87 @@
 
 <details>
 <summary>10 月 15–16 日的详细测试记录</summary>
+
+### 2026-10-16 对话连续阅读纸试版
+
+- 范围：仅背景开启的首页和对话主体；`.chat-body` 共用一层纸，移除砚台重复纸罩与底部接缝。无背景模式、侧栏和抽屉保持原样；使用现有设置滑块，不增加设置项。
+- 改动文件：`web/src/styles/tokens.scss`（静态对话文字墨色）、`styles/desk.scss`（连续纸面与不透明降级）、`utils/desk-palette.ts`（真实对话单纸面矩阵）、`stores/desk.ts`（独立求限与双调色板缓存）、`components/shell/DeskBackdrop.vue`（传递计算结果）。没有业务数据或协议修改。
+- 验证文件：新增 `web/src/tests/desk-reading-paper.test.ts` 的三项独立测试，覆盖壳层/对话限额分离、缓存及异步主题切换；`scripts/acceptance/desk_text_dom.js` 按真实 DOM 作用域枚举文字，不再假定所有文字沿用根令牌；`gui_desk_runtime.py` 对新的实际绘图根采样，并允许指定输出目录。旧测试断言/夹具未修改。
+- 实际执行 `npm run build`（包含产品 vue-tsc）与 `npm run lint`（零警告）通过；`npm run test:run` 为 28 文件、203 项通过、0 跳过，日志 `/tmp/maigokite-desk-trial-tests.log`。`npx vue-tsc --noEmit` 仍仅报旧 `workspace-explorer.test.ts:29` 缺 `mime_type` / `data_url`。已有 Sass legacy-js-api、测试装配的 i18n/router-link 警告保留，未通过放宽规则消除。
+- 实际执行 `.venv/bin/python -B /tmp/desk_trial.py`：独立 VITE_MOCK Chromium、同一照片、浅深色、六强调色、1440/1100/719；36 状态、1,968 个可见文字矩形，去文字后截图采样 0 不达标，正文最低 8.755、其余最低 4.512，0 页面异常。截图/报告 `/tmp/maigokite-desk-trial/`。高对比模式实际计算背景图为 none。
+- 实际执行 `.venv/bin/python -B scripts/acceptance/gui_desk_runtime.py --output /tmp/maigokite-desk-trial-runtime`：滚动前后无文字背景条像素相同、实际 CSS fixed；抽屉 transform 期间始终不透明。220 条全展开历史，180 帧采样：无图 P50/P95/P99 = 16.7/33.4/33.4ms、0 长任务，Paint/Raster 总计 1006.9/543.8ms；有图 16.7/33.4/50.1ms、长任务 102/50ms，Paint/Raster 1141.1/808.1ms。比前次有图 Raster 3364.0ms 降低，但长帧仍在；这是本机单次压力记录，不作为普遍性能保证。
+- 未覆盖：本试版没有重跑全套对抗图片、Electron built file:// 或安装包；前次相关通过不能代替本次桌面验收。侧栏/抽屉/设置即时预览仍使用原有透纸上限，等待用户确认对话效果再统一。截图使用隔离模拟记录，不连接实际模型或后端，不修改真实用户图片偏好。
+
+### 2026-10-16 案头背景设置与客户端显示
+
+#### 改动文件与理由
+
+| 文件（相对项目根） | 理由 |
+| --- | --- |
+| `web/src/components/settings/DeskBackgroundSettings.vue` | 设置入口、选图/移除/开关/显现度、复用真实预览和就地错误 |
+| `web/src/components/settings/DeskFocalPreview.vue` | 独立焦点拖动与键盘调整；新增展示组件均不超过 250 行 |
+| `web/src/components/settings/AppearanceSettingsPanel.vue` | 将背景组接入现有外观页，保留一份外观预览 |
+| `web/src/components/shell/DeskBackdrop.vue` | 图片显示、纸面参数、主题变化、失效提示及生命周期 |
+| `web/src/stores/desk.ts` | 独立客户端展示偏好、Blob URL 所有权、求限缓存，不改既有业务 store |
+| `web/src/utils/desk-preferences.ts` | v1 字段验证与统一图片尺寸/大小限制 |
+| `web/src/utils/desk-storage.ts` | IndexedDB 图片存取与错误边界 |
+| `web/src/utils/desk-image-header.ts` | 静态格式和容器尺寸预检，避免超限图先解码 |
+| `web/src/utils/desk-image.ts` | 异步解码/缩放/重编码及柔化图像素读取 |
+| `web/src/utils/desk-contrast.ts` | 无 DOM 的量化、真实叠层、对比度安全求限 |
+| `web/src/utils/desk-palette.ts` | 从实际 computed 令牌读取受保护文字集合与纸色 |
+| `web/src/utils/desk-paper.ts` | 入场覆纸与落定淡出，不提供逐帧偏移或动画框架 |
+| `web/src/styles/desk.scss`、`web/src/styles/tokens.scss` | 统一背景材质、局部纸底、高对比度降级和新参数 |
+| `web/src/components/layout/AppLayout.vue`、`web/src/main.ts` | 接入显示层和样式，不改 App.vue |
+| `web/src/components/layout/Sidebar.vue`、`web/src/components/shell/Drawer.vue`、`web/src/views/Chat.vue`、`web/src/components/chat-area/InputBox.vue` | 为有入场动画的阅读纸接入覆纸指令，保留既有交互 |
+| `web/src/components/common/CommandPalette.vue`、`web/src/config/settings-fields.ts` | 背景命令和设置搜索定位 |
+| `web/src/i18n/locales/en.ts` | source-keyed 中英文文案 |
+| `web/index.html` | 仅为图片显示添加 `img-src blob:` |
+| `web/src/tests/desk-background.test.ts` | 13 项独立对比度、偏好、限额、损坏/动画/存储失败测试；不改旧测试 |
+| `scripts/acceptance/desk_text_dom.js`、`gui_desk_background.py` | 实际可见文字枚举、去文字截图像素采样、对抗图片与多尺寸截图 |
+| `scripts/acceptance/gui_desk_runtime.py` | fixed 绘制、抽屉首帧与 220 条历史压力测量 |
+| `scripts/acceptance/desk_electron.cjs`、`gui_desk_electron.py` | 临时独立配置运行生产 Electron main/preload；不启动 Core，结束关闭实例 |
+| `docs/design/agent-ui-design.md`、`docs/project/Changelog.md`、本文件 | 更新设计、用户变化和实际验收边界 |
+
+#### 实际命令与结果
+
+- `web/`：`VITE_MOCK=1 npm run build` 通过，用于隔离桌面验收；最后恢复普通 `npm run build`。构建包含 `vue-tsc --noEmit -p tsconfig.build.json`、Vite Web 和 Electron main/preload。
+- `npm run test:run`：27 个文件、200 项通过、0 失败、0 跳过。新增 13 项，无旧断言/夹具修改。
+- `npm run lint`：全量 0 错误、0 警告，使用脚本原有 `--max-warnings=0`。
+- `node_modules/.bin/vue-tsc --noEmit`：**未通过**。唯一剩余错误为 `src/tests/workspace-explorer.test.ts:29` 的旧文件预览响应夹具缺 `mime_type` 与 `data_url`。没有通过修改旧断言、夹具或排除更多测试来隐藏它；不能声称全部类型门禁通过。
+- `.venv/bin/python -B scripts/acceptance/gui_desk_background.py`：真实 Chromium、隔离演示配置；48 个截图状态、2,015 个可见文字框，未登记文字色与实际背景像素对比度 **0 失败**，0 页面异常。白/黑/2px 棋盘/饱和噪声/渐变/本机真实照片 × 浅深主题，另覆盖 1440/1100/719、六强调色、纸内/纸外砚台、显现度归零、键盘焦点、非法图片保留原图、刷新恢复、移除、高对比度与强制颜色。每个状态保留正常及文字透明两张图；采样最小正文 11.380:1、其他文字 4.667:1（阈值仍为 7 和 4.5，不是 1.03 倍）。求限扫描约 1.0–13.1ms，此批未达到需要分批让出线程的阈值。
+- `.venv/bin/python -B scripts/acceptance/gui_desk_runtime.py`：fixed 无字区域滚动前后像素一致；抽屉所有采到的 transform 入场帧均不透明，落定后恢复透纸。使用真实分段加载入口展开 220 条历史，实际 DOM 220 个 turn、滚动高度 253,427px。
+
+| 220 条全部展开，180 帧滚动 | P50 / P95 / P99（ms） | 长任务 | Paint 累计（ms） | Raster 累计（ms，多线程总和） |
+| --- | --- | --- | --- | --- |
+| 无背景 | 16.7 / 33.4 / 33.4 | 0 | 1066.945 | 556.799 |
+| 有背景 | 16.7 / 33.5 / 50.0 | 102ms、52ms | 1232.790 | 3363.996 |
+
+压力场景有明显额外光栅开销，不能称为性能完全通过；没有擅自回退逐帧 JS 同步。默认不开启背景，开关始终可用。原始 Trace 与测量在 `/tmp/maigokite-desk-runtime/`，不是跨硬件性能保证。
+
+| 运行形态 | 实际覆盖 | 状态 |
+| --- | --- | --- |
+| Web Chromium | 设置、对抗图像素、浅深/六预设/三宽度、入场绘制与长历史 Trace | 已运行；像素通过，压力性能有上述限制 |
+| Electron 28.3.3 built `file://` | 生产 main/preload、安全选项不变；选图、blob:file:/// 显示、IndexedDB 刷新恢复、移除、设置/欢迎页截图 | 已运行；不是 Web 截图替代；独立实例正常退出 |
+| packaged 安装包 | 当前未提供可验收的最终安装包/运行资源 | **阻塞/未运行**；不扩展打包工程 |
+
+截图/报告：`/tmp/maigokite-desk/`、`/tmp/maigokite-desk-electron/`。命令日志为 `/tmp/maigokite-desk-{tests,types,lint,build}.log`；不加入 Git。Vite 构建仍有已有 Sass legacy API 弃用提示。
+最终普通 `npm run build` 已成功恢复，未留下演示构建供用户启动。本轮 Vite、Chromium 与独立 Electron 实例均已退出，临时 Electron 配置已自动移除；未启动后端，未操作 Git。验收截图和 Trace 保留供审阅。
+
+#### 未覆盖与决定项
+
+- 尚未用最终安装包验收；未覆盖 Windows/macOS、Electron 长历史 Trace、所有照片/驱动/屏幕组合；AVIF 的失败容器校验已测，未导入真实 AVIF 文件验收。
+- 缺失记录、解码失败有防护与部分独立测试，未完成全部跨窗口竞争/配额满的真实浏览器故障注入。胶囊保持不透明，不新增背景 IPC。
+- 8K 维持约定限制，不再作为待决定项。性能进一步优化若改变 fixed 绘制方案，需要单独确认；旧文件预览测试夹具要清零类型错误，需要允许补齐两个响应字段，当前未改。
+
+### 2026-10-16 静态文字墨色验收
+
+- `web/`：`npm run build` 通过（包括产品 vue-tsc、Vite Web 与 Electron 入口构建）；`node_modules/.bin/vue-tsc --noEmit -p tsconfig.build.json` 独立通过。构建不是 Electron 启动或安装包测试。
+- `npm run lint -- --format json --output-file /tmp/maigokite-ink-lint-final.json`：全量 ESLint（脚本自带 `--max-warnings=0`）0 错误、0 警告。`npm run test:run -- --reporter=json --outputFile=/tmp/maigokite-ink-tests-final.json`：187 通过、0 失败、0 跳过；没有修改既有断言或夹具。
+- `VITE_MOCK=1 npm run dev -- --host 127.0.0.1 --port 5197 --strictPort` 只用于隔离展示数据，不启动 Core 或读取真实模型凭据。`.venv/bin/python scripts/acceptance/gui_text_ink.py --phase before` / `--phase after` 在真实 Chromium 枚举文字，生成六预设 × 两主题 × 三纸面审计及前后截图。可重复运行的采集与报告脚本位于 `scripts/acceptance/`，本轮证据保留在 `/tmp/maigokite-text-ink/`，不加入 Git。
+- 最终 `after`：192 个视图状态、11,420 个可见文本节点、39 种去重 RGBA，未登记文字色与对比度断言共 **0 失败**。前后可同位比对的 6,180 个 SVG 颜色记录无变化。另补拍浅/深两张视口外待处理提示，实际文字对纸面为 6.108 / 9.018；此补拍无同状态 before，不算前后对照。
+- 预览和 Chromium 实例已退出，未留下本轮后端进程；证据截图和报告保留供审阅。构建仍打印已有 Sass legacy JS API 弃用提示，没有通过升级依赖或压制警告掩盖。
+- 初始采集器有未定义令牌继承色及模式胶囊同级底色的计算问题，已修正并重跑；不以初始 findings 作为真实缺陷数量。原始 `--wait`、`--stone` 和部分强调色低对比度仍在审计表保留，文字使用相应墨色；白字只对实际实色按钮背景验收。
+- 限制：固定展示数据，不是业务端到端或所有故障弹窗的覆盖；本轮未运行 Electron 28 `file://` / packaged、图片背景像素采样、长会话性能或背景导入失败路径。它们属于未开始的第二步，不能将源码核对记成通过。
 
 ### 2026-10-16 Agent 评测基础设施验收
 

@@ -107,7 +107,7 @@ code {
   box-shadow: inset var(--code-change-marker-width) 0 0 var(--code-deletion-ink);
 }
 .hunk {
-  color: var(--accent);
+  @include mixins.text-ink;
 }
 .header {
   color: var(--ink-2);

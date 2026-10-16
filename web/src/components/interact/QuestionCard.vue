@@ -82,6 +82,7 @@ async function submit() {
   </article>
 </template>
 <style scoped lang="scss">
+@use '@/styles/mixins' as mixins;
 .question-card {
   border-left: var(--space-1) solid var(--wait);
   padding: var(--space-4) var(--space-5);
@@ -104,7 +105,7 @@ textarea {
   width: 100%;
 }
 button[aria-pressed='true'] {
-  color: var(--accent);
+  @include mixins.text-ink;
 }
 .question-caption {
   margin: 0 0 var(--space-4);

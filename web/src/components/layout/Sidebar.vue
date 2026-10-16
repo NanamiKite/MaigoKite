@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vDeskPaper } from '@/utils/desk-paper'
 import { nextTick, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
@@ -57,6 +58,7 @@ function closeOnNarrowScreen() {
 <template>
   <aside
     id="session-sidebar"
+    v-desk-paper="ui.layout.sidebarCollapsed"
     class="sidebar"
     :class="{ collapsed: ui.layout.sidebarCollapsed, resizing }"
     :aria-label="$t('会话侧栏')"
@@ -229,7 +231,10 @@ function closeOnNarrowScreen() {
         :title="$t('它记得')"
         @click="closeOnNarrowScreen"
       >
-        <span class="memory-mark">✦</span><span v-if="!ui.layout.sidebarCollapsed">{{ $t('它记得') }}</span>
+        <span
+          class="memory-mark"
+          aria-hidden="true"
+        >✦</span><span v-if="!ui.layout.sidebarCollapsed">{{ $t('它记得') }}</span>
       </router-link>
       <router-link
         to="/settings"

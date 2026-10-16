@@ -1,5 +1,20 @@
 @use './breakpoints' as breakpoints;
 :root {
+  --desk-dim: 0.25;
+  --desk-blur-radius: 8px;
+  --desk-focus-height: 180px;
+  --desk-position: 50% 50%;
+  --desk-clear: none;
+  --desk-soft: none;
+  --plate-a: 1;
+  --chat-plate-a: 1;
+  // Background-only reading inks. Decorative accents keep their original hue.
+  --desk-ink-2: #394038;
+  --desk-ink-3: #4d534b;
+  --desk-accent-ink: #24524e;
+  --desk-wait-ink: #674711;
+  --desk-stone-ink: #25574f;
+  --desk-seal-ink: #8d3928;
   /* Exact dimensions retained by the presentation migration. */
   --measure-780px: 780px;
   --measure-620px: 620px;
@@ -143,7 +158,10 @@
   --palette-height: min(55vh, 480px);
   --mac-titlebar-inset: 82px;
   --pending-badge-size: 18px;
-  --wait-ink: color-mix(in srgb, var(--wait) 65%, var(--ink));
+  /* Text-only inks. Decorative wait/accent/seal colors remain unchanged. */
+  --wait-ink: #7d5a1e;
+  --stone-ink: #2f6e69;
+  --seal-ink-action: #9f3c2a;
   --pending-line: 2px;
   --session-title-size: var(--type-body);
   --control-row-height: 38px;
@@ -401,6 +419,76 @@
 }
 :root[data-accent='ink'] {
   --accent: var(--accent-black);
+}
+/* Static 6 × 2 palette: >=5 on the effective Inkline paper-2. Already-safe
+   presets keep their original color. Action ink also covers the darker pressed
+   paper; no runtime calculation or first-frame/theme-switch flash. */
+:root {
+  --accent-ink: #2c6963;
+  --accent-ink-action: #2c645f;
+}
+:root[data-accent='blue'] {
+  --accent-ink: #405f88;
+  --desk-accent-ink: #324c70;
+  --accent-ink-action: #3f5c83;
+}
+:root[data-accent='green'] {
+  --accent-ink: #4d6b55;
+  --desk-accent-ink: #36513c;
+  --accent-ink-action: #47614e;
+}
+:root[data-accent='earth'] {
+  --accent-ink: #805d3c;
+  --desk-accent-ink: #65472f;
+  --accent-ink-action: #735538;
+}
+:root[data-accent='lotus'] {
+  --accent-ink: #745d71;
+  --desk-accent-ink: #594454;
+  --accent-ink-action: #695566;
+}
+:root[data-accent='ink'] {
+  --accent-ink: #454340;
+  --desk-accent-ink: #393733;
+  --accent-ink-action: #454340;
+}
+:root[data-theme='dark'] {
+  --wait-ink: #ddbc7e;
+  --desk-ink-2: #d3d9ce;
+  --desk-ink-3: #b8c1b1;
+  --desk-accent-ink: #add2c4;
+  --desk-wait-ink: #e7c98d;
+  --desk-stone-ink: #acd4c7;
+  --desk-seal-ink: #f1b4a4;
+  --stone-ink: #5fa59d;
+  --seal-ink-action: #e17a62;
+  --accent-ink: #8ab9a8;
+  --accent-ink-action: #8ab9a8;
+}
+:root[data-theme='dark'][data-accent='blue'] {
+  --accent-ink: #89a6c6;
+  --desk-accent-ink: #b7cde7;
+  --accent-ink-action: #8aa7c6;
+}
+:root[data-theme='dark'][data-accent='green'] {
+  --accent-ink: #87ac90;
+  --desk-accent-ink: #b4d4bb;
+  --accent-ink-action: #88ad91;
+}
+:root[data-theme='dark'][data-accent='earth'] {
+  --accent-ink: #c29a71;
+  --desk-accent-ink: #e3c6a4;
+  --accent-ink-action: #c39d75;
+}
+:root[data-theme='dark'][data-accent='lotus'] {
+  --accent-ink: #b398b0;
+  --desk-accent-ink: #d7bfd1;
+  --accent-ink-action: #b69cb3;
+}
+:root[data-theme='dark'][data-accent='ink'] {
+  --accent-ink: #b9b6af;
+  --desk-accent-ink: #d7d3ca;
+  --accent-ink-action: #b9b6af;
 }
 :root {
   --accent-soft: color-mix(in srgb, var(--accent) 9%, var(--paper));

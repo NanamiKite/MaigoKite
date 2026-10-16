@@ -16,10 +16,11 @@ defineProps<{ verdict: Verdict }>()
   height: var(--space-4);
   place-content: center;
   font: var(--text-xs) var(--font-serif);
-  color: var(--stone);
-  border: var(--hairline) solid currentColor;
+  color: var(--stone-ink);
+  border: var(--hairline) solid var(--stone);
 }
 .denied {
   color: var(--seal);
+  border-color: var(--seal);
 }
 </style>

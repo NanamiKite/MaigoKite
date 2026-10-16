@@ -15,6 +15,12 @@ export const settingsFields: SettingsField[] = [
   { id: 'text-size', tab: 'general', label: '字号', keywords: 'font text size' },
   { id: 'texture', tab: 'general', label: '纸纹', keywords: 'texture paper' },
   {
+    id: 'desk-background',
+    tab: 'general',
+    label: '案头背景',
+    keywords: 'background wallpaper image 图片 显现度',
+  },
+  {
     id: 'enter-behavior',
     tab: 'general',
     label: '发送快捷键',

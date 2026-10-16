@@ -1,3 +1,14 @@
+/* Separate readable text from adjacent currentColor icons. Never apply this to
+   Pulse, Rail strokes, swatches or icon-only controls. */
+@mixin text-ink {
+  color: var(--accent-ink);
+  &:where(:hover, :focus-visible, :active) {
+    color: var(--accent-ink-action);
+  }
+  > .icon-symbol {
+    color: var(--accent);
+  }
+}
 @mixin floating {
   border: var(--hairline) solid var(--rule);
   border-radius: var(--radius-md);
@@ -33,7 +44,7 @@
   border: 0;
   border-radius: var(--radius-sm);
   background: var(--transparent);
-  color: var(--accent);
+  @include text-ink;
   font: inherit;
   font-size: var(--text-xs);
 }

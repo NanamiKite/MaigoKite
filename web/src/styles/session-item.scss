@@ -36,7 +36,7 @@
 .session-pending span { font-family: var(--font-sans); font-size: var(--text-xs); }
 .session-row:has(.session-pending) .session-time { display: none; }
 .session-link.router-link-active {
-  color: var(--accent);
+  @include mixins.text-ink;
 }
 .session-time {
   position: absolute;

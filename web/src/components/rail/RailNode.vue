@@ -98,6 +98,7 @@ async function resend(id: string) {
       <span
         v-else
         class="disclosure"
+        aria-hidden="true"
       >{{ expanded ? '−' : '+' }}</span>
     </button>
     <div

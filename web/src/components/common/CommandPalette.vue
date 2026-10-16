@@ -3,6 +3,7 @@ import { t } from '@/i18n'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
+import { useDeskStore } from '@/stores/desk'
 import { useSessionStore } from '@/stores/session'
 import { useMemoryStore } from '@/stores/memory'
 import Kbd from './Kbd.vue'
@@ -18,6 +19,7 @@ type Entry = {
   perform?: () => void
 }
 const ui = useUIStore(),
+  desk = useDeskStore(),
   session = useSessionStore(),
   memory = useMemoryStore(),
   router = useRouter()
@@ -106,6 +108,13 @@ const entries = computed<Entry[]>(() => [
     perform: () => ui.openDrawer(id as 'pending' | 'files' | 'changes' | 'plan'),
   })),
   { id: 'settings', label: t('设置'), to: '/settings', keywords: 'sz settings', group: 'settings' },
+  {
+    id: 'desk-background', label: t('切换案头背景'), keywords: 'atbj background wallpaper', group: 'settings',
+    perform: () => {
+      if (desk.image) desk.change({ on: !desk.preferences.on })
+      else void router.push('/settings?tab=general&field=desk-background')
+    },
+  },
   {
     id: 'theme',
     label: t(ui.theme === 'dark' ? '切换到宣纸' : '切换到松烟'),
@@ -451,7 +460,7 @@ button.selected {
   white-space: nowrap;
 }
 mark {
-  color: var(--accent);
+  @include mixins.text-ink;
   background: var(--transparent);
   font-weight: var(--weight-semibold);
 }

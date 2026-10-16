@@ -159,6 +159,9 @@ small {
   margin-left: auto;
   white-space: nowrap;
 }
+.pending-session .icon-symbol {
+  color: var(--accent);
+}
 .pending-empty {
   padding: var(--space-8) var(--space-5);
   text-align: center;

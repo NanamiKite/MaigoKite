@@ -179,7 +179,7 @@ async function save() {
   font-size: var(--text-md);
 }
 .mode-options small {
-  color: var(--accent);
+  @include mixins.text-ink;
   margin-inline-start: var(--space-3);
   font-size: var(--text-xs);
 }

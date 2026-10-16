@@ -216,7 +216,7 @@ defineExpose({ open })
   max-width: var(--receipt-width);
 }
 .run-view-tabs [aria-selected='true'] {
-  color: var(--accent);
+  @include mixins.text-ink;
   border-bottom-color: var(--accent);
 }
 .selected {

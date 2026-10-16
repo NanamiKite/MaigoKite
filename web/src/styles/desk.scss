@@ -1,0 +1,213 @@
+// Each reading plane paints the SAME viewport-aligned softened image, then the
+// dim layer and its own paper. Never place text directly on the clear image.
+.app-layout {
+  --plate: color-mix(in srgb, var(--paper) calc(var(--plate-a) * 100%), transparent);
+  --plate-2: color-mix(in srgb, var(--paper-2) calc(var(--plate-a) * 100%), transparent);
+  --desk-tint: color-mix(in srgb, var(--paper) calc(var(--desk-dim) * 100%), transparent);
+}
+.backdrop,
+.desk-paper-cover {
+  display: none;
+  pointer-events: none;
+}
+.app-layout[data-backdrop] {
+  isolation: isolate;
+  background: var(--transparent);
+  .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-underlay);
+    background: var(--paper-3);
+  }
+  .backdrop img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: var(--desk-position);
+  }
+  .backdrop::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--desk-tint);
+  }
+  .main-content {
+    background: var(--paper);
+  }
+  .main-content.chat-content,
+  .chat-page {
+    background: var(--transparent);
+  }
+  .chat-body,
+  .titlebar,
+  .windowbar,
+  .sidebar,
+  .drawer,
+  .workpaper {
+    --desk-surface: var(--paper);
+    --desk-plate: var(--plate);
+    background-color: var(--paper-3);
+    background-image:
+      linear-gradient(var(--desk-plate), var(--desk-plate)),
+      linear-gradient(var(--desk-tint), var(--desk-tint)), var(--desk-soft);
+    background-position: center, center, var(--desk-position);
+    background-size: auto, auto, cover;
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+  }
+  .sidebar,
+  .drawer {
+    --desk-surface: var(--paper-2);
+    --desk-plate: var(--plate-2);
+  }
+  // One stationary reading plane: scrolling text, Rail, composer and usage share
+  // its image and paper coat. No second coating, or wallpaper seam at the footer.
+  .chat-body {
+    --ink-2: var(--desk-ink-2);
+    --ink-3: var(--desk-ink-3);
+    --accent-ink: var(--desk-accent-ink);
+    --accent-ink-action: var(--desk-accent-ink);
+    --wait-ink: var(--desk-wait-ink);
+    --stone-ink: var(--desk-stone-ink);
+    --seal-ink-action: var(--desk-seal-ink);
+    --desk-plate: color-mix(in srgb, var(--paper) calc(var(--chat-plate-a) * 100%), transparent);
+    position: relative;
+    isolation: isolate;
+    .messages-inner {
+      background: var(--transparent);
+      border: 0;
+      box-shadow: none;
+    }
+    .composer {
+      background: var(--transparent);
+      border-radius: var(--radius-sm);
+      box-shadow: var(--elevation-inset);
+      &::before,
+      > .desk-paper-cover {
+        display: none;
+      }
+    }
+    .composer-dock {
+      background: var(--transparent);
+      padding: var(--space-3) 0 0;
+    }
+    .seal-mark.denied,
+    .message-action-row__error,
+    .message-actions__error {
+      color: var(--desk-seal-ink);
+    }
+  }
+  .chat-body:not(.workpaper) {
+    width: min(calc(var(--content-width) + var(--space-8)), calc(100% - var(--space-6)));
+    margin: var(--space-4) auto;
+    border: var(--hairline) solid var(--rule);
+    border-radius: var(--workpaper-frame-radius);
+    box-shadow: var(--elevation-sheet);
+  }
+  .chat-body:not(.desk-ready),
+  .drawer:not(.desk-ready),
+  .sidebar:not(.desk-ready) {
+    background: var(--desk-surface);
+  }
+  .chat-body,
+  .drawer,
+  .sidebar {
+    > .desk-paper-cover {
+      display: block;
+      position: absolute;
+      inset: 0;
+      z-index: var(--z-underlay);
+      border-radius: inherit;
+      background: var(--desk-surface);
+      opacity: 1;
+    }
+    &.desk-ready > .desk-paper-cover {
+      opacity: 0;
+      animation: desk-reveal var(--motion-panel) var(--ease-out);
+    }
+  }
+  // No clear-image exposure for the page-edge labels/controls. Existing noise
+  // remains unchanged; code, diff, terminal, dialogs and capsules stay opaque.
+  .rail-minimap,
+  .follow-button,
+  .pending-reminder,
+  .composer-help,
+  .configure-link,
+  .composer-notice,
+  .composer-hint,
+  .queued-messages,
+  .chat-error,
+  .compaction-status {
+    background-color: var(--paper);
+    border-radius: var(--radius-sm);
+  }
+  .composer-help,
+  .configure-link {
+    padding: var(--space-2) var(--space-3);
+  }
+  .rail-minimap {
+    border: var(--hairline) solid var(--rule);
+  }
+  .desk-preview-on .appearance-preview {
+    background-color: var(--paper-3);
+    background-image:
+      linear-gradient(var(--plate), var(--plate)),
+      linear-gradient(var(--desk-tint), var(--desk-tint)), var(--desk-soft);
+    background-size: auto, auto, cover;
+    background-position: center, center, var(--desk-position);
+  }
+  .desk-preview-on .preview-inkwell {
+    background: var(--plate-2);
+  }
+}
+.desk-toast {
+  position: fixed;
+  inset: auto var(--space-6) var(--space-6) auto;
+  z-index: var(--z-palette);
+  max-width: min(var(--palette-width), calc(100vw - var(--space-9)));
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  background: var(--paper-raised);
+  color: var(--ink-2);
+  border: var(--hairline) solid var(--rule);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-float);
+  font-size: var(--text-sm);
+}
+@keyframes desk-reveal {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-layout[data-backdrop] .desk-ready > .desk-paper-cover {
+    animation-duration: var(--motion-reduced);
+  }
+}
+@media (prefers-contrast: more), (forced-colors: active) {
+  .app-layout[data-backdrop] {
+    --plate-a: 1 !important;
+    --chat-plate-a: 1 !important;
+    .backdrop {
+      display: none;
+    }
+    .chat-body,
+    .titlebar,
+    .windowbar,
+    .sidebar,
+    .drawer,
+    .workpaper,
+    .composer,
+    .desk-preview-on .appearance-preview {
+      background-image: none;
+      background-color: var(--desk-surface, var(--paper));
+    }
+    .desk-preview-on {
+      background-image: none;
+    }
+  }
+}

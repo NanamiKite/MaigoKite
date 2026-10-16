@@ -1,3 +1,4 @@
+@use './mixins';
 .audit-page {
   display: grid;
   gap: var(--space-7);
@@ -68,7 +69,7 @@
 }
 .audit-verdict {
   font-size: var(--text-xs);
-  color: var(--accent);
+  @include mixins.text-ink;
 }
 .audit-verdict.denied {
   color: var(--seal);

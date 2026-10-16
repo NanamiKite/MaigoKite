@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vDeskPaper } from '@/utils/desk-paper'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useUIStore } from '@/stores/ui'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -82,6 +83,7 @@ async function moveTab(event: KeyboardEvent) {
     v-if="everOpened"
     v-show="ui.drawerOpen"
     id="work-drawer"
+    v-desk-paper="ui.drawerOpen"
     class="drawer"
     :class="{ wide, resizing }"
     :aria-label="$t('工作抽屉')"

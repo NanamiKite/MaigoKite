@@ -54,7 +54,7 @@
 .ink-select-option > span { overflow-wrap: anywhere; }
 .ink-select-option [aria-hidden='true'] { flex: none; }
 :where(.ink-select-menu[data-keyboard-navigation='true']) .ink-select-option[data-active='true'] { background: var(--control-hover); }
-.ink-select-option[aria-selected='true'] { color: var(--accent); background: var(--accent-selected); font-weight: var(--weight-medium); }
+.ink-select-option[aria-selected='true'] { @include mixins.text-ink; background: var(--accent-selected); font-weight: var(--weight-medium); }
 :where(.ink-select-menu[data-keyboard-navigation='true']) .ink-select-option[data-active='true'][aria-selected='true'] { box-shadow: inset var(--focus-width) 0 0 var(--accent); }
 .setting-row > .ink-select, .form-field > .ink-select { width: 100%; }
 .ink-number {

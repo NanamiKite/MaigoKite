@@ -170,7 +170,7 @@ const statusLabels: Record<PlanItem['status'], string> = {
   white-space: nowrap;
 }
 .plan-step.completed {
-  color: var(--accent);
+  @include mixins.text-ink;
 }
 .plan-step.in_progress {
   color: var(--ink);
@@ -178,8 +178,11 @@ const statusLabels: Record<PlanItem['status'], string> = {
   border-inline-start-color: var(--accent);
   font-weight: var(--weight-medium);
 }
-.in_progress .plan-marker,
 .in_progress .plan-status {
+  @include mixins.text-ink;
+}
+.completed .plan-marker,
+.in_progress .plan-marker {
   color: var(--accent);
 }
 .plan-empty {

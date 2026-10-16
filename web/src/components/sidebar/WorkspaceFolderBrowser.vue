@@ -323,7 +323,7 @@ onBeforeUnmount(() => {
   background: var(--accent-selected);
 }
 .folder-row.selected .folder-entry > .icon-symbol:last-child {
-  color: var(--accent);
+  @include mixins.text-ink;
 }
 .folder-enter {
   flex: none;

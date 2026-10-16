@@ -41,7 +41,7 @@
   font-size: var(--text-sm);
 }
 .model-feedback.saved {
-  color: var(--accent);
+  @include mixins.text-ink;
 }
 .empty-icon {
   color: var(--ink-2);

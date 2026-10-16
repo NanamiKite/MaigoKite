@@ -217,6 +217,7 @@ const measurementLabel = computed(() =>
   </StatPopover>
 </template>
 <style scoped lang="scss">
+@use '@/styles/mixins' as mixins;
 @use '@/styles/composer-stats';
 .context-ring {
   width: var(--size-14);
@@ -230,7 +231,7 @@ const measurementLabel = computed(() =>
 }
 .capacity-retry {
   margin-left: var(--space-2);
-  color: var(--accent);
+  @include mixins.text-ink;
 }
 .stat-rows dd {
   min-width: 0;

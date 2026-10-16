@@ -41,7 +41,7 @@
   border-radius: var(--radius-sm);
 }
 .settings-tabs button[aria-pressed='true'] {
-  color: var(--accent);
+  @include mixins.text-ink;
   background: var(--accent-selected);
   box-shadow: inset var(--focus-width) 0 0 var(--accent);
   font-weight: var(--weight-semibold);
@@ -213,7 +213,7 @@
   padding-inline-start: var(--space-3);
 }
 .field-saved {
-  color: var(--accent);
+  @include mixins.text-ink;
 }
 .field-error button,
 .page-error button {

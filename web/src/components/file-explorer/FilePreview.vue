@@ -303,7 +303,7 @@ async function openFile() {
     &[aria-pressed='true'] {
       border-bottom-color: var(--accent);
       background: var(--accent-selected);
-      color: var(--accent);
+      @include mixins.text-ink;
       font-weight: var(--weight-semibold);
     }
   }
@@ -351,7 +351,7 @@ header > span {
   height: var(--measure-31px);
   place-items: center;
   border-radius: var(--radius-md);
-  color: var(--accent);
+  @include mixins.text-ink;
   background: var(--accent-soft);
 }
 header div {

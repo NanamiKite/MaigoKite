@@ -115,6 +115,7 @@ function drop(event: DragEvent) {
   </form>
 </template>
 <style scoped lang="scss">
+@use '@/styles/mixins' as mixins;
 .capsule {
   height: var(--capsule-height);
   display: flex;
@@ -165,7 +166,7 @@ button {
 }
 .capsule-destinations button[aria-pressed='true'] {
   background: var(--accent-selected);
-  color: var(--accent);
+  @include mixins.text-ink;
 }
 @media (prefers-reduced-motion: reduce) {
   .capsule {

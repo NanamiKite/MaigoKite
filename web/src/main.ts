@@ -11,6 +11,7 @@ import router from './router'
 import { setupGuards } from './router/guards'
 import { i18n } from './i18n'
 import './styles/base.scss'
+import './styles/desk.scss'
 
 const app = createApp(App)
 

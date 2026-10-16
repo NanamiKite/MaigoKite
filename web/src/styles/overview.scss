@@ -34,7 +34,7 @@ h2 {
   border-radius: var(--radius-sm);
   padding: var(--space-4) var(--space-5);
   background: var(--accent-soft);
-  color: var(--accent);
+  @include mixins.text-ink;
   font-size: var(--type-small);
 }
 .record-section > header {

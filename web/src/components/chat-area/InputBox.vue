@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vDeskPaper } from '@/utils/desk-paper'
 import { t } from '@/i18n'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -180,6 +181,7 @@ const handleKeydown = useComposerKeyboard({
   >
     <ComposerAlert :session-id="sessionId" />
     <div
+      v-desk-paper
       class="composer"
       :aria-busy="isSending || busy"
     >

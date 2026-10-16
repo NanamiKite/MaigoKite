@@ -115,7 +115,7 @@ h2 {
   padding: var(--space-3);
   border: 0;
   border-radius: var(--radius-sm);
-  color: var(--accent);
+  @include mixins.text-ink;
   background: var(--transparent);
   font-size: var(--type-small);
 }

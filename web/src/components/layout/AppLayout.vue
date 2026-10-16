@@ -12,6 +12,7 @@ import TitleBar from '@/components/shell/TitleBar.vue'
 import WindowBar from '@/components/shell/WindowBar.vue'
 import Drawer from '@/components/shell/Drawer.vue'
 import CommandPalette from '@/components/common/CommandPalette.vue'
+import DeskBackdrop from '@/components/shell/DeskBackdrop.vue'
 import Sidebar from './Sidebar.vue'
 import { panelWidths } from '@/stores/layout'
 import { layoutPixels, overlayPanel } from '@/utils/layout-media'
@@ -133,6 +134,7 @@ onUnmounted(() => {
     class="app-layout inkline-shell"
     :class="{ desktop: isElectron }"
   >
+    <DeskBackdrop />
     <WindowBar
       v-if="isElectron"
       :platform="platform"

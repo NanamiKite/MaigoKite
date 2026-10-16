@@ -33,7 +33,7 @@
   background: var(--paper-2);
 }
 .extension-tabs button[aria-pressed='true'] {
-  color: var(--accent);
+  @include mixins.text-ink;
   background: var(--accent-selected);
 }
 h2 {
@@ -118,7 +118,7 @@ textarea {
   overflow-wrap: anywhere;
 }
 .extension-result {
-  color: var(--accent);
+  @include mixins.text-ink;
   font-size: var(--text-sm);
 }
 .extension-wait {

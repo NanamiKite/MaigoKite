@@ -11,6 +11,7 @@ from agent.data_contracts import (
     ApprovalRecord,
     ApprovalScope,
     ApprovalStatus,
+    AuthorizationScope,
     ConversationRecord,
     JSONObject,
     QuestionRecord,
@@ -113,7 +114,7 @@ class Version(Input):
 class Decision(Version):
     decision: Literal["allow", "deny"]
     note: str = Field(default="", max_length=2000)
-    scope: Literal["once", "task", "session"] = "once"
+    scope: ApprovalScope = "once"
 
 
 class Answer(Version):
@@ -382,7 +383,7 @@ class AuthorizationResponse(Output):
     approval_id: str
     conversation_id: str
     task_id: str
-    scope: Literal["task", "session"]
+    scope: AuthorizationScope
     expires_at: str
     resource: JSONObject
 

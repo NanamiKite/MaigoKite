@@ -58,6 +58,8 @@ User Preference 与用户记忆不合并：前者是显式产品设置，后者�
 
 2026-10-11 权限升级使用原 SQLite 增列逻辑，历史审批默认 `once`、空复用范围/期限，不生成授权。复用信息仍是审批审计回执，不新增 Grant 表、Runtime 状态表或执行续接数据。旧会话权限 `full_access / auto` 规范化为 `workspace_auto`；新的 `danger_full_access` 不由旧值推导。迁移不删除业务数据。运行验收未在本批执行。
 
+2026-10-16 新增显式 `authorization_scope=session_public_web`，复用上述 TEXT 字段，无表结构迁移、不改写旧回执。`reuse_scope_json` 保留原操作及策略边界；只有新 scope 才按内置搜索/公共网页读取组匹配，旧 `session` 仍按原范围精确匹配。该范围与 `session` 一样跨本会话任务复用，按原期限/撤销字段过滤；批准范围与原参数 hash 一起进入现有审计事务。
+
 ### 当前关系（逻辑归属与外键区别）
 
 ```mermaid

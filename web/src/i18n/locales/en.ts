@@ -283,6 +283,23 @@ const en: Record<string, string> = {
   仅这一次: 'Only this operation',
   本任务内同范围操作: 'Same scope in this task',
   本会话内同范围操作: 'Same scope in this conversation',
+  本会话搜索和公共网页读取: 'Search and public webpage reading in this conversation',
+  本任务仅此搜索服务: 'Only this search service in this task',
+  本会话仅此搜索服务: 'Only this search service in this conversation',
+  本任务仅此站点: 'Only this site in this task',
+  本会话仅此站点: 'Only this site in this conversation',
+  本次授权包括: 'This approval covers',
+  '允许本会话使用已配置的搜索服务，并读取不同站点的公共网页。':
+    'Allow this conversation to use configured search services and read public webpages across sites.',
+  '不包含浏览器操作、登录、提交、上传或命令联网。':
+    'Does not cover browser actions, sign-in, submissions, uploads, or network access from commands.',
+  '搜索服务会收到查询内容，目标网站会收到网页访问请求。':
+    'Search services receive the query; target websites receive page requests.',
+  搜索网页: 'Search the web',
+  '将查询内容发送给搜索服务，获取相关网页。':
+    'Send the query to the search service to find relevant webpages.',
+  '读取目标网页的文字内容，不使用浏览器登录态。':
+    'Read text from the target webpage without using browser sign-in state.',
   '仅复用以下范围，不是放行整个工具': 'Reuse only the scope below, not every use of the tool',
   '授权最长 8 小时，可在对话管理中撤销；权限或工作区变更后失效。':
     'Grants last up to 8 hours and can be revoked in conversation management. Permission or workspace changes invalidate them.',

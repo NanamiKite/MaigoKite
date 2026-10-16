@@ -28,15 +28,8 @@ export type TaskResult = Transport['TaskResultResponse']
 export type KnownAgentEvent = Transport['KnownEvent']
 export type PermissionMode =
   'read_only' | 'workspace' | 'workspace_auto' | 'danger_full_access' | 'full_access'
-export type ApprovalScope = 'once' | 'task' | 'session'
-export interface ApprovalAuthorization {
-  approval_id: string
-  conversation_id: string
-  task_id: string
-  scope: 'task' | 'session'
-  expires_at: string
-  resource: Record<string, unknown>
-}
+export type ApprovalScope = NonNullable<Transport['Decision']['scope']>
+export type ApprovalAuthorization = Transport['AuthorizationResponse']
 export type ResponseMode = 'fast' | 'balanced' | 'thorough'
 export interface ThinkingControl {
   kind: 'effort' | 'toggle' | 'unavailable'

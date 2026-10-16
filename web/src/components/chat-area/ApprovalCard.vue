@@ -7,7 +7,11 @@ import { useInboxStore } from '@/stores/inbox'
 import InkButton from '@/components/common/InkButton.vue'
 import InkSelect from '@/components/common/InkSelect.vue'
 import { useSessionStore } from '@/stores/session'
-import { approvalDescription, approvalScopeDescription } from '@/utils/tool-presentation'
+import {
+  approvalDescription,
+  approvalScopeDescription,
+  approvalScopeLabel,
+} from '@/utils/tool-presentation'
 import { awaitFocus } from '@/utils/await-focus'
 const card = ref<HTMLElement | null>(null)
 const props = defineProps<{ item?: AwaitItem; approval?: Approval }>()
@@ -35,15 +39,37 @@ const pendingDecision = ref<'allow' | 'deny' | null>(null)
 const session = useSessionStore()
 const scope = ref<ApprovalScope>('once')
 const record = computed(() => {
-  const entry = props.approval || session.approvals[item.value?.sessionId || '']?.find(
-    (value) => value.id === item.value?.id,
-  )
+  const entry =
+    props.approval ||
+    session.approvals[item.value?.sessionId || '']?.find((value) => value.id === item.value?.id)
   return entry?.id === item.value?.id && entry?.version === item.value?.version ? entry : undefined
 })
-const scopes = computed(() => (record.value?.allowed_scopes || []).filter((value) =>
-  value === 'task' || value === 'session',
-))
-watch(() => [item.value?.id, item.value?.version, scopes.value.join(',')], () => { scope.value = 'once' })
+const scopes = computed(() =>
+  (record.value?.allowed_scopes || []).filter((value) => value !== 'once'),
+)
+const scopeOptions = computed(() => [
+  { value: 'once', label: t('仅这一次') },
+  ...scopes.value.map((value) => ({
+    value,
+    label: approvalScopeLabel(value, record.value?.reuse_scope),
+  })),
+])
+// Snapshot polling replaces objects, but only a different reviewed operation
+// should reset the user's still-unsubmitted choice.
+watch([() => item.value?.id, () => item.value?.version], () => {
+  scope.value = 'once'
+})
+watch(
+  () => scopes.value.join(','),
+  () => {
+    if (scope.value !== 'once' && !scopes.value.includes(scope.value)) scope.value = 'once'
+  },
+)
+function selectScope(event: Event) {
+  if (!(event.target instanceof HTMLSelectElement)) return
+  const value = event.target.value
+  scope.value = scopes.value.find((candidate) => candidate === value) || 'once'
+}
 const description = computed(() =>
   item.value
     ? approvalDescription(
@@ -78,7 +104,8 @@ async function decide(decision: 'allow' | 'deny') {
     :data-await="item.id"
   >
     <header>
-      <strong>{{ description?.action }}</strong><span class="await-label">{{ $t('等你处理') }}</span>
+      <strong>{{ description?.action }}</strong>
+      <span class="await-label">{{ $t('等你处理') }}</span>
     </header>
     <p class="approval-target">
       {{ description?.target }}
@@ -106,9 +133,9 @@ async function decide(decision: 'allow' | 'deny') {
       {{ $t('批准范围') }}
       <InkSelect
         :value="scope"
-        :options="[{ value: 'once', label: $t('仅这一次') }, ...scopes.map(value => ({ value, label: $t(value === 'task' ? '本任务内同范围操作' : '本会话内同范围操作') }))]"
+        :options="scopeOptions"
         :disabled="pendingDecision !== null || inbox.busy.includes(item.id)"
-        @change="scope = ($event.target as HTMLSelectElement).value as ApprovalScope"
+        @change="selectScope"
       />
     </label>
     <details
@@ -116,9 +143,9 @@ async function decide(decision: 'allow' | 'deny') {
       class="approval-details"
       open
     >
-      <summary>{{ $t('仅复用以下范围，不是放行整个工具') }}</summary>
+      <summary>{{ $t('本次授权包括') }}</summary>
       <p
-        v-for="line in approvalScopeDescription(record?.reuse_scope)"
+        v-for="line in approvalScopeDescription(record?.reuse_scope, scope)"
         :key="line"
       >
         {{ line }}
@@ -126,11 +153,13 @@ async function decide(decision: 'allow' | 'deny') {
       <p>{{ $t('授权最长 8 小时，可在对话管理中撤销；权限或工作区变更后失效。') }}</p>
     </details>
     <div v-if="rejecting">
-      <label>{{ $t('驳回理由（可选）') }}<textarea
-        v-model="note"
-        rows="2"
-        maxlength="2000"
-      />
+      <label>
+        {{ $t('驳回理由（可选）') }}
+        <textarea
+          v-model="note"
+          rows="2"
+          maxlength="2000"
+        />
       </label>
     </div>
     <p
@@ -159,9 +188,7 @@ async function decide(decision: 'allow' | 'deny') {
         :loading="pendingDecision === 'deny'"
         @click="rejecting ? decide('deny') : (rejecting = true)"
       >
-        {{
-          pendingDecision === 'deny' ? $t('正在提交…') : rejecting ? $t('确认驳回') : $t('驳回')
-        }}
+        {{ pendingDecision === 'deny' ? $t('正在提交…') : rejecting ? $t('确认驳回') : $t('驳回') }}
         <small>N</small>
       </InkButton>
       <button

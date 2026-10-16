@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { onScopeDispose, ref, watch } from 'vue'
 import { api, type ApprovalAuthorization } from '@/api/client'
-import { t } from '@/i18n'
-import { approvalScopeDescription } from '@/utils/tool-presentation'
+import { approvalScopeDescription, approvalScopeLabel } from '@/utils/tool-presentation'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import Tooltip from '@/components/common/Tooltip.vue'
 
@@ -108,9 +107,9 @@ onScopeDispose(() => {
       :key="item.approval_id"
     >
       <details>
-        <summary>{{ t(item.scope === 'task' ? '本次任务的批准' : '此对话的批准') }}</summary>
+        <summary>{{ approvalScopeLabel(item.scope, item.resource) }}</summary>
         <p
-          v-for="line in approvalScopeDescription(item.resource)"
+          v-for="line in approvalScopeDescription(item.resource, item.scope)"
           :key="line"
         >
           {{ line }}

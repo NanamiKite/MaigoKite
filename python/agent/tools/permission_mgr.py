@@ -15,7 +15,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from agent.data_contracts import PERMISSION_MODE, PermissionMode
+from agent.data_contracts import (
+    PERMISSION_MODE,
+    AuthorizationRecord,
+    JSONObject,
+    JSONValue,
+    PermissionMode,
+    available_approval_scopes,
+)
 from agent.security.sensitive_paths import is_sensitive_path, validate_windows_path
 from agent.security.whitelist import Whitelist
 from agent.utils.command_shell import resolve_command_shell
@@ -36,7 +43,7 @@ class PolicyDecision:
     reason: str
     arguments: dict[str, Any]
     resource_scope: str = ""
-    reuse_scope: dict[str, Any] | None = None
+    reuse_scope: JSONObject | None = None
     authorization_id: str = ""
     # Trusted execution metadata, never a tool-supplied permission grant.
     sandbox_mode: PermissionMode = "workspace"
@@ -401,11 +408,31 @@ class PermissionManager:
         return PolicyDecision("approval_required", risk, reason, normalized, resource_scope, reuse,
                               sandbox_mode=sandbox_mode, allow_network=allow_network)
 
-    def _reuse_scope(self, name: str, args: dict[str, Any], risk: RiskLevel, mode: str) -> dict[str, Any] | None:
+    @staticmethod
+    def authorizes(receipt: AuthorizationRecord, decision: PolicyDecision) -> bool:
+        """Match a current policy decision against an unexpired Repository grant."""
+        resource = decision.reuse_scope
+        if decision.outcome != "approval_required" or not resource:
+            return False
+        granted = receipt["resource"]
+        if receipt["scope"] != "session_public_web":
+            return granted == resource
+        # This opt-in joins only search and stateless webpage reads. It cannot
+        # authorize Browser/MCP/commands or survive a mode/workspace change.
+        return (
+            "session_public_web" in available_approval_scopes(granted)
+            and "session_public_web" in available_approval_scopes(resource)
+            and all(
+                granted.get(key) == resource.get(key)
+                for key in ("policy_version", "workspace_root", "mode", "risk")
+            )
+        )
+
+    def _reuse_scope(self, name: str, args: dict[str, Any], risk: RiskLevel, mode: str) -> JSONObject | None:
         """Small, closed set of product scopes. Unknown/sensitive actions stay one-shot."""
         if risk >= RiskLevel.L5:
             return None
-        operation: dict[str, Any]
+        operation: JSONObject
         if name in {"file_write", "file_edit"}:
             operation = {"directory": str(Path(args["path"]).parent), "recursive": False}
         elif name == "web_search":
@@ -426,7 +453,8 @@ class PermissionManager:
             if name == "browser":
                 operation["action"] = "open"
         elif name in {"bash", "exec_command"} and risk <= RiskLevel.L3:
-            operation = {"argv": shlex.split(args["command"]), "workdir": args["workdir"], "shell": args["shell"]}
+            argv: list[JSONValue] = list(shlex.split(args["command"]))
+            operation = {"argv": argv, "workdir": args["workdir"], "shell": args["shell"]}
         else:
             return None
         return {"policy_version": 2, "tool": name, "workspace_root": str(self.workspace_root),

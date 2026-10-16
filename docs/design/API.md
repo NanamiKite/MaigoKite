@@ -163,7 +163,9 @@ DELETE /workspaces/{workspace_id}/approvals/{approval_id}/authorization
 决定请求支持 `{"decision":"deny","version":1,"note":"请只读取文件，不要修改"}`。
 `note` 可选，最多 2000 字符；与决定、版本推进、审计在同一事务中保存。GET 单条审批可查询已结束的决定，返回 `note / decided_at`，不再只能查询 pending 列表。
 
-允许请求可携带 `scope`：`{"decision":"allow","version":1,"scope":"session"}`。缺省为 `once`；另支持 `task / session`，仅可选择审批响应的 `allowed_scopes`。`deny` 只接受 `once`。响应增加服务端生成的 `reuse_scope`（只读）、`authorization_scope / authorization_expires_at / authorization_revoked_at`；客户端不得提交自定义 scope 规则。L5/MCP/沙箱外命令不支持复用。
+允许请求可携带 `scope`：`{"decision":"allow","version":1,"scope":"session"}`。缺省为 `once`；另支持 `task / session / session_public_web`，仅可选择审批响应的 `allowed_scopes`。`deny` 只接受 `once`。响应增加服务端生成的 `reuse_scope`（只读）、`authorization_scope / authorization_expires_at / authorization_revoked_at`；客户端不得提交自定义 scope 规则。L5/MCP/沙箱外命令不支持复用。
+
+`session_public_web` 需要用户显式选择，仅出现在 L3 内置搜索/网页读取的可用范围中，覆盖同会话的 `web_search / web_fetch`，不覆盖 Browser、MCP 或命令。`reuse_scope` 继续记录原操作的引擎/origin，授权范围必须结合 `authorization_scope`（授权列表中为 `scope`）解释；旧 `session` 仍只批准原引擎/站点。授权最长 8 小时，沿用同一撤销、权限变更及审计入口。不支持该范围的操作返回 `APPROVAL_SCOPE_UNAVAILABLE`，不能用改写请求给其他工具授予公共网页权限。
 
 授权列表返回 `{"authorizations":[...]}`，项包括 `approval_id / conversation_id / task_id / scope / expires_at / resource`；撤销返回 204。两接口要求 owner 且校验主体，不删除原审批审计；任务/会话授权最长 8 小时。每次执行重新核对权限和回执，详见 [工具权限](../agent-capabilities/security/tool-permission.md#窄范围复用)。
 

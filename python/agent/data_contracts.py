@@ -19,7 +19,8 @@ type ToolCallStatus = Literal[
 ]
 type PermissionMode = Literal["read_only", "workspace", "workspace_auto", "danger_full_access"]
 type ApprovalStatus = Literal["pending", "consumed", "rejected", "expired"]
-type ApprovalScope = Literal["once", "task", "session"]
+type AuthorizationScope = Literal["task", "session", "session_public_web"]
+type ApprovalScope = Literal["once"] | AuthorizationScope
 type RiskLabel = Literal["L1", "L2", "L3", "L4", "L5"]
 
 
@@ -127,7 +128,7 @@ class AuthorizationRecord(TypedDict):
     approval_id: str
     conversation_id: str
     task_id: str
-    scope: Literal["task", "session"]
+    scope: AuthorizationScope
     expires_at: str
     resource: JSONObject
 
@@ -227,6 +228,28 @@ class RunResult(TypedDict):
     retryable: NotRequired[bool]
 
 
+def available_approval_scopes(resource: JSONObject | None) -> list[ApprovalScope]:
+    """Offer public-web reuse only for the built-in search and HTTP text reader.
+
+    The grant changes neither browser permissions nor web_fetch's public-address
+    checks. Old task/session grants retain their engine/origin boundaries.
+    """
+    scopes: list[ApprovalScope] = ["once"]
+    if not resource:
+        return scopes
+    scopes.extend(["task", "session"])
+    if (
+        resource.get("policy_version") == 2
+        and resource.get("risk") == "L3"
+        and resource.get("tool") in ("web_search", "web_fetch")
+        and resource.get("mode") in ("read_only", "workspace", "workspace_auto", "danger_full_access")
+        and isinstance(resource.get("workspace_root"), str)
+        and resource.get("workspace_root")
+    ):
+        scopes.append("session_public_web")
+    return scopes
+
+
 def approval_notice(approval: ApprovalRecord) -> ApprovalNotice:
     """Public approval facts; omit principal IDs and the private argument hash."""
     arguments = approval["arguments"]
@@ -240,7 +263,7 @@ def approval_notice(approval: ApprovalRecord) -> ApprovalNotice:
         "version": approval["version"], "expires_at": approval["expires_at"],
         "note": approval["note"], "decided_at": approval["decided_at"] or "",
         "reuse_scope": approval["reuse_scope"],
-        "allowed_scopes": ["once", "task", "session"] if approval["reuse_scope"] else ["once"],
+        "allowed_scopes": available_approval_scopes(approval["reuse_scope"]),
         "authorization_scope": approval["authorization_scope"],
         "authorization_expires_at": approval["authorization_expires_at"],
         "authorization_revoked_at": approval["authorization_revoked_at"],

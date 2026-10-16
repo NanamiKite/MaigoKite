@@ -38,6 +38,7 @@ from agent.data_contracts import (
     TaskResultRecord,
     TaskStatus,
     ToolCallRecord,
+    available_approval_scopes,
 )
 from agent.errors import UserFacingError
 from agent.event_contracts import event_payload
@@ -1908,7 +1909,7 @@ class SQLiteRepository:
                    WHERE a.workspace_id=? AND a.conversation_id=? AND a.principal_id=?
                    AND a.status='consumed' AND a.authorization_revoked_at=''
                    AND a.authorization_expires_at>? AND c.archived=0
-                   AND (a.authorization_scope='session' OR
+                   AND (a.authorization_scope IN ('session','session_public_web') OR
                         (a.authorization_scope='task' AND (?='' OR a.task_id=?)
                          AND t.status IN ('running','waiting_approval','interrupted')))
                    ORDER BY a.created_at DESC LIMIT 200""",
@@ -2033,8 +2034,8 @@ class SQLiteRepository:
     ) -> ApprovalRecord:
         if decision not in {"allow", "deny"}:
             raise ValueError("decision must be allow or deny")
-        if scope not in {"once", "task", "session"} or (decision == "deny" and scope != "once"):
-            raise ValueError("scope must be once, task or session; denial is always once")
+        if decision == "deny" and scope != "once":
+            raise ValueError("denial only supports one-time approval")
         if not isinstance(note, str) or len(note) > 2000:
             raise ValueError("approval note must not exceed 2000 characters")
         note = note.strip()
@@ -2057,7 +2058,9 @@ class SQLiteRepository:
                 raise ValueError("approval has already been decided")
             if int(item["version"]) != version:
                 raise ValueError("approval version conflict")
-            reuse = json.loads(item["reuse_scope_json"])
+            reuse = JSON_OBJECT.validate_json(item["reuse_scope_json"])
+            if scope not in available_approval_scopes(reuse):
+                raise ValueError("scope is not available for this approval")
             if scope != "once":
                 if not reuse or item["risk_level"] == "L5":
                     raise PermissionError("this operation only supports one-time approval")

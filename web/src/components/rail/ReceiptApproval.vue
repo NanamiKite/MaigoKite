@@ -2,7 +2,11 @@
 import { computed, ref } from 'vue'
 import type { Approval } from '@/api/client'
 import type { AwaitItem, Verdict } from '@/api/events'
-import { approvalDescription, approvalScopeDescription } from '@/utils/tool-presentation'
+import {
+  approvalDescription,
+  approvalScopeDescription,
+  approvalScopeLabel,
+} from '@/utils/tool-presentation'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import SealMark from './SealMark.vue'
 const props = defineProps<{ item: AwaitItem; record?: Approval }>()
@@ -27,11 +31,7 @@ const status = computed(() => {
         : '等待确认'
 })
 const scope = computed(() =>
-  props.record?.authorization_scope === 'task'
-    ? '本任务内同范围操作'
-    : props.record?.authorization_scope === 'session'
-      ? '本会话内同范围操作'
-      : '仅这一次',
+  approvalScopeLabel(props.record?.authorization_scope || 'once', props.record?.reuse_scope),
 )
 const rawDetails = computed(
   () => (props.record ? JSON.stringify(props.record.arguments, null, 2) : props.item.detail) || '',
@@ -79,9 +79,9 @@ function toggle(event: Event) {
         {{ item.note || record?.note }}
       </p>
       <template v-if="record?.authorization_scope && verdict && verdict !== 'deny'">
-        <p>{{ $t('批准范围') }} · {{ $t(scope) }}</p>
+        <p>{{ $t('批准范围') }} · {{ scope }}</p>
         <p
-          v-for="line in approvalScopeDescription(record.reuse_scope)"
+          v-for="line in approvalScopeDescription(record.reuse_scope, record.authorization_scope)"
           :key="line"
         >
           {{ line }}

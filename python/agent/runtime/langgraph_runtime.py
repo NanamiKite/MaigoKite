@@ -62,6 +62,7 @@ from agent.data_contracts import (
     PermissionMode,
     TaskRecord,
     approval_notice,
+    available_approval_scopes,
 )
 from agent.errors import UserFacingCancellation, UserFacingError, public_error
 from agent.event_contracts import event_payload
@@ -728,7 +729,10 @@ class LangGraphRuntime:
         # Only the parent can use its own explicitly scoped receipts. Child
         # tools never inherit authorizations, even inside the same conversation.
         if isinstance(context, _RunContext) and decision.outcome == "approval_required" and decision.reuse_scope:
-            receipt = next((item for item in context.authorizations if item["resource"] == decision.reuse_scope), None)
+            receipt = next(
+                (item for item in context.authorizations if policy.authorizes(item, decision)),
+                None,
+            )
             if receipt is not None:
                 return replace(decision, outcome="allow", reason="allowed by scoped approval",
                                authorization_id=receipt["approval_id"])
@@ -1002,9 +1006,11 @@ class LangGraphRuntime:
     ) -> RunHandle:
         if decision not in {"allow", "deny"}:
             raise ValueError("decision must be allow or deny")
-        if scope not in {"once", "task", "session"} or (decision == "deny" and scope != "once"):
+        if decision == "deny" and scope != "once":
             raise ValueError("invalid approval scope")
         pending = await self.repository.get_approval(workspace_id, approval_id)
+        if scope not in available_approval_scopes(pending["reuse_scope"]):
+            raise ValueError("invalid approval scope")
         pending_task = await self.repository.get_task(workspace_id, str(pending["task_id"]))
         conversation = await self.repository.get_conversation(
             workspace_id, str(pending_task["conversation_id"])

@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from starlette.requests import HTTPConnection
 
 from agent.api import contracts as dto
+from agent.data_contracts import available_approval_scopes
 from agent.errors import public_error
 
 if TYPE_CHECKING:
@@ -250,8 +251,11 @@ def routes(core: AgentCore, execution: Execution, credentials: Credentials) -> A
         pending = await repository.get_approval(workspace_id, approval_id)
         if pending["status"] != "pending" or pending["version"] != body.version:
             raise dto.APIError(409, "APPROVAL_NOT_PENDING", "审批状态已改变，请刷新后重试。")
-        if (body.decision == "deny" or not pending.get("reuse_scope")) and body.scope != "once":
-            raise dto.APIError(400, "APPROVAL_SCOPE_UNAVAILABLE", "此决定仅支持单次操作。")
+        if (
+            body.scope not in available_approval_scopes(pending["reuse_scope"])
+            or (body.decision == "deny" and body.scope != "once")
+        ):
+            raise dto.APIError(400, "APPROVAL_SCOPE_UNAVAILABLE", "此操作不支持所选批准范围，请刷新后重试。")
         if body.decision == "allow":
             await credentials.prepare(
                 workspace_id, pending["conversation_id"], pending["task_id"], tool_name=pending["tool_name"]

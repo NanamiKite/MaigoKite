@@ -1190,8 +1190,7 @@ export interface components {
             arguments: components["schemas"]["JSONObject-Output"];
             reuse_scope: components["schemas"]["JSONObject-Output"];
         };
-        /** @enum {string} */
-        ApprovalScope: "once" | "task" | "session";
+        ApprovalScope: "once" | components["schemas"]["AuthorizationScope"];
         /** @enum {string} */
         ApprovalStatus: "pending" | "consumed" | "rejected" | "expired";
         /** ApprovalsResponse */
@@ -1207,15 +1206,13 @@ export interface components {
             conversation_id: string;
             /** Task Id */
             task_id: string;
-            /**
-             * Scope
-             * @enum {string}
-             */
-            scope: "task" | "session";
+            scope: components["schemas"]["AuthorizationScope"];
             /** Expires At */
             expires_at: string;
             resource: components["schemas"]["JSONObject-Output"];
         };
+        /** @enum {string} */
+        AuthorizationScope: "task" | "session" | "session_public_web";
         /** AuthorizationsResponse */
         AuthorizationsResponse: {
             /** Authorizations */
@@ -1388,12 +1385,8 @@ export interface components {
              * @default
              */
             note: string;
-            /**
-             * Scope
-             * @default once
-             * @enum {string}
-             */
-            scope: "once" | "task" | "session";
+            /** @default once */
+            scope: components["schemas"]["ApprovalScope"];
         };
         /** Discovery */
         Discovery: {

@@ -18,11 +18,15 @@ ExecutionEngine、TaskManager、IChatProvider/ChatAdapter 和执行后端开关�
 2026-10-10 按用户要求先完成源码切换，随后获准补做前四批定向后端验收；实际范围与结果见
 [交付路线与状态](../project/Roadmap.md)，不外推为全量发布验收。
 
-运行时集成按四类职责维护：运行调用、界面事件映射、审批桥接、产品持久投影。`langgraph_runtime.py` 保留 graph 创建、准入/恢复、产品 middleware 与权限桥接；`runtime/projection.py` 持有单次运行的流式文本解析、推理展示、工具结果投影和事件去重。后者的终态标志仅表示 UI 终态已投递，不作为任务状态或恢复依据。模型协议、工具调度、检查点、暂停恢复和上下文摘要仍由现有成熟组件承担。
+运行时集成按四类职责维护：运行调用、界面事件映射、审批桥接、产品持久投影。`langgraph_runtime.py` 保留 graph 创建、准入/恢复与权限桥接；`runtime/product_tools.py` 承接产品工具 middleware；`runtime/projection.py` 持有单次运行的流式文本解析、推理展示、工具结果投影和事件去重。后者的终态标志仅表示 UI 终态已投递，不作为任务状态或恢复依据。模型协议、工具调度、检查点、暂停恢复和上下文摘要仍由现有成熟组件承担。
 
-`_RunContext` 引用同一份投影对象；工具权限快照不再复制展示标志。推理展示只保留一个“当前段是否打开”的标志，模型轮次结束后重置文本解析器；子 Agent 通过 `models/reasoning.py` 的公开文本提取函数生成活动内容，不调用父 Runtime 的私有文本函数。聊天和工具事件字段不变，结构化结果仍由 Repository 的原有事务提交。
+共享请求 `RuntimeRunRequest` 和单次运行上下文 `RunContext` 定义在 `runtime/run_context.py`，字段、默认值和资源所有权不变；原 Runtime 模块仍导出请求类型，保留调用方的导入兼容。上下文引用同一份投影对象；工具权限快照不再复制展示标志。推理展示只保留一个“当前段是否打开”的标志，模型轮次结束后重置文本解析器；子 Agent 通过 `models/reasoning.py` 的公开文本提取函数生成活动内容，不调用父 Runtime 的私有文本函数。聊天和工具事件字段不变，结构化结果仍由 Repository 的原有事务提交。
+
+`ProductToolMiddleware` 显式接收 Repository、执行前权限刷新和工具执行回调，事件直接交给当前运行的投影，不再通过上下文访问整个 Runtime。middleware 的顺序及图中使用的 `_ProductToolMiddleware` 名称保持不变，避免已落盘 checkpoint 引用的节点失效。子 Agent 和上下文预算仍存在原有的 Runtime 依赖，本次未将它们改造成新服务层。
 
 Core 保留 ToolRegistry、PermissionPolicy、Repository 等产品能力；ToolRegistry 只做发现和元数据，不再提供另一个 invoke 执行入口。
+
+提示词安全审查由 `runtime/prompt_safety.py` 中的 `PromptSafetyMiddleware` 完成，显式复用 Repository、SafetyReviewer、设置/凭证回调和当前运行的事件投影，不反向调用 Runtime 私有方法。它在原 middleware 顺序中执行，仍使用原生 `interrupt` 处理用户确认；不持有 graph、根任务或独立审批状态。工具权限判定、HITL 批次匹配、审批恢复和执行前重查本轮仍留在 `langgraph_runtime.py`，未迁移或改变授权语义。
 
 聊天的 `thinking` 是独立于输出预算的会话设置：保存和开始运行时均按模型能力校验，切换模型默认清空，
 空值不发推理参数。原 `response_mode` 仅保留旧客户端兼容字段，不再将 fast/balanced/thorough 映射到

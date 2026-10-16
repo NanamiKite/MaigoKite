@@ -14,14 +14,12 @@ from pathlib import Path
 from typing import Any
 
 from agent.data_contracts import (
-    APPROVAL_RECORD,
     AUTHORIZATION_RECORD,
     CONVERSATION_RECORD,
     JSON_OBJECT,
     MESSAGE_RECORD,
     PERMISSION_MODE,
     QUESTION_RECORD,
-    SNAPSHOT_RECORD,
     TASK_EVENT_RECORD,
     TASK_RECORD,
     TOOL_CALL_RECORD,
@@ -42,7 +40,7 @@ from agent.data_contracts import (
 )
 from agent.errors import UserFacingError
 from agent.event_contracts import event_payload
-from agent.models.usage import aggregate_usage_events
+from agent.inspector.snapshots import approval_value, conversation_snapshot, task_inspection
 from agent.sqlite_schema import initialize_schema
 from agent.structured_output import validate_output_schema, validated_result_json
 
@@ -1470,51 +1468,7 @@ class SQLiteRepository:
             usage_events = db.execute("""SELECT id,event_type,payload_json FROM task_events WHERE task_id=?
                 AND event_type IN ('model.usage','model.call.started','model.call.failed','context.compacted')
                 ORDER BY sequence""", (task_id,)).fetchall()
-        projection: dict[str, Any] = {
-            "plan": None, "context": None, "changes": [], "summary": None,
-            "usage": aggregate_usage_events([dict(row) for row in usage_events]),
-            # sqlite3.Row iterates values; convert to a mapping before selecting columns.
-            "questions": [
-                {
-                    **{key: value for key, value in dict(row).items() if key != "options_json"},
-                    "options": json.loads(row["options_json"]),
-                }
-                for row in questions
-            ],
-            "truncated": len(calls) > 50 or len(approvals) > 50 or len(events) > 100,
-        }
-        for event in reversed(events[:100]):
-            payload = json.loads(event["payload_json"])
-            if event["event_type"] == "plan.updated":
-                projection["plan"] = payload.get("items")
-            elif event["event_type"] == "context.updated":
-                projection["context"] = payload
-            elif event["event_type"] == "file.changed":
-                projection["changes"].append(payload)
-            elif event["event_type"] == "message.completed":
-                projection["summary"] = payload.get("content")
-            elif event["event_type"] in {"task.succeeded", "task.completed"} and payload.get("summary") is not None:
-                projection["summary"] = payload.get("summary")
-        # Bound the wire snapshot independently of the number of rows. Large
-        # evidence remains in event history; truncation is explicit to callers.
-        remaining = 900_000
-        def bounded[T: Mapping[str, object]](items: list[T]) -> list[T]:
-            nonlocal remaining
-            accepted: list[T] = []
-            for item in items:
-                size = len(json.dumps(item, ensure_ascii=False).encode("utf-8"))
-                if size > remaining:
-                    projection["truncated"] = True
-                    continue
-                remaining -= size
-                accepted.append(item)
-            return accepted
-        tool_calls = bounded([dict(row) for row in calls[:50]])
-        approval_values = bounded([self._approval_value(row) for row in approvals[:50]])
-        projection["changes"] = bounded(projection["changes"])
-        projection["questions"] = bounded(projection["questions"])
-        return {"task": dict(task), "tool_calls": tool_calls, "approvals": approval_values,
-                "projection": projection, "last_sequence": int(last_sequence)}
+        return task_inspection(task, calls, approvals, events, questions, usage_events, int(last_sequence))
 
     async def conversation_snapshot(self, workspace_id: str, conversation_id: str) -> ConversationSnapshotRecord:
         """One bounded product snapshot and cursor, not runtime/event sourcing state.
@@ -1553,21 +1507,7 @@ class SQLiteRepository:
                 "SELECT COALESCE(MAX(sequence),0) FROM task_events WHERE workspace_id=? AND conversation_id=?",
                 (workspace_id, conversation_id),
             ).fetchone()[0]
-        result: dict[str, Any] = {"last_sequence": int(sequence), "truncated": False}
-        remaining = 900_000
-        for name, values in rows.items():
-            result[name] = []
-            result["truncated"] |= len(values) > 200
-            for row in values[:200]:
-                value = self._approval_value(row) if name == "approvals" else dict(row)
-                size = len(json.dumps(value, ensure_ascii=False).encode())
-                if size > remaining:
-                    result["truncated"] = True
-                    continue
-                remaining -= size
-                result[name].append(value)
-            result[name].reverse()
-        return SNAPSHOT_RECORD.validate_python(result, strict=True)
+        return conversation_snapshot(rows, int(sequence))
 
     async def list_command_calls(self, workspace_id: str, conversation_id: str = "") -> list[dict[str, Any]]:
         async with self._lock:
@@ -1669,10 +1609,7 @@ class SQLiteRepository:
 
     @staticmethod
     def _approval_value(row: sqlite3.Row) -> ApprovalRecord:
-        item = dict(row)
-        item["arguments"] = json.loads(item.pop("arguments_json"))
-        item["reuse_scope"] = json.loads(item.pop("reuse_scope_json", "{}"))
-        return APPROVAL_RECORD.validate_python(item)
+        return approval_value(row)
 
     def _revoke_authorizations(self, workspace_id: str, conversation_id: str = "") -> None:
         """Called under the Repository lock, committed with the policy change."""

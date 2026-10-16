@@ -193,10 +193,10 @@ class Credentials:
 
     async def sync(self, workspace: str, reference: str, secret: str) -> None:
         if reference.startswith("model."):
-            await self.core.set_chat_model_credential(workspace, reference.removeprefix("model."), secret)
+            await self.core.models.set_credential(workspace, reference.removeprefix("model."), secret)
         elif reference.startswith("model-profile."):
             model_id = reference.removeprefix("model-profile.")
-            await self.core.set_chat_model_credential(workspace, "", secret, model_id)
+            await self.core.models.set_credential(workspace, "", secret, model_id)
         elif reference in {"tavily", "google"}:
             await self.core.set_tool_credential(workspace, reference, secret)
 
@@ -220,8 +220,8 @@ class Credentials:
                     # Local no-key models and explicit environment credentials must work without a keyring daemon.
                     key = ""
                 if profile.id == "model_default" and await self._revoked(workspace, "model-profile." + profile.id):
-                    await self.core.set_chat_model_credential(workspace, profile.provider, "")
-                await self.core.set_chat_model_credential(workspace, profile.provider, key, profile.id)
+                    await self.core.models.set_credential(workspace, profile.provider, "")
+                await self.core.models.set_credential(workspace, profile.provider, key, profile.id)
 
     async def profile_key(self, workspace: str, model_id: str, provider: str, base_url: str) -> str:
         if not model_id:

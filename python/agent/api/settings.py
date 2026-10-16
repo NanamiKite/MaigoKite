@@ -1,4 +1,4 @@
-"""Model, credential, permission and extension settings; domain persistence stays in Core."""
+"""Model, credential, permission and extension settings; business rules use their domain owners."""
 from __future__ import annotations
 
 import asyncio
@@ -91,17 +91,17 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
         return {**model.to_dict(), "credential_configured": configured or bool(os.getenv(env))}
 
     async def catalog(workspace: str) -> dict[str, object]:
-        models, default = await core.list_chat_models(workspace)
+        models, default = await core.models.list_settings(workspace)
         return {"models": [await model_value(workspace, item) for item in models], "default_model_id": default}
 
     @router.get("/settings", dependencies=owner_only, response_model=None)
     async def get_settings(workspace_id: str) -> dict[str, object]:
-        return {"models": {"chat": await model_value(workspace_id, await core.get_chat_model_settings(workspace_id))}}
+        return {"models": {"chat": await model_value(workspace_id, await core.models.get_settings(workspace_id))}}
 
     @router.patch("/settings", dependencies=owner_only, response_model=None)
     async def update_settings(workspace_id: str, body: dto.SettingsUpdate) -> dict[str, object]:
         async with credentials.model_changes:
-            current = await core.get_chat_model_settings(workspace_id)
+            current = await core.models.get_settings(workspace_id)
             value = body.models.chat.model_copy(update={"id": current.id, "is_default": True})
             return {"models": {"chat": await persist_model(workspace_id, value)}}
 
@@ -147,7 +147,7 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
         # Revoke before changing the host; OS cleanup can fail without enabling reuse.
         if changed_endpoint:
             await credentials.revoke_model(workspace_id, cast(ChatModelSettings, previous))
-        item = await core.upsert_chat_model(workspace_id, settings)
+        item = await core.models.upsert_settings(workspace_id, settings)
         if secret:
             await credentials.save(workspace_id, "model-profile." + item.id, secret)
         await audit(workspace_id, "model.profile.saved", item.id)
@@ -166,14 +166,14 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
         async with credentials.model_changes:
             profile = await core.models.get_profile(workspace_id, model_id)
             await credentials.revoke_model(workspace_id, profile)
-            await core.delete_chat_model(workspace_id, model_id)
+            await core.models.delete_settings(workspace_id, model_id)
             await audit(workspace_id, "model.profile.deleted", model_id)
         return Response(status_code=204)
 
     @router.post("/models/{model_id}/default", dependencies=owner_only, response_model=None)
     async def set_default(workspace_id: str, model_id: str) -> dict[str, object]:
         async with credentials.model_changes:
-            await core.set_default_chat_model(workspace_id, model_id)
+            await core.models.set_default(workspace_id, model_id)
         return await catalog(workspace_id)
 
     @router.post("/models/actions/validate", dependencies=owner_only, response_model=None)
@@ -184,7 +184,7 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
                 or body.chat.api_key
                 or await credentials.profile_key(workspace_id, body.chat.id, body.chat.provider, body.chat.base_url)
             )
-            await core.validate_chat_model(body.chat.settings(), key)
+            await core.models.validate_connection(body.chat.settings(), key)
             ok, message = True, "connection successful"
         except Exception as exc:
             ok, message = False, public_error(exc)
@@ -295,27 +295,27 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
     @router.get("/memories", response_model=None)
     async def memories(workspace_id: str, q: str = Query(default="", max_length=200),
                        folder_id: str | None = Query(default=None, max_length=200)) -> dict[str, object]:
-        return {"memories": await core.list_memories(workspace_id, dto.Principal, q, 200, folder_id)}
+        return {"memories": await core.memories.list_memories(workspace_id, dto.Principal, q, 200, folder_id)}
 
     @router.get("/memory-settings", response_model=None)
     async def memory_settings(workspace_id: str, folder_id: str = Query(max_length=200)) -> dict[str, object]:
-        return await core.get_memory_settings(workspace_id, dto.Principal, folder_id)
+        return await core.memories.get_memory_settings(workspace_id, dto.Principal, folder_id)
 
     @router.patch("/memory-settings", response_model=None)
     async def update_memory_settings(workspace_id: str, body: dto.MemorySettings) -> dict[str, object]:
-        return await core.set_memory_settings(workspace_id, dto.Principal, body.folder_id, body.enabled)
+        return await core.memories.set_memory_settings(workspace_id, dto.Principal, body.folder_id, body.enabled)
 
     @router.post("/memories", status_code=201, response_model=None)
     async def add_memory(workspace_id: str, body: dto.MemoryInput) -> dict[str, object]:
-        return await core.upsert_memory(workspace_id, dto.Principal, **body.model_dump())
+        return await core.memories.upsert_memory(workspace_id, dto.Principal, **body.model_dump())
 
     @router.patch("/memories/{memory_id}", response_model=None)
     async def update_memory(workspace_id: str, memory_id: str, body: dto.MemoryInput) -> dict[str, object]:
-        return await core.upsert_memory(workspace_id, dto.Principal, memory_id=memory_id, **body.model_dump())
+        return await core.memories.upsert_memory(workspace_id, dto.Principal, memory_id=memory_id, **body.model_dump())
 
     @router.delete("/memories/{memory_id}", status_code=204, response_model=None)
     async def delete_memory(workspace_id: str, memory_id: str) -> Response:
-        await core.delete_memory(workspace_id, dto.Principal, memory_id)
+        await core.memories.delete_memory(workspace_id, dto.Principal, memory_id)
         return Response(status_code=204)
 
     @router.get("/data-summary", dependencies=owner_only, response_model=None)

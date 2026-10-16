@@ -14,7 +14,7 @@ from agent.data_contracts import JSON_OBJECT, JSONObject
 from agent.errors import UserFacingError
 
 if TYPE_CHECKING:
-    from agent.runtime.langgraph_runtime import _RunContext
+    from agent.runtime.run_context import RunContext
     from agent.runtime.subagents import ChildContext
 
 OUTPUT_TOOL_NAME = "maigokite_structured_result"
@@ -94,7 +94,7 @@ def response_schema(schema: JSONObject) -> JSONObject:
     return result
 
 
-def output_budget_tools(tools: list[Any], context: _RunContext | ChildContext | None) -> list[Any]:
+def output_budget_tools(tools: list[Any], context: RunContext | ChildContext | None) -> list[Any]:
     """Count the schema that LangChain adds after product model middleware."""
     from langchain_core.utils.function_calling import convert_to_openai_tool
 

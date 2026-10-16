@@ -1050,16 +1050,24 @@ export const api = {
       { method: 'POST' },
     )
   },
-  async listWorkspaceChanges(folderId = ''): Promise<{
+  async listWorkspaceChanges(
+    folderId = '',
+    signal?: AbortSignal,
+  ): Promise<{
     changes: WorkspaceChange[]
     git: boolean
     truncated: boolean
   }> {
-    return request(`${path}/changes?${folderQuery(folderId)}`)
+    return request(`${path}/changes?${folderQuery(folderId)}`, { signal, cache: 'no-store' })
   },
-  async getWorkspaceDiff(filePath: string, folderId = ''): Promise<WorkspaceChange> {
+  async getWorkspaceDiff(
+    filePath: string,
+    folderId = '',
+    signal?: AbortSignal,
+  ): Promise<WorkspaceChange> {
     return request(
       `${path}/changes/diff?path=${encodeURIComponent(filePath)}&${folderQuery(folderId)}`,
+      { signal, cache: 'no-store' },
     )
   },
   connectEvents(conversationId: string, onEvent: (event: AgentEvent) => void): WebSocket {

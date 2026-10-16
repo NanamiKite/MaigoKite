@@ -19,7 +19,7 @@ from agent.tools.execution_context import ExecutionMetadata
 from agent.tools.validator import ToolValidator
 
 if TYPE_CHECKING:
-    from agent.runtime.langgraph_runtime import _RunContext
+    from agent.runtime.run_context import RunContext
     from agent.runtime.subagents import ChildContext
 
 
@@ -68,7 +68,7 @@ class BaseTool(ABC):
         validator = ToolValidator(lambda _name: schema)
 
         async def invoke(runtime: ToolRuntime[object], **arguments: Any) -> ToolMessage:
-            run = cast("_RunContext | ChildContext", runtime.context)
+            run = cast("RunContext | ChildContext", runtime.context)
             context = ExecutionContext(
                 run.request.trace_id,
                 run.request.task_id,

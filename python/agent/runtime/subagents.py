@@ -37,7 +37,8 @@ from agent.tools.base import BaseTool, ExecutionContext, ToolResult
 from agent.tools.execution_context import ExecutionMetadata
 
 if TYPE_CHECKING:
-    from agent.runtime.langgraph_runtime import LangGraphRuntime, RuntimeRunRequest, _RunContext
+    from agent.runtime.langgraph_runtime import LangGraphRuntime
+    from agent.runtime.run_context import RunContext, RuntimeRunRequest
 
 READ_TOOLS = frozenset({"file_read", "glob", "grep"})
 CHILD_TAG = "maigokite:subagent"
@@ -69,7 +70,7 @@ class DelegateArgs(BaseModel):
 
 @dataclass(slots=True)
 class ChildContext:
-    parent: _RunContext
+    parent: RunContext
     subagent_id: str
     request: RuntimeRunRequest
     execution_metadata: ExecutionMetadata
@@ -255,7 +256,7 @@ class DelegateTool(BaseTool):
 
     def to_langchain_tool(self) -> StructuredTool:
         async def invoke(task: str, runtime: ToolRuntime[object], model_id: str = "", label: str = "") -> ToolMessage:
-            parent = cast("_RunContext", runtime.context)
+            parent = cast("RunContext", runtime.context)
             if self.graph is None or parent.child_scope is None or parent.terminal_emitted:
                 raise ValueError("子 Agent 执行入口不可用。")
             # The product middleware registers this entire invocation (including
@@ -271,7 +272,7 @@ class DelegateTool(BaseTool):
         )
 
     async def _run(self, task: str, runtime: ToolRuntime[object], model_id: str, label: str) -> ToolMessage:
-        parent = cast("_RunContext", runtime.context)
+        parent = cast("RunContext", runtime.context)
         adapter = parent.adapter
         call_id = str(runtime.tool_call_id)
         selected = dict(self.model_info) if not model_id or model_id == self.model_info.get("model_id") else {}
@@ -474,7 +475,7 @@ class ListSubagentModelsTool(BaseTool):
 
     def to_langchain_tool(self) -> StructuredTool:
         async def invoke(runtime: ToolRuntime[object], model_id: str = "") -> ToolMessage:
-            parent = cast("_RunContext", runtime.context)
+            parent = cast("RunContext", runtime.context)
             catalog = (
                 await parent.adapter.model_catalog(parent.request.workspace_id) if parent.adapter.model_catalog else []
             )

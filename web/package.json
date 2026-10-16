@@ -1,6 +1,7 @@
 {
   "name": "maigokite-web",
   "productName": "MaigoKite",
+  "desktopName": "com.electron.maigokite-web.desktop",
   "private": true,
   "version": "0.1.0",
   "license": "MPL-2.0",
@@ -11,7 +12,10 @@
   },
   "build": {
     "appId": "com.electron.maigokite-web",
-    "icon": "public/brand/app-icon-cat-ribbon-v1.png"
+    "icon": "public/brand/app-icon-cat-ribbon-v1.png",
+    "linux": {
+      "syncDesktopName": true
+    }
   },
   "scripts": {
     "dev": "vite",

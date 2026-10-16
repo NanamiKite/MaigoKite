@@ -108,6 +108,10 @@ Core 解释器顺序：`MAIGOKITE_PYTHON` → `UV_PROJECT_ENVIRONMENT` 或根 .v
 浏览器工具需单独执行 `<Core Python> -m playwright install chromium`，或在配置中指定已有 Chromium 的路径。
 桌面需本机图形会话；Linux 的系统图形库依赖不由脚本提权安装。
 
+Linux 桌面启动会在 `$XDG_DATA_HOME/applications`（未设置或不是绝对路径时为 `~/.local/share/applications`）维护 `com.electron.maigokite-web.source.desktop`，使 Wayland/X11 的窗口标识能关联到项目图标。入口使用当前源码的绝对图标路径，`Exec` 调回同一套启动脚本；不新增应用菜单项或自启动，不修改系统级入口。源码版标识通过启动器内部的 `MAIGOKITE_DESKTOP_NAME` 在 Electron ready 前传入，不改变用户数据目录；安装版使用 `package.json` 的 `desktopName`，由 Builder 的 `linux.syncDesktopName` 同步生成桌面入口。
+
+仅带脚本管理标记的入口会被更新；自定义同名入口不会覆盖。注册失败会输出警告但不阻止启动，此时任务栏可能仍显示默认图标。修复图标后需从托盘退出、重新构建并启动；不需要重装 Python/Electron、注销桌面会话或强制切到 X11。删除源码目录时可以一并删除上述源码版桌面入口，不涉及聊天数据。
+
 ### 从旧后端升级
 
 先退出旧版整套进程，再执行 setup、build 和 start。Go 网关和 8081 gRPC 服务已移除，无需修复 GOROOT。保留原配置和 SQLite 路径，会话、任务、审批和 LangGraph checkpoint 原地沿用；不在新旧版本之间同时共享打开数据库。Windows 凭证通过受限兼容读取迁移，Linux/macOS 沿用原服务/账号；系统密钥链需可访问，不退回明文。此迁移未做实机验收。

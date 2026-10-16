@@ -129,6 +129,8 @@ pending, consumed, rejected, expired
 
 ## 6. 当前事务边界与架构债务
 
+`inspect_task()` / `conversation_snapshot()` 的全部查询和游标读取仍在 Repository 的同一锁内完成；之后将已读取的行交给 `inspector/snapshots.py` 纯函数组装展示结果。该模块不接收数据库连接，也不执行 SQL；事件顺序、记录数量、返回大小和 `truncated` 标记沿用原规则，不调用预留 Timeline。审批记录的 JSON 解码复用同一个转换函数，审批决定与审计写入仍在 Repository。
+
 当前在单个 SQLite 事务中完成：
 
 - 创建审批，并把工具调用/任务切换为等待；

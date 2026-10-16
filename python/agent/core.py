@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import re
 import uuid
 from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from pathlib import Path
@@ -33,6 +32,7 @@ from agent.event_bus import EventBus
 from agent.extensions import ExtensionCatalog, ExtensionConfig, MCPServerStatus, close_mcp_clients, startup_config
 from agent.mcp import MCPClient
 from agent.media import ImageReference
+from agent.memory.notes import FolderMemories
 from agent.models.image_generation import IMAGE_SETTING_KEY, ImageSettings
 from agent.models.runtime import ChatModelRuntime, ChatModelSettings
 from agent.observability import Observability
@@ -41,10 +41,9 @@ from agent.repository import (
     ConversationBusyError,
     MessageReplay,
     SQLiteRepository,
-    folder_memory_scope,
     validate_subagent_model_ids,
 )
-from agent.runtime import LangGraphRuntime, ProductToolSpec, RuntimeRunRequest
+from agent.runtime import LangGraphRuntime, ProductToolSpec, RunHandle, RuntimeRunRequest
 from agent.safety import SAFETY_SETTING_KEY, normalize_safety_settings
 from agent.security.injection_filter import InjectionFilter
 from agent.security.whitelist import Whitelist
@@ -75,12 +74,6 @@ _EntryResult = TypeVar("_EntryResult")
 
 class AgentCore:
     RESPONSE_MODES = {"fast", "balanced", "thorough"}
-    MEMORY_CATEGORIES = {"preference", "fact", "constraint", "project", "other"}
-    MEMORY_SECRET_PATTERNS = (
-        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----", re.IGNORECASE),
-        re.compile(r"\b(?:api[_ -]?key|access[_ -]?token|password|secret)\s*[:=]\s*\S+", re.IGNORECASE),
-        re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
-    )
 
     def __init__(
         self,
@@ -166,6 +159,7 @@ class AgentCore:
         self._langgraph_runtime: LangGraphRuntime | None = None
         self._langgraph_entry_tasks: set[asyncio.Task[Any]] = set()
         self.processes = ProcessRegistry()
+        self.memories = FolderMemories(self.repository, self._memory_folder_root)
 
     async def initialize(self) -> None:
         if self._initialized:
@@ -763,6 +757,14 @@ class AgentCore:
             attachments=tuple(ImageReference.model_validate(item) for item in metadata.get("attachments", [])),
         )
         handle = await runtime.start(prompt, request)
+        await self._wait_for_run(handle)
+        return await self._langgraph_result(
+            workspace_id, handle.request.task_id, conversation_id
+        )
+
+    @staticmethod
+    async def _wait_for_run(handle: RunHandle) -> None:
+        """Drain events and await root cleanup when the caller is cancelled."""
         try:
             async for _event in handle.events():
                 pass  # Events already persist/stream; do not retain a second full list.
@@ -772,9 +774,6 @@ class AgentCore:
             if current is not None and current.cancelling():
                 await asyncio.shield(handle.cancel())
                 raise
-        return await self._langgraph_result(
-            workspace_id, handle.request.task_id, conversation_id
-        )
 
     async def _track_langgraph_entry(
         self, operation: Coroutine[Any, Any, _EntryResult]
@@ -939,15 +938,7 @@ class AgentCore:
             note,
             scope,
         )
-        try:
-            async for _event in handle.events():
-                pass
-            await handle.wait()
-        except asyncio.CancelledError:
-            current = asyncio.current_task()
-            if current is not None and current.cancelling():
-                await asyncio.shield(handle.cancel())
-                raise
+        await self._wait_for_run(handle)
         return await self._langgraph_result(
             workspace_id, task_id, conversation_id
         )
@@ -978,15 +969,7 @@ class AgentCore:
         handle = await runtime.recover(
             workspace_id, task_id, principal_id=principal_id, version=version, trace_id=trace_id,
         )
-        try:
-            async for _event in handle.events():
-                pass
-            await handle.wait()
-        except asyncio.CancelledError:
-            current = asyncio.current_task()
-            if current is not None and current.cancelling():
-                await asyncio.shield(handle.cancel())
-                raise
+        await self._wait_for_run(handle)
         return await self._langgraph_result(workspace_id, task_id, handle.request.conversation_id)
 
     async def answer_question(self, workspace_id: str, question_id: str, principal_id: str,
@@ -1001,15 +984,7 @@ class AgentCore:
         if runtime is None:
             raise RuntimeError("LangGraph runtime is not initialized")
         handle = await runtime.answer_question(workspace_id, question_id, principal_id, answer, version)
-        try:
-            async for _event in handle.events():
-                pass
-            await handle.wait()
-        except asyncio.CancelledError:
-            current = asyncio.current_task()
-            if current is not None and current.cancelling():
-                await asyncio.shield(handle.cancel())
-                raise
+        await self._wait_for_run(handle)
         return await self._langgraph_result(workspace_id, handle.request.task_id, handle.request.conversation_id)
 
     async def list_jobs(self, workspace_id: str, conversation_id: str = "") -> list[dict[str, Any]]:
@@ -1097,9 +1072,6 @@ class AgentCore:
     def tool_registry(self) -> ToolRegistry:
         return self._extensions.registry
 
-    async def get_chat_model_settings(self, workspace_id: str) -> ChatModelSettings:
-        return await self.models.get_settings(workspace_id)
-
     async def get_chat_model_context(self, workspace_id: str, model_id: str) -> dict[str, Any]:
         from agent.models.context_capacity import resolve_context_capacity
         from agent.runtime.context import context_payload
@@ -1108,20 +1080,8 @@ class AgentCore:
         capacity = await resolve_context_capacity(model)
         return context_payload(model, capacity, self._context_max_tokens)
 
-    async def update_chat_model_settings(self, workspace_id: str, settings: ChatModelSettings) -> ChatModelSettings:
-        return await self.models.update_settings(workspace_id, settings)
-
-    async def list_chat_models(self, workspace_id: str) -> tuple[list[ChatModelSettings], str]:
-        return await self.models.list_settings(workspace_id)
-
     async def upsert_chat_model(self, workspace_id: str, settings: ChatModelSettings) -> ChatModelSettings:
         return await self.models.upsert_settings(workspace_id, settings)
-
-    async def delete_chat_model(self, workspace_id: str, model_id: str) -> None:
-        await self.models.delete_settings(workspace_id, model_id)
-
-    async def set_default_chat_model(self, workspace_id: str, model_id: str) -> tuple[list[ChatModelSettings], str]:
-        return await self.models.set_default(workspace_id, model_id)
 
     async def set_chat_model_credential(
         self, workspace_id: str, provider: str, api_key: str, model_id: str = ""
@@ -1136,9 +1096,6 @@ class AgentCore:
             self._tool_credentials[key] = api_key
         else:
             self._tool_credentials.pop(key, None)
-
-    async def validate_chat_model(self, settings: ChatModelSettings, api_key: str = "") -> str:
-        return await self.models.validate_connection(settings, api_key)
 
     async def get_user_preferences(self, workspace_id: str, user_id: str) -> dict[str, str]:
         value = await self.repository.get_preference(workspace_id, user_id, "interface.assistant_name")
@@ -1159,28 +1116,19 @@ class AgentCore:
     async def list_memories(
         self, workspace_id: str, user_id: str, query: str = "", limit: int = 100, folder_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        if len(query) > 200:
-            raise ValueError("memory search query must not exceed 200 characters")
-        scope = await self._memory_scope(workspace_id, folder_id)
-        return await self.repository.list_user_memories(workspace_id, user_id, query, limit, folder_scope=scope)
+        return await self.memories.list_memories(workspace_id, user_id, query, limit, folder_id)
 
-    async def _memory_scope(self, workspace_id: str, folder_id: str | None) -> str | None:
-        if folder_id is None:
-            return None
+    async def _memory_folder_root(self, workspace_id: str, folder_id: str) -> str:
         folder = await self.get_workspace_folder(workspace_id, folder_id)
-        return folder_memory_scope(folder_id, str(folder["root_path"]))
+        return str(folder["root_path"])
 
     async def get_memory_settings(self, workspace_id: str, user_id: str, folder_id: str) -> dict[str, Any]:
-        scope = await self._memory_scope(workspace_id, folder_id)
-        enabled = await self.repository.get_preference(workspace_id, user_id, "memory.enabled." + str(scope))
-        return {"folder_id": folder_id, "enabled": enabled is True}
+        return await self.memories.get_memory_settings(workspace_id, user_id, folder_id)
 
     async def set_memory_settings(
         self, workspace_id: str, user_id: str, folder_id: str, enabled: bool
     ) -> dict[str, Any]:
-        scope = await self._memory_scope(workspace_id, folder_id)
-        await self.repository.set_memory_enabled(workspace_id, user_id, str(scope), enabled)
-        return {"folder_id": folder_id, "enabled": enabled}
+        return await self.memories.set_memory_settings(workspace_id, user_id, folder_id, enabled)
 
     async def upsert_memory(
         self,
@@ -1193,33 +1141,18 @@ class AgentCore:
         confidence: float = 1.0,
         folder_id: str | None = None,
     ) -> dict[str, Any]:
-        category = category.strip().lower()
-        normalized_content = " ".join(content.split())
-        if category not in self.MEMORY_CATEGORIES:
-            raise ValueError("invalid memory category")
-        if not normalized_content:
-            raise ValueError("memory content is required")
-        if len(normalized_content) > 4000:
-            raise ValueError("memory content must not exceed 4000 characters")
-        if any(pattern.search(normalized_content) for pattern in self.MEMORY_SECRET_PATTERNS):
-            raise ValueError("memory content must not contain credentials or private keys")
-        if not 0 <= confidence <= 1:
-            raise ValueError("memory confidence must be between 0 and 1")
-        item = await self.repository.upsert_user_memory(
+        return await self.memories.upsert_memory(
             workspace_id,
             user_id,
             memory_id=memory_id,
             category=category,
-            content=normalized_content,
-            source_type="user",
-            source_id=user_id,
+            content=content,
             confidence=confidence,
-            folder_scope=await self._memory_scope(workspace_id, folder_id),
+            folder_id=folder_id,
         )
-        return item
 
     async def delete_memory(self, workspace_id: str, user_id: str, memory_id: str) -> None:
-        await self.repository.delete_user_memory(workspace_id, user_id, memory_id)
+        await self.memories.delete_memory(workspace_id, user_id, memory_id)
 
     async def get_workspace_data_summary(self, workspace_id: str) -> dict[str, Any]:
         return await self.repository.get_workspace_data_summary(workspace_id)
@@ -1299,23 +1232,7 @@ class AgentCore:
                     raise ConversationBusyError("Extension settings changed; reload before applying")
                 if await self.repository.has_unfinished_tasks(include_waiting=not restore_only):
                     raise ConversationBusyError("请先结束运行中的任务；应用新配置还需要完成或取消待处理审批和提问。")
-                # Secret values are transient; never persist them in config/checkpoints.
-                env: dict[str, dict[str, str]] = {}
-                for server in candidate.mcp_servers:
-                    # Restoring a missing connection must not erase credentials
-                    # owned by an unchanged, healthy connection we will reuse.
-                    values = credentials.get(
-                        server.namespace, self._extensions.env.get(server.namespace, {}) if restore_only else {}
-                    )
-                    if not isinstance(values, dict):
-                        raise ValueError("MCP credentials must be named environment values")
-                    env[server.namespace] = {}
-                    for name in server.secret_env:
-                        value = values.get(name, "")
-                        if not isinstance(value, str) or "\x00" in value or len(value) > 65536:
-                            raise ValueError("Invalid MCP credential")
-                        if value:
-                            env[server.namespace][name] = value
+                env = self._extensions.resolve_credentials(candidate, credentials, restore_only=restore_only)
                 await self._apply_extensions(candidate, env, restore_only=restore_only)
             finally:
                 self._extensions_reloading = False
@@ -1328,8 +1245,6 @@ class AgentCore:
         # blocked by the caller; failed staging only releases newly owned clients.
         previous = self._langgraph_runtime
         previous_clients = self._extensions.clients
-        previous_servers = {server.namespace: server for server in self._extensions.config.mcp_servers}
-        previous_states = {state["namespace"]: state for state in self._extensions.servers}
         staged: ExtensionCatalog | None = None
         runtime: LangGraphRuntime | None = None
         self._extension_error = ""
@@ -1337,61 +1252,12 @@ class AgentCore:
             await self._close_retired_extensions()
             staged = await self._prepare_extension_catalog(candidate, restore_only=restore_only)
             staged.env = env
-            registry, clients, states = staged.registry, staged.clients, staged.servers
+            registry, clients = staged.registry, staged.clients
             if staged.skill_errors and not restore_only:
                 raise ValueError("Skill 扫描有错误，未应用新配置：" + "; ".join(staged.skill_errors[:5]))
-            pending = []
-            for server in candidate.mcp_servers:
-                namespace = server.namespace
-                client = previous_clients.get(namespace)
-                previous_server = previous_servers.get(namespace)
-                client_secrets = {
-                    name: client.env[name] for name in server.secret_env if name in client.env
-                } if client is not None else {}
-                # Tool visibility edits require discovery, not a new process.
-                # Command/cwd/environment or credential changes do require one.
-                selection_fields = {"enabled_tools", "disabled_tools"}
-                if (
-                    not server.enabled
-                    or client is None
-                    or not client.is_running
-                    or previous_server is None
-                    or previous_server.model_dump(exclude=selection_fields)
-                    != server.model_dump(exclude=selection_fields)
-                    or (not restore_only and client_secrets != env.get(namespace, {}))
-                ):
-                    pending.append(server)
-                    continue
-                clients[namespace] = client
-                # Reuse keeps the process environment, not newly read keychain
-                # values. Snapshot what this client actually received so a
-                # later explicit apply still detects and rotates changed keys.
-                env[namespace] = client_secrets
-                if restore_only:
-                    # Pending approvals retain the applied tool schemas; recovery
-                    # of another server must not rediscover or replace these tools.
-                    names = previous_states[namespace]["tool_names"]
-                    for name in names:
-                        tool = self._extensions.registry.get(name)
-                        if tool is None:
-                            raise ValueError("Applied MCP tool catalog is incomplete")
-                        registry.register(tool)
-                else:
-                    # Explicit reload refreshes discovery over the same healthy
-                    # SDK connection, without launching a duplicate server process.
-                    async with asyncio.timeout(30):
-                        tools = await registry.discover_mcp(client, namespace,
-                            enabled_tools=server.enabled_tools, disabled_tools=server.disabled_tools)
-                    names = [tool.name for tool in tools]
-                states.append(
-                    {"namespace": namespace, "status": "running", "transport": "stdio", "tool_names": list(names)}
-                )
-            await staged.connect_servers(pending, self._policy.workspace_root, self.observability)
-            order = {server.namespace: index for index, server in enumerate(candidate.mcp_servers)}
-            states.sort(key=lambda state: order[state["namespace"]])
-            unavailable = [state["namespace"] for state in states if state["status"] not in {"running", "disabled"}]
-            if unavailable and not restore_only:
-                raise ValueError("MCP 未全部连接，未应用新配置；请检查服务与凭证后重试。")
+            unavailable = await staged.stage_connections(
+                self._extensions, self._policy.workspace_root, self.observability, restore_only=restore_only,
+            )
             runtime = await self._create_langgraph_runtime(registry, staged.skills)
             # This is last-applied product configuration, NOT execution state.
             # Unapplied edits must not silently replace a pending approval's server after restart.

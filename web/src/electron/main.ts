@@ -26,6 +26,9 @@ import type { Appearance } from '../stores/ui'
 import type { PulseState } from '../api/events'
 import type { GraphicsStatus } from './graphics-status'
 app.setName('MaigoKite')
+// Source launches register a separate desktop entry so they cannot shadow an installed app.
+if (process.platform === 'linux' && !app.isPackaged && process.env.MAIGOKITE_DESKTOP_NAME)
+  app.setDesktopName(process.env.MAIGOKITE_DESKTOP_NAME)
 
 let mainWindow: BrowserWindow | null = null,
   capsuleWindow: BrowserWindow | null = null,

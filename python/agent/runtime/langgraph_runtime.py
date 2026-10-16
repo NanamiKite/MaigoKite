@@ -8,12 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import uuid
 from collections import defaultdict
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import aclosing
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -27,9 +26,6 @@ from langchain.agents.middleware import (
 from langchain.agents.middleware.human_in_the_loop import InterruptOnConfig
 from langchain.agents.middleware.types import (
     AgentState,
-    ExtendedModelResponse,
-    ModelRequest,
-    ModelResponse,
     ToolCallRequest,
 )
 from langchain.agents.structured_output import StructuredOutputError, ToolStrategy
@@ -57,29 +53,30 @@ from langgraph.typing import ContextT
 from agent.data_contracts import (
     ApprovalNotice,
     ApprovalRecord,
-    AuthorizationRecord,
     JSONObject,
-    PermissionMode,
     TaskRecord,
     approval_notice,
     available_approval_scopes,
 )
 from agent.errors import UserFacingCancellation, UserFacingError, public_error
 from agent.media import IMAGE_LIMIT, ImageReference
-from agent.models.context_capacity import ContextCapacity
 from agent.models.reasoning import message_text
 from agent.repository import ConversationBusyError, SQLiteRepository
 from agent.runtime.context import ContextBudgetMiddleware, SafeSummarizationMiddleware
 from agent.runtime.images import image_message
+from agent.runtime.product_tools import ProductToolMiddleware
+from agent.runtime.product_tools import tool_call_id as _tool_call_id
 from agent.runtime.projection import END_OF_EVENTS, EventPublisher, MaigoKiteEvent, RunProjection, publish_event
+from agent.runtime.prompt_safety import PromptSafetyMiddleware
+from agent.runtime.run_context import RunContext
+from agent.runtime.run_context import RuntimeRunRequest as RuntimeRunRequest
 from agent.runtime.subagents import CHILD_TAG, ChildContext, DelegateTool, ListSubagentModelsTool, create_readonly_agent
-from agent.safety import SafetyReviewer, SafetyReviewError, SafetyReviewInput, SafetyReviewResult, skipped_review
+from agent.safety import SafetyReviewer
 from agent.structured_output import (
     OUTPUT_TOOL_NAME,
     StructuredResultError,
     response_schema,
     validate_output_schema,
-    validated_result_json,
 )
 from agent.tools.base import BaseTool
 from agent.tools.execution_context import ExecutionMetadata
@@ -88,31 +85,7 @@ from agent.tools.native.file_write import FileWriteTool
 from agent.tools.permission_mgr import PermissionManager, PolicyDecision, RiskLevel
 from agent.tools.validator import ToolValidator, ValidationError
 
-logger = logging.getLogger("maigokite.agent.runtime")
-
-
-def _tool_call_id(call: NativeToolCall) -> str:
-    """ToolNode needs a nonempty ID to bind execution and approval to the same call."""
-    call_id = call["id"]
-    if not call_id:
-        raise ValueError("tool call is missing its ID")
-    return call_id
-
-
 ModelResolver = Callable[[str, str, str], Awaitable[tuple[str, BaseChatModel]]]
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimeRunRequest:
-    workspace_id: str = "personal"
-    conversation_id: str = ""
-    task_id: str = ""
-    principal_id: str = "local-user"
-    permission_mode: PermissionMode = "read_only"
-    trace_id: str = ""
-    request_hash: str = ""
-    output_schema: JSONObject | None = None
-    attachments: tuple[ImageReference, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,253 +139,6 @@ class RunHandle:
         except asyncio.CancelledError:
             if not self.root_task.done():
                 raise
-
-
-@dataclass(slots=True)
-class _RunContext:
-    adapter: LangGraphRuntime
-    request: RuntimeRunRequest
-    projection: RunProjection
-    execution_metadata: ExecutionMetadata = field(default_factory=ExecutionMetadata)
-    latest_tool_calls: list[NativeToolCall] = field(default_factory=list)
-    tool_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    started: asyncio.Event = field(default_factory=asyncio.Event)
-    direct_tool: NativeToolCall | None = None
-    review_call_ids: set[str] = field(default_factory=set)
-    boundary_review_ids: set[str] = field(default_factory=set)
-    authorizations: list[AuthorizationRecord] = field(default_factory=list)
-    max_subagent_calls: int = 0
-    subagent_model_ids: list[str] = field(default_factory=list)
-    child_slots: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(1))
-    child_scope: asyncio.TaskGroup | None = None
-    context_capacity: ContextCapacity | None = None
-    # Current model request's input budget and fixed prompt/tool overhead.
-    # Child results use these estimates without copying the parent's history.
-    result_budget: tuple[int, int] | None = None
-    # Pending UI metrics only; the summary itself belongs to LangGraph state.
-    compaction_receipt: tuple[str, dict[str, Any]] | None = None
-
-    @property
-    def terminal_emitted(self) -> bool:
-        return self.projection.terminal_delivered
-
-
-class _ProductToolMiddleware(AgentMiddleware[AgentState[object], _RunContext]):
-    """Map official tool execution callbacks to MaigoKite product concerns."""
-
-    async def abefore_model(self, state: AgentState[object], runtime: Runtime[_RunContext]) -> dict[str, Any] | None:
-        context = runtime.context
-        pending = await context.adapter.repository.task_inputs(
-            context.request.workspace_id, context.request.task_id, pending=True,
-        )
-        known = {message.id for message in state["messages"]}
-        messages = [HumanMessage(content=item["content"], id=item["id"])
-                    for item in pending if item["id"] not in known]
-        return {"messages": messages} if messages else None
-
-    async def aafter_model(self, state: AgentState[object], runtime: Runtime[_RunContext]) -> None:
-        # after_model hooks run in reverse order: refresh before native HITL,
-        # including permission changes made while the provider was streaming.
-        await runtime.context.adapter._refresh_execution_metadata(runtime.context)
-
-    async def awrap_model_call(
-        self, request: ModelRequest[_RunContext],
-        handler: Callable[[ModelRequest[_RunContext]], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
-        context = request.runtime.context
-        if context.direct_tool is not None:
-            # Convert an explicit /tool command to an AIMessage so it follows
-            # the same approval and tool execution nodes as model-generated calls.
-            last = request.messages[-1]
-            if isinstance(last, HumanMessage):
-                return ModelResponse(result=[AIMessage(content="", tool_calls=[context.direct_tool])])
-            if isinstance(last, ToolMessage):
-                artifact = last.artifact if isinstance(last.artifact, dict) else {}
-                content = artifact.get("raw") or artifact.get("summary") or last.text
-                return ModelResponse(result=[AIMessage(content=str(content))])
-            raise RuntimeError("direct tool command has no matching tool result")
-        enabled = request.runtime.context.execution_metadata.get("enabled_tools")
-        if enabled is not None:
-            request = request.override(tools=[tool for tool in request.tools
-                                             if getattr(tool, "name", "") in {*enabled, "write_todos"}])
-        if context.max_subagent_calls == 0:
-            request = request.override(
-                tools=[
-                    tool
-                    for tool in request.tools
-                    if getattr(tool, "name", "") not in {"delegate", "list_subagent_models"}
-                ]
-            )
-        profile = request.model.profile or {}
-        if profile.get("image_inputs") is False and any(
-            isinstance(message, HumanMessage) and isinstance(message.content, list)
-            and any(isinstance(block, dict) and block.get("type") in {"image", "image_url"}
-                    for block in message.content)
-            for message in request.messages
-        ):
-            raise UserFacingError("当前模型声明不支持图片输入，请切换到支持看图的模型。")
-        response = await handler(request)
-        if context.request.output_schema is not None:
-            result = response.model_response if isinstance(response, ExtendedModelResponse) else response
-            if result.structured_response is not None:
-                if any(call["name"] != OUTPUT_TOOL_NAME
-                       for message in result.result if isinstance(message, AIMessage)
-                       for call in message.tool_calls):
-                    raise StructuredResultError("最终结果不能与尚未执行的工具一起提交；未保存工作流结果。")
-                validated_result_json(context.request.output_schema, result.structured_response)
-        # A budget rejection or failed/cancelled request is not a confirmed
-        # consumption receipt. A successful model response confirms this input;
-        # remote consumption after a lost response remains deliberately unknown.
-        consumed = await context.adapter.repository.consume_task_inputs(
-            context.request.workspace_id, context.request.task_id,
-            {str(message.id) for message in request.messages if isinstance(message, HumanMessage)},
-        )
-        for item in consumed:
-            await context.adapter._emit(context, "task.input.consumed", {
-                "input_id": item["id"], "content": item["content"], "status": "consumed",
-            })
-        return response
-
-    async def awrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
-    ) -> ToolMessage | Command[Any]:
-        context = request.runtime.context
-        if not isinstance(context, _RunContext):
-            raise RuntimeError("LangGraph runtime context is missing")
-        if request.tool_call["name"] == "delegate":
-            # ToolNode fans out independent investigations. Their own semaphore
-            # limits concurrency; holding the file-mutation lock here would
-            # silently turn every user's parallel setting into one.
-            if context.child_scope is None or context.terminal_emitted:
-                raise RuntimeError("delegation requires an active root task scope")
-            work = context.child_scope.create_task(
-                context.adapter._execute_product_tool_call(request, handler),
-                name=f"delegate:{request.tool_call['id']}",
-            )
-            return await work
-        # ToolNode retains orchestration and results. Serialize tool bodies
-        # during migration, including writes to the same file in one batch.
-        async with context.tool_lock:
-            if request.tool_call["name"] == "write_todos":
-                # Framework-owned planning state, not a filesystem/workspace
-                # TODO mutation. ToolNode owns the returned Command update.
-                await context.adapter.repository.update_tool_call(_tool_call_id(request.tool_call), "running")
-                await context.adapter._emit(context, "tool.started", {
-                    "tool_call_id": _tool_call_id(request.tool_call), "tool_name": "write_todos",
-                    "arguments": request.tool_call.get("args", {}),
-                })
-                return await handler(request)
-            return await context.adapter._execute_product_tool_call(request, handler)
-
-
-class _PromptSafetyMiddleware(AgentMiddleware[AgentState[object], _RunContext]):
-    """Review newly visible human prompt text immediately before a model call."""
-
-    async def awrap_model_call(
-            self, request: ModelRequest[_RunContext],
-            handler: Callable[[ModelRequest[_RunContext]], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
-            context = request.runtime.context
-            adapter = context.adapter
-            if adapter._safety_settings is None:
-                return await handler(request)
-            settings = await adapter._safety_settings(context.request.workspace_id)
-            if not settings.get("enabled"):
-                return await handler(request)
-            model_id = str(context.execution_metadata.get("model_id") or
-                           getattr(request.model, "model_name", None) or getattr(request.model, "model", ""))
-            if model_id in settings.get("trusted_model_ids", []):
-                result = skipped_review(model_id, str(settings["request_format"]), int(settings["risk_threshold"]))
-                await adapter._emit_safety_result(context, result)
-                return await handler(request)
-            previous_questions = await adapter.repository.task_questions(
-                context.request.workspace_id, context.request.task_id,
-            )
-            safety_question = next(
-                (item for item in reversed(previous_questions)
-                 if item["tool_call_id"].startswith("safety_")),
-                None,
-            )
-            if safety_question is not None:
-                if safety_question["status"] == "answered":
-                    if safety_question["answer"] != "继续执行":
-                        raise PermissionError("prompt safety review denied execution")
-                    return await handler(request)
-                decision = interrupt({
-                    "kind": "user_question",
-                    "tool_call_id": safety_question["tool_call_id"],
-                    "title": safety_question["title"],
-                    "options": json.loads(safety_question["options_json"]),
-                    "safety_review": True,
-                    "review_id": safety_question["tool_call_id"],
-                })
-                if str(decision) != "继续执行":
-                    raise PermissionError("prompt safety review denied execution")
-                return await handler(request)
-            human_text = "\n\n".join(
-                str(message.text) for message in request.messages if isinstance(message, HumanMessage)
-            )
-            previous_length = int(context.execution_metadata.get("safety_reviewed_length", 0))
-            delta = human_text[previous_length:]
-            if not delta.strip():
-                return await handler(request)
-            context.execution_metadata["safety_reviewed_length"] = len(human_text)
-            key = await adapter._safety_credential(context.request.workspace_id) if adapter._safety_credential else ""
-            try:
-                result = await adapter._safety_reviewer.review(
-                    base_url=str(settings["decision_base_url"]),
-                    api_key=key,
-                    request_format=str(settings["request_format"]),
-                    state=str(settings["state"]),
-                    decision_model=str(settings["decision_model"]),
-                    review=SafetyReviewInput(
-                        model_id=model_id, task_id=context.request.task_id,
-                        step=int(context.execution_metadata.get("model_calls", 0)) + 1,
-                        delta=delta, previous_model_id=str(context.execution_metadata.get("safety_model_id", "")),
-                    ),
-                    threshold=int(settings["risk_threshold"]),
-                    layout=str(settings["jev_layout"]),
-                )
-            except SafetyReviewError as exc:
-                logger.warning(
-                    "Prompt safety review failed closed: model_id=%s format=%s error=%s",
-                    model_id,
-                    settings["request_format"],
-                    exc,
-                )
-                result = SafetyReviewResult(
-                    review_id="safety_" + uuid.uuid4().hex, model_id=model_id,
-                    request_format=str(settings["request_format"]), risk_score=None,
-                    threshold=int(settings["risk_threshold"]), skipped=False,
-                    skip_reason=None, blocked=True, reason="review_error",
-                )
-            context.execution_metadata["safety_model_id"] = model_id
-            await adapter._emit_safety_result(context, result)
-            if result.blocked:
-                await adapter.repository.create_tool_call(
-                    result.review_id,
-                    context.request.workspace_id,
-                    context.request.conversation_id,
-                    context.request.task_id,
-                    "safety_review",
-                    {"review_id": result.review_id, "risk_score": result.risk_score},
-                    delta,
-                )
-                decision = interrupt({
-                    "kind": "user_question", "tool_call_id": result.review_id,
-                    "title": "提示词安全审查需要确认",
-                    "options": [
-                        {"label": "继续执行", "recommended": False},
-                        {"label": "终止任务", "recommended": True},
-                    ],
-                    "safety_review": True,
-                    "review_id": result.review_id,
-                })
-                if str(decision) != "继续执行":
-                    raise PermissionError("prompt safety review denied execution")
-            return await handler(request)
 
 
 class LangGraphRuntime:
@@ -572,9 +298,15 @@ class LangGraphRuntime:
             # Append queued user input after compaction so it cannot be reduced
             # to a summary before its first consumption receipt.
             HumanInTheLoopMiddleware(interrupt_on),
-            _ProductToolMiddleware(),
-            _PromptSafetyMiddleware(),
-            ContextBudgetMiddleware[_RunContext](self.context_max_tokens, summarizer),
+            ProductToolMiddleware(
+                self.repository,
+                refresh_authority=self._refresh_execution_metadata,
+                execute_tool=self._execute_product_tool_call,
+            ),
+            PromptSafetyMiddleware(
+                self.repository, self._safety_reviewer, self._safety_settings, self._safety_credential,
+            ),
+            ContextBudgetMiddleware[RunContext](self.context_max_tokens, summarizer),
         ]
         if isinstance(model, ChatAnthropic):
             middleware.append(AnthropicPromptCachingMiddleware())
@@ -584,7 +316,7 @@ class LangGraphRuntime:
             system_prompt=self.system_prompt or None,
             middleware=middleware,
             checkpointer=self._checkpointer,
-            context_schema=_RunContext,
+            context_schema=RunContext,
             response_format=ToolStrategy(
                 response_schema(output_schema), handle_errors=False,
                 tool_message_content="Final structured task result captured.",
@@ -685,7 +417,7 @@ class LangGraphRuntime:
         return graph
 
     def _policy_decision(
-        self, name: str, arguments: dict[str, Any], context: _RunContext | ChildContext, *, approved: bool = False,
+        self, name: str, arguments: dict[str, Any], context: RunContext | ChildContext, *, approved: bool = False,
     ) -> PolicyDecision:
         spec = self._specs_by_name.get(name)
         enabled = context.execution_metadata.get("enabled_tools", self._specs_by_name)
@@ -711,7 +443,7 @@ class LangGraphRuntime:
         )
         # Only the parent can use its own explicitly scoped receipts. Child
         # tools never inherit authorizations, even inside the same conversation.
-        if isinstance(context, _RunContext) and decision.outcome == "approval_required" and decision.reuse_scope:
+        if isinstance(context, RunContext) and decision.outcome == "approval_required" and decision.reuse_scope:
             receipt = next(
                 (item for item in context.authorizations if policy.authorizes(item, decision)),
                 None,
@@ -721,7 +453,7 @@ class LangGraphRuntime:
                                authorization_id=receipt["approval_id"])
         return decision
 
-    async def _refresh_execution_metadata(self, context: _RunContext) -> None:
+    async def _refresh_execution_metadata(self, context: RunContext) -> None:
         fresh = (await self._execution_metadata(context.request) if self._execution_metadata
                  else context.execution_metadata.copy())
         original = context.execution_metadata.get("enabled_tools", self._specs_by_name)
@@ -738,21 +470,8 @@ class LangGraphRuntime:
         context.authorizations = grants
         context.execution_metadata = fresh
 
-    async def _emit_safety_result(self, context: _RunContext, result: Any) -> None:
-        await self._emit(context, "safety.reviewed", {
-            "review_id": result.review_id,
-            "model_id": result.model_id,
-            "request_format": result.request_format,
-            "risk_score": result.risk_score,
-            "threshold": result.threshold,
-            "skipped": result.skipped,
-            "skip_reason": result.skip_reason,
-            "blocked": result.blocked,
-            "reason": result.reason,
-        })
-
     def _should_interrupt(self, tool_request: ToolCallRequest) -> bool:
-        context = cast(_RunContext, tool_request.runtime.context)
+        context = cast(RunContext, tool_request.runtime.context)
         if context.review_call_ids and any(
             call["id"] in context.review_call_ids for call in context.latest_tool_calls
         ):
@@ -772,7 +491,7 @@ class LangGraphRuntime:
         decision = self._policy_decision(
             str(tool_call["name"]),
             dict(tool_call.get("args") or {}),
-            cast(_RunContext, runtime.context),
+            cast(RunContext, runtime.context),
         )
         return (
             f"{decision.reason}\n"
@@ -1024,7 +743,7 @@ class LangGraphRuntime:
                          and call["name"] == pending["tool_name"]), None)
             if call is None:
                 raise ValueError("approval no longer matches the runtime checkpoint")
-            review_context = _RunContext(
+            review_context = RunContext(
                 self, request, RunProjection(self.repository, self._event_publisher, request, asyncio.Queue()),
             )
             if self._execution_metadata is not None:
@@ -1197,7 +916,7 @@ class LangGraphRuntime:
             "task.input.queued", {"input_id": item["id"], "content": item["content"], "status": item["status"]})
         return item
 
-    async def _question_interrupts(self, interrupts: Any, context: _RunContext) -> Command[Any] | None:
+    async def _question_interrupts(self, interrupts: Any, context: RunContext) -> Command[Any] | None:
         """Project native interrupts and map durable user answers back to their IDs."""
         records = {item["tool_call_id"]: item for item in await self.repository.task_questions(
             context.request.workspace_id, context.request.task_id,
@@ -1257,7 +976,7 @@ class LangGraphRuntime:
         ))
         cancelled = product_task["status"] == "cancelled"
         queue: asyncio.Queue[MaigoKiteEvent | object] = asyncio.Queue()
-        context = _RunContext(self, request, RunProjection(self.repository, self._event_publisher, request, queue))
+        context = RunContext(self, request, RunProjection(self.repository, self._event_publisher, request, queue))
         context.direct_tool = (
             None if cancelled else self._direct_tool_call(str(product_task["input_text"]), request.task_id)
         )
@@ -1297,7 +1016,7 @@ class LangGraphRuntime:
             "type": "tool_call",
         }
 
-    async def _drive(self, graph: Any, graph_input: Any, context: _RunContext) -> None:
+    async def _drive(self, graph: Any, graph_input: Any, context: RunContext) -> None:
         config = {"configurable": {"thread_id": context.request.task_id}}
         try:
             context.started.set()
@@ -1468,7 +1187,7 @@ class LangGraphRuntime:
             await context.projection.queue.put(END_OF_EVENTS)
 
     async def _settle_compaction(
-        self, graph: Any, config: dict[str, Any], context: _RunContext, *, cancelled: bool,
+        self, graph: Any, config: dict[str, Any], context: RunContext, *, cancelled: bool,
     ) -> None:
         """Resolve an unprojected summary after graph cleanup, including commit/stop races."""
         if context.compaction_receipt is None:
@@ -1486,7 +1205,7 @@ class LangGraphRuntime:
                 "message": "压缩提交未确认；原始聊天记录保留，恢复时以持久上下文为准。",
             })
 
-    async def _project_compaction(self, messages: Any, context: _RunContext) -> None:
+    async def _project_compaction(self, messages: Any, context: RunContext) -> None:
         receipt = context.compaction_receipt
         if receipt is not None and any(getattr(item, "id", None) == receipt[0] for item in messages):
             await self._emit(context, "context.compacted", receipt[1])
@@ -1535,7 +1254,7 @@ class LangGraphRuntime:
             )
             return cancelled
 
-    async def _map_runtime_event(self, event: dict[str, Any], context: _RunContext) -> None:
+    async def _map_runtime_event(self, event: dict[str, Any], context: RunContext) -> None:
         event_type = str(event.get("type") or "")
         data = event.get("data")
         if event_type == "checkpoints" and isinstance(data, dict):
@@ -1593,14 +1312,14 @@ class LangGraphRuntime:
                 if message.tool_calls:
                     await self._record_tool_proposals(message, context)
 
-    async def _map_message(self, message: BaseMessage, context: _RunContext) -> None:
+    async def _map_message(self, message: BaseMessage, context: RunContext) -> None:
         if isinstance(message, AIMessageChunk):
             await context.projection.stream_message(message)
         elif isinstance(message, ToolMessage):
             await context.projection.tool_message(message)
 
     async def _record_tool_proposals(
-        self, message: AIMessage, context: _RunContext
+        self, message: AIMessage, context: RunContext
     ) -> None:
         context.latest_tool_calls = []
         for raw_call in message.tool_calls:
@@ -1681,7 +1400,7 @@ class LangGraphRuntime:
                 calls.append(remaining.pop(index))
         return calls
 
-    async def _review_records(self, context: _RunContext) -> dict[str, ApprovalRecord]:
+    async def _review_records(self, context: RunContext) -> dict[str, ApprovalRecord]:
         records: dict[str, ApprovalRecord] = {}
         for status in ("pending", "consumed", "rejected", "expired"):
             for record in await self.repository.list_approvals(
@@ -1692,7 +1411,7 @@ class LangGraphRuntime:
         return records
 
     async def _review_resume_input(
-        self, interrupts: Any, context: _RunContext
+        self, interrupts: Any, context: RunContext
     ) -> Command[Any] | None:
         """Translate existing approval audit facts into one native HITL response.
 
@@ -1749,7 +1468,7 @@ class LangGraphRuntime:
         return message
 
     async def _handle_interrupts(
-        self, interrupts: Any, context: _RunContext
+        self, interrupts: Any, context: RunContext
     ) -> None:
         task = await self.repository.get_task(context.request.workspace_id, context.request.task_id)
         if task["status"] == "cancelled":
@@ -1827,7 +1546,7 @@ class LangGraphRuntime:
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
     ) -> ToolMessage | Command[Any]:
         context = request.runtime.context
-        if not isinstance(context, _RunContext):
+        if not isinstance(context, RunContext):
             raise RuntimeError("LangGraph runtime context is missing")
         tool_name = str(request.tool_call["name"])
         task = await self.repository.get_task(context.request.workspace_id, context.request.task_id)
@@ -1975,7 +1694,7 @@ class LangGraphRuntime:
 
     async def _emit(
         self,
-        context: _RunContext,
+        context: RunContext,
         event_type: str,
         payload: Mapping[str, object],
     ) -> None:

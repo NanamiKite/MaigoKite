@@ -704,6 +704,10 @@ const en: Record<string, string> = {
   工作区名称: 'Workspace name',
   工作区摘要: 'Workspace summary',
   '工作区没有未提交变更。': 'No uncommitted changes.',
+  'Git 未提交': 'Git uncommitted',
+  '没有 Git 未提交变更。': 'No uncommitted Git changes.',
+  '任务中的文件改动记录保留在执行小结中。':
+    'Task summaries retain the file changes made during each task.',
   工作抽屉: 'Workspace drawer',
   工作方式: 'Mode',
   '已启用 {0}/{1}': '{0}/{1} enabled',

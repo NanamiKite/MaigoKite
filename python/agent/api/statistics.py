@@ -65,7 +65,7 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
         since = (local_now.replace(hour=0, minute=0, second=0, microsecond=0)
                  - timedelta(days=days - 1)).astimezone(UTC).isoformat() if days else ""
         until = local_now.astimezone(UTC).isoformat()
-        profiles, _ = await core.list_chat_models(workspace_id)
+        profiles, _ = await core.models.list_settings(workspace_id)
         result = await core.repository.usage_statistics(workspace_id, since, until)
         # Public projection only. Never expose stored credentials or raw provider bodies.
         result["profiles"] = [{"id": profile.id, "name": profile.name, "model": profile.model,

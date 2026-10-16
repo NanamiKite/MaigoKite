@@ -16,7 +16,7 @@ from agent.repository import SQLiteRepository
 from agent.structured_output import OUTPUT_TOOL_NAME
 
 if TYPE_CHECKING:
-    from agent.runtime.langgraph_runtime import RuntimeRunRequest
+    from agent.runtime.run_context import RuntimeRunRequest
 
 
 @dataclass(frozen=True, slots=True)

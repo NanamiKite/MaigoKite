@@ -8,6 +8,7 @@ const net = require('node:net')
 const os = require('node:os')
 const path = require('node:path')
 const { requireBuild } = require('./lib/web-build.cjs')
+const { registerSourceDesktop } = require('./lib/linux-desktop.cjs')
 
 const root = path.resolve(__dirname, '..')
 const web = path.join(root, 'web')
@@ -259,6 +260,15 @@ async function start(target, mode) {
     if (target === 'desktop') npm(['run', 'electron:compile'])
   }
   env.MAIGOKITE_DESKTOP_BUILT = mode === 'built' ? '1' : '0'
+  if (target === 'desktop' && process.platform === 'linux') {
+    delete env.MAIGOKITE_DESKTOP_NAME
+    try {
+      // Wayland resolves taskbar icons through the desktop entry, not BrowserWindow.icon.
+      env.MAIGOKITE_DESKTOP_NAME = registerSourceDesktop(root, mode)
+    } catch (error) {
+      console.warn(`[MaigoKite] Desktop icon registration failed: ${error.message}`)
+    }
+  }
   const vite = path.join(web, 'node_modules/vite/bin/vite.js')
   const specs = target === 'web'
     ? [

@@ -37,7 +37,7 @@ from agent.runtime.memory import project_memories
 from agent.structured_output import output_budget_tools
 
 if TYPE_CHECKING:
-    from agent.runtime.langgraph_runtime import _RunContext
+    from agent.runtime.run_context import RunContext
     from agent.runtime.subagents import ChildContext
 
 
@@ -434,7 +434,7 @@ class ContextBudgetMiddleware(AgentMiddleware[AgentState[object], ContextT]):
         self, request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[str]]],
     ) -> ToolMessage | Command[str]:
-        context = cast("_RunContext", request.runtime.context)
+        context = cast("RunContext", request.runtime.context)
         if request.tool_call["name"] == "delegate" and self.summarizer is not None and context.result_budget is None:
             # Resuming an approval can enter ToolNode without a model call in
             # this process. Recompute estimates from the model configuration;
@@ -488,14 +488,14 @@ class ContextBudgetMiddleware(AgentMiddleware[AgentState[object], ContextT]):
             )
         except asyncio.CancelledError:
             if hasattr(request.runtime.context, "compaction_receipt"):
-                cast("_RunContext", request.runtime.context).compaction_receipt = None
+                cast("RunContext", request.runtime.context).compaction_receipt = None
             await _emit(request.runtime.context, "context.compaction.skipped", {
                 "reason": "cancelled", "message": "任务已停止，压缩结果未提交。",
             })
             raise
         except Exception as exc:
             if hasattr(request.runtime.context, "compaction_receipt"):
-                cast("_RunContext", request.runtime.context).compaction_receipt = None
+                cast("RunContext", request.runtime.context).compaction_receipt = None
             await _emit(request.runtime.context, "context.compaction.failed", {
                 "error_type": type(exc).__name__, "reason": getattr(exc, "reason", ""),
                 "message": str(exc) if isinstance(exc, ContextBudgetExceeded)
@@ -533,7 +533,7 @@ class ContextBudgetMiddleware(AgentMiddleware[AgentState[object], ContextT]):
             messages.insert(0, request.system_message)
         # Historical usage describes the pre-compaction prompt. Scaling this
         # rewritten input by those counters would falsely reject a short summary.
-        context = cast("_RunContext | ChildContext | None", request.runtime.context)
+        context = cast("RunContext | ChildContext | None", request.runtime.context)
         budget_tools = output_budget_tools(request.tools, context)
         estimated = count_tokens_approximately(messages, tools=budget_tools, use_usage_metadata_scaling=False)
         capacity = getattr(context, "context_capacity", None)
@@ -574,7 +574,7 @@ class ContextBudgetMiddleware(AgentMiddleware[AgentState[object], ContextT]):
                 memory.update(included_count=0, ids=[], estimated_tokens=0)
         if context is not None and hasattr(context, "result_budget"):
             history = count_tokens_approximately(request.messages, use_usage_metadata_scaling=False)
-            cast("_RunContext", context).result_budget = (input_budget, max(0, estimated - history))
+            cast("RunContext", context).result_budget = (input_budget, max(0, estimated - history))
         call_id = f"call_{uuid.uuid4().hex}"
         await _publish_context(context, request.model, capacity, self.max_tokens, estimated,
                                call_id=call_id, memory=memory)

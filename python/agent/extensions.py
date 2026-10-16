@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
@@ -198,6 +199,93 @@ class ExtensionCatalog:
         for name in disabled:
             skills.unregister(name)
         return skills, inventory, errors
+
+    def resolve_credentials(
+        self, config: ExtensionConfig, credentials: Mapping[str, object], *, restore_only: bool,
+    ) -> dict[str, dict[str, str]]:
+        """Validate transient secrets and retain unchanged connections' credentials on restore."""
+        # Secret values are transient; never persist them in config/checkpoints.
+        env: dict[str, dict[str, str]] = {}
+        for server in config.mcp_servers:
+            # Restoring a missing connection must not erase credentials
+            # owned by an unchanged, healthy connection we will reuse.
+            values = credentials.get(
+                server.namespace, self.env.get(server.namespace, {}) if restore_only else {}
+            )
+            if not isinstance(values, dict):
+                raise ValueError("MCP credentials must be named environment values")
+            env[server.namespace] = {}
+            for name in server.secret_env:
+                value = values.get(name, "")
+                if not isinstance(value, str) or "\x00" in value or len(value) > 65536:
+                    raise ValueError("Invalid MCP credential")
+                if value:
+                    env[server.namespace][name] = value
+        return env
+
+    async def stage_connections(
+        self, previous: ExtensionCatalog, workspace_root: Path, observability: Observability,
+        *, restore_only: bool,
+    ) -> list[str]:
+        """Populate this candidate; Core commits it with the graph or releases its new clients."""
+        candidate, env = self.config, self.env
+        registry, clients, states = self.registry, self.clients, self.servers
+        previous_clients = previous.clients
+        previous_servers = {server.namespace: server for server in previous.config.mcp_servers}
+        previous_states = {state["namespace"]: state for state in previous.servers}
+        pending = []
+        for server in candidate.mcp_servers:
+            namespace = server.namespace
+            client = previous_clients.get(namespace)
+            previous_server = previous_servers.get(namespace)
+            client_secrets = {
+                name: client.env[name] for name in server.secret_env if name in client.env
+            } if client is not None else {}
+            # Tool visibility edits require discovery, not a new process.
+            # Command/cwd/environment or credential changes do require one.
+            selection_fields = {"enabled_tools", "disabled_tools"}
+            if (
+                not server.enabled
+                or client is None
+                or not client.is_running
+                or previous_server is None
+                or previous_server.model_dump(exclude=selection_fields)
+                != server.model_dump(exclude=selection_fields)
+                or (not restore_only and client_secrets != env.get(namespace, {}))
+            ):
+                pending.append(server)
+                continue
+            clients[namespace] = client
+            # Reuse keeps the process environment, not newly read keychain
+            # values. Snapshot what this client actually received so a
+            # later explicit apply still detects and rotates changed keys.
+            env[namespace] = client_secrets
+            if restore_only:
+                # Pending approvals retain the applied tool schemas; recovery
+                # of another server must not rediscover or replace these tools.
+                names = previous_states[namespace]["tool_names"]
+                for name in names:
+                    tool = previous.registry.get(name)
+                    if tool is None:
+                        raise ValueError("Applied MCP tool catalog is incomplete")
+                    registry.register(tool)
+            else:
+                # Explicit reload refreshes discovery over the same healthy
+                # SDK connection, without launching a duplicate server process.
+                async with asyncio.timeout(30):
+                    tools = await registry.discover_mcp(client, namespace,
+                        enabled_tools=server.enabled_tools, disabled_tools=server.disabled_tools)
+                names = [tool.name for tool in tools]
+            states.append(
+                {"namespace": namespace, "status": "running", "transport": "stdio", "tool_names": list(names)}
+            )
+        await self.connect_servers(pending, workspace_root, observability)
+        order = {server.namespace: index for index, server in enumerate(candidate.mcp_servers)}
+        states.sort(key=lambda state: order[state["namespace"]])
+        unavailable = [state["namespace"] for state in states if state["status"] not in {"running", "disabled"}]
+        if unavailable and not restore_only:
+            raise ValueError("MCP 未全部连接，未应用新配置；请检查服务与凭证后重试。")
+        return unavailable
 
     async def connect_servers(
         self, servers: list[MCPSettings], workspace_root: Path, observability: Observability,

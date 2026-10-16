@@ -24,6 +24,11 @@
 .state.error {
   color: var(--ink-2);
 }
+.state-note {
+  display: block;
+  margin-top: var(--space-3);
+  line-height: var(--leading-normal);
+}
 .changes-split {
   display: flex;
   flex: 1;

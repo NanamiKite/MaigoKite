@@ -30,6 +30,8 @@ Schema helper 使用 Repository 创建的同一个连接，不自行 commit、cl
 
 ## 2. 当前归属模型
 
+自动标题增量：`conversations.title_source` 只接受 `pending / automatic / manual`。既有库增列默认 `manual`，保留所有历史标题，不根据“新对话”等展示文字推断来源。新建未命名会话显式写入 `pending`；首条用户消息的准入事务同时更新标题与来源，重复提交不重新生成。显式改名和分岔使用 `manual`，不再按标题字面值判断。该升级不改变消息、审批或 checkpoint。
+
 会话分岔增量：`conversations` 增加 `forked_from_conversation_id / forked_from_message_id / fork_request_hash`，默认空值，保留原数据。前两项为来源标记而非级联外键，源删除不影响分岔；请求指纹只用于创建幂等，不是执行续接状态。分岔与新 ID 的可见消息在同一 SQLite 事务中写入，不复制任务、审批或 checkpoint。新库 API 的消息复制/独立 ID/无旧任务及图片引用复制已通过；旧库迁移与幂等并发不在该通过范围。
 
 - `workspaces.kind` 保留 `personal / team` 兼容值，当前产品只推进个人使用，不继续建设团队管理。
@@ -44,7 +46,7 @@ Schema helper 使用 Repository 创建的同一个连接，不自行 commit、cl
 |---|---|
 | `workspaces` | `id / name / kind / created_at / updated_at` |
 | `workspace_memberships` | `(workspace_id, user_id)` 主键与 `role`；当前主要用于访问检查 |
-| `conversations` | 工作区、标题、`model_id`、权限模式、响应档位和时间 |
+| `conversations` | 工作区、标题及 `title_source`、`model_id`、权限模式、响应档位和时间 |
 | `messages` | 会话、`role / content / created_at`；没有显式 sequence/词元列 |
 | `user_preferences` | `(workspace_id, subject_user_id, key)` 唯一，保存非敏感 JSON |
 | `workspace_settings` | `(workspace_id, key)` 唯一，保存非敏感 JSON |

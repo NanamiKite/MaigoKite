@@ -1,4 +1,20 @@
 const en: Record<string, string> = {
+  '无效的权限模式。': 'Invalid permission mode.',
+  '无效的响应模式。': 'Invalid response mode.',
+  '来源消息标识无效。': 'Invalid source message ID.',
+  '对话名称须为 {min}–{max} 个字符。': 'Chat names must contain {min}–{max} characters.',
+  '请先停止或完成此对话中的任务，再移动、归档或删除。':
+    'Finish or stop this chat’s tasks before moving, archiving or deleting it.',
+  '工作区文件夹不存在或路径已变更，请重新选择文件夹。':
+    'The workspace folder is missing or its path has changed. Please select it again.',
+  '请选择有效的文件夹。': 'Please select a valid folder.',
+  '工作区文件夹须使用绝对路径。': 'The workspace folder must use an absolute path.',
+  '工作区路径不是文件夹。': 'The workspace path is not a folder.',
+  '工作区名称不能超过 {max} 个字符。': 'Workspace names cannot exceed {max} characters.',
+  '请选择一个确认选项。': 'Please select a confirmation option.',
+  继续执行: 'Continue execution',
+  终止任务: 'Stop task',
+  提示词安全审查需要确认: 'Prompt safety review requires confirmation',
   已打开的对话: 'Open conversations',
   '关闭标签：{0}': 'Close tab: {0}',
   '关闭标签，不会删除对话或停止任务':

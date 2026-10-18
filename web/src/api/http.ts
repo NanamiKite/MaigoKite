@@ -1,12 +1,15 @@
 import { t } from '@/i18n'
+import { errorCopy, errorParameters, type ErrorParameters } from './error-copy'
 export const apiBase =
-  import.meta.env.VITE_API_BASE_URL || (location.protocol === 'file:' ? 'http://127.0.0.1:8080' : '')
+  import.meta.env.VITE_API_BASE_URL ||
+  (location.protocol === 'file:' ? 'http://127.0.0.1:8080' : '')
 export const workspacePath = '/api/v1/workspaces/personal'
 export class GatewayError extends Error {
   constructor(
     message: string,
     public readonly status = 0,
     public readonly code = 'NETWORK',
+    public readonly params: ErrorParameters = {},
   ) {
     super(message)
     this.name = 'GatewayError'
@@ -42,10 +45,15 @@ export async function request<T>(
     const headers = new Headers(init?.headers)
     headers.set('Content-Type', 'application/json')
     if (bearer) headers.set('Authorization', `Bearer ${bearer}`)
-    const response = await fetch(`${apiBase}${url}`, { ...init, headers, signal: controller.signal })
+    const response = await fetch(`${apiBase}${url}`, {
+      ...init,
+      headers,
+      signal: controller.signal,
+    })
     if (!response.ok) {
       const body: unknown = await response.json().catch(() => null)
-      const error = body && typeof body === 'object' ? (body as Record<string, unknown>).error : null
+      const error =
+        body && typeof body === 'object' ? (body as Record<string, unknown>).error : null
       const detail = error && typeof error === 'object' ? (error as Record<string, unknown>) : {}
       const message =
         typeof error === 'string'
@@ -53,9 +61,11 @@ export async function request<T>(
           : typeof detail.message === 'string'
             ? detail.message
             : response.status === 404
-              ? t("此操作不可用，请重启或更新应用。")
-              : t("请求失败（{0}）", [response.status])
-      throw new GatewayError(message, response.status, String(detail.code || 'HTTP'))
+              ? t('此操作不可用，请重启或更新应用。')
+              : t('请求失败（{0}）', [response.status])
+      const code = typeof detail.code === 'string' ? detail.code : 'HTTP'
+      const params = errorParameters(detail.params)
+      throw new GatewayError(errorCopy(code, message, params), response.status, code, params)
     }
     const body: unknown = response.status === 204 ? undefined : await response.json()
     return decode(body)
@@ -63,10 +73,10 @@ export async function request<T>(
     if (reason instanceof GatewayError) throw reason
     throw new GatewayError(
       controller.signal.aborted
-        ? t("请求超时或已取消，请重试。")
+        ? t('请求超时或已取消，请重试。')
         : reason instanceof Error
           ? reason.message
-          : t("无法连接服务"),
+          : t('无法连接服务'),
     )
   } finally {
     clearTimeout(timeout)

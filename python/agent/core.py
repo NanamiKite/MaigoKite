@@ -542,7 +542,7 @@ class AgentCore:
 
     def _require_inactive_conversation(self, conversation_id: str) -> None:
         if self._langgraph_runtime is not None and self._langgraph_runtime.has_active_conversation(conversation_id):
-            raise ConversationBusyError("此对话的任务尚未结束，请稍后再管理。")
+            raise ConversationBusyError("此对话的任务尚未结束，请稍后再管理。", code="CONVERSATION_BUSY")
 
     async def _delete_conversation_threads(self, task_ids: Sequence[str]) -> None:
         # Resolve the current runtime after extension reload, not the original graph owner.

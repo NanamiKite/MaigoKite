@@ -51,6 +51,7 @@ class ConversationRecord(TypedDict):
     id: str
     workspace_id: str
     title: str
+    title_source: Literal["pending", "automatic", "manual"]
     model_id: str
     permission_mode: PermissionMode
     response_mode: Literal["fast", "balanced", "thorough"]

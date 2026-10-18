@@ -105,7 +105,7 @@ async function create() {
   if (creating.value) return
   creating.value = true
   try {
-    const item = await session.createSession('新对话')
+    const item = await session.createSession()
     await router.push('/chat/' + item.id)
   } catch {
     /* The existing store owns submission errors. */

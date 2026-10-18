@@ -185,16 +185,20 @@ class SQLiteRepository:
         model_ids = validate_subagent_model_ids([] if subagent_model_ids is None else subagent_model_ids)
         conversation_id = f"conv_{uuid.uuid4().hex}"
         now = _now()
-        title = title.strip() or "新对话"
+        title = title.strip()
+        title_source = "manual" if title else "pending"
+        title = title or "新对话"
         async with self._lock:
             self._require_folder(workspace_id, folder_id)
             self._db().execute(
                 """INSERT INTO conversations(
                      id,workspace_id,title,model_id,permission_mode,response_mode,created_at,updated_at,folder_id,
-                     max_subagent_calls,max_concurrent_subagents,subagent_model_ids_json,thinking,memory_enabled
-                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     max_subagent_calls,max_concurrent_subagents,subagent_model_ids_json,thinking,memory_enabled,
+                     title_source
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (conversation_id, workspace_id, title, model_id, permission_mode, response_mode, now, now, folder_id,
-                 max_subagent_calls, max_concurrent_subagents, json.dumps(model_ids), thinking, memory_enabled),
+                 max_subagent_calls, max_concurrent_subagents, json.dumps(model_ids), thinking, memory_enabled,
+                 title_source),
             )
             self._db().commit()
         return await self.get_conversation(workspace_id, conversation_id)
@@ -345,7 +349,9 @@ class SQLiteRepository:
             (workspace_id, conversation_id),
         ).fetchone()
         if active:
-            raise ConversationBusyError("请先停止或完成此对话中的任务，再移动、归档或删除。")
+            raise ConversationBusyError(
+                "请先停止或完成此对话中的任务，再移动、归档或删除。", code="CONVERSATION_BUSY",
+            )
 
     async def list_workspace_folders(self, workspace_id: str) -> list[dict[str, Any]]:
         async with self._lock:
@@ -386,7 +392,7 @@ class SQLiteRepository:
         No filesystem operation or checkpoint deletion belongs to this action.
         """
         if not folder_id:
-            raise ValueError("默认工作区不能删除。")
+            raise UserFacingError("默认工作区不能删除。", code="DEFAULT_WORKSPACE_PROTECTED")
         async with self._lock:
             with self._db() as db:
                 db.execute("BEGIN IMMEDIATE")
@@ -399,14 +405,18 @@ class SQLiteRepository:
                     try:
                         self._require_idle_conversation(workspace_id, row["id"])
                     except ConversationBusyError:
-                        raise ConversationBusyError("工作区中有未结束的任务，请完成或停止后再删除。") from None
+                        raise ConversationBusyError(
+                            "工作区中有未结束的任务，请完成或停止后再删除。", code="WORKSPACE_TASK_ACTIVE",
+                        ) from None
                     latest = db.execute(
                         """SELECT status FROM tasks WHERE workspace_id=? AND conversation_id=?
                            ORDER BY created_at DESC,rowid DESC LIMIT 1""",
                         (workspace_id, row["id"]),
                     ).fetchone()
                     if latest is not None and latest["status"] == "interrupted":
-                        raise ConversationBusyError("工作区中有可恢复的任务，请完成或停止后再删除。")
+                        raise ConversationBusyError(
+                            "工作区中有可恢复的任务，请完成或停止后再删除。", code="WORKSPACE_TASK_RECOVERABLE",
+                        )
                 for row in conversations:
                     self._revoke_authorizations(workspace_id, row["id"])
                 now = _now()
@@ -508,6 +518,8 @@ class SQLiteRepository:
                 values.append(value)
         if not assignments:
             return await self.get_conversation(workspace_id, conversation_id)
+        if title is not None:
+            assignments.append("title_source='manual'")
         assignments.append("updated_at=?")
         values.extend([_now(), workspace_id, conversation_id])
         async with self._lock:
@@ -559,7 +571,7 @@ class SQLiteRepository:
         async with self._lock:
             if role == "user":
                 self._db().execute(
-                    """UPDATE conversations SET title=? WHERE id=? AND title='新对话'
+                    """UPDATE conversations SET title=?,title_source='automatic' WHERE id=? AND title_source='pending'
                        AND NOT EXISTS(SELECT 1 FROM messages WHERE conversation_id=?)""",
                     (content[:28], conversation_id, conversation_id),
                 )
@@ -822,6 +834,12 @@ class SQLiteRepository:
                         conversation["subagent_model_ids_json"],
                         schema_json,
                     ),
+                )
+                db.execute(
+                    """UPDATE conversations SET title=?,title_source='automatic'
+                       WHERE id=? AND title_source='pending'
+                       AND NOT EXISTS(SELECT 1 FROM messages WHERE conversation_id=?)""",
+                    (prompt[:28], conversation_id, conversation_id),
                 )
                 db.execute(
                     "INSERT INTO messages(id,conversation_id,role,content,created_at,attachments_json) "
@@ -1412,8 +1430,19 @@ class SQLiteRepository:
                     raise PermissionError("question belongs to another principal")
                 if row["status"] != "pending" or row["version"] != version or row["task_status"] != "waiting_approval":
                     raise ValueError("question is no longer pending or its version changed")
+                options = json.loads(row["options_json"])
+                answer = answer.strip()
+                if str(row["tool_call_id"]).startswith("safety_"):
+                    values = {option["value"] for option in options if option.get("value")}
+                    if values and answer not in values:
+                        raise UserFacingError("请选择一个确认选项。", code="QUESTION_CHOICE_REQUIRED")
+                # Persist the machine decision for resume; keep readable labels
+                # in the transcript instead of leaking protocol IDs into chat.
+                display_answer = next(
+                    (option["label"] for option in options if option.get("value") == answer), answer,
+                )
                 db.execute("UPDATE questions SET answer=?,status='answered',version=version+1 WHERE id=?",
-                           (answer.strip(), question_id))
+                           (answer, question_id))
                 db.execute("UPDATE tasks SET status='running',updated_at=?,version=version+1 WHERE id=?",
                            (_now(), row["task_id"]))
                 db.execute(
@@ -1425,7 +1454,7 @@ class SQLiteRepository:
                 # product messages instead of a successfully completed checkpoint.
                 db.execute("INSERT INTO messages(id,conversation_id,role,content,created_at) VALUES(?,?,?,?,?)",
                            (f"answer_{question_id}", row["conversation_id"], "user",
-                            f"{row['title']}\n{answer.strip()}", _now()))
+                            f"{row['title']}\n{display_answer}", _now()))
         return await self.get_question(workspace_id, question_id)
 
     async def inspect_task(self, workspace_id: str, task_id: str) -> dict[str, Any]:

@@ -21,6 +21,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("maigokite.agent.runtime")
 
+_CONTINUE = "safety.continue"
+_STOP = "safety.stop"
+
+
+def _allows_execution(answer: object, options_json: str) -> bool:
+    """Read legacy receipts without using their labels for new decisions.
+
+    Pre-ID questions/checkpoints must remain answerable after an upgrade. Only
+    those receipts accept the old exact label; all new questions use stable IDs.
+    """
+    options = json.loads(options_json)
+    if any(option.get("value") for option in options):
+        return answer == _CONTINUE
+    return answer == "继续执行"
+
 
 class PromptSafetyMiddleware(AgentMiddleware[AgentState[object], "RunContext"]):
     """Review user input using shared services, without owning active runs or checkpoints."""
@@ -67,7 +82,7 @@ class PromptSafetyMiddleware(AgentMiddleware[AgentState[object], "RunContext"]):
         )
         if safety_question is not None:
             if safety_question["status"] == "answered":
-                if safety_question["answer"] != "继续执行":
+                if not _allows_execution(safety_question["answer"], safety_question["options_json"]):
                     raise PermissionError("prompt safety review denied execution")
                 return await handler(request)
             decision = interrupt(
@@ -80,7 +95,7 @@ class PromptSafetyMiddleware(AgentMiddleware[AgentState[object], "RunContext"]):
                     "review_id": safety_question["tool_call_id"],
                 }
             )
-            if str(decision) != "继续执行":
+            if not _allows_execution(decision, safety_question["options_json"]):
                 raise PermissionError("prompt safety review denied execution")
             return await handler(request)
         human_text = "\n\n".join(str(message.text) for message in request.messages if isinstance(message, HumanMessage))
@@ -143,14 +158,14 @@ class PromptSafetyMiddleware(AgentMiddleware[AgentState[object], "RunContext"]):
                     "tool_call_id": result.review_id,
                     "title": "提示词安全审查需要确认",
                     "options": [
-                        {"label": "继续执行", "recommended": False},
-                        {"label": "终止任务", "recommended": True},
+                        {"value": _CONTINUE, "label": "继续执行", "recommended": False},
+                        {"value": _STOP, "label": "终止任务", "recommended": True},
                     ],
                     "safety_review": True,
                     "review_id": result.review_id,
                 }
             )
-            if str(decision) != "继续执行":
+            if decision != _CONTINUE:
                 raise PermissionError("prompt safety review denied execution")
         return await handler(request)
 

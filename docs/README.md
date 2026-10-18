@@ -30,6 +30,7 @@ MaigoKite 是面向个人工作流的本地 Agent。本目录按读者和职责�
 | 长期记忆与检索边界 | [记忆与检索边界](agent-capabilities/memory/memory-system.md) |
 | MCP 传输方式 / 生命周期 | [MCP 集成](agent-capabilities/mcp/mcp-integration.md) |
 | SKILL.md / 扩展边界 | [本地技能与扩展边界](agent-capabilities/skills/skill-lifecycle.md) |
+| 天线工作流 / MMANA 兼容与求解器评估（设计中） | [业余无线电天线工作流](design/AntennaWorkflow.md) |
 | 工具风险、模式、审批规则 | [工具权限](agent-capabilities/security/tool-permission.md) |
 | 威胁、身份、凭证与网络 | [安全边界](ops-security/Security.md) |
 | 日志、审计与排障 | [日志与诊断](ops-security/Observability.md) |

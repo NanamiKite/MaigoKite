@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { questionAnswerLabel } from '@/utils/question-presentation'
 import { computed, ref, watch } from 'vue'
 import type { PresentationNode } from '@/utils/rail-presentation'
 import RailGlyph from './RailGlyph.vue'
@@ -130,7 +131,7 @@ async function resend(id: string) {
         :item="node.await"
       />
       <p v-if="node.await?.answer !== undefined">
-        {{ $t('已回答：{0}', [node.await.answer]) }}
+        {{ $t('已回答：{0}', [questionAnswerLabel(node.await)]) }}
       </p>
       <p v-else-if="node.await?.closed && !node.await.verdict">
         {{ $t('已关闭') }}

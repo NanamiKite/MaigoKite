@@ -31,7 +31,7 @@ async function send(newSession = false) {
       const recent = session.sessions.find(
         (item) => !item.archived && (item.folder_id || '') === workspace.selectedId,
       )
-      const id = newSession || !recent ? (await session.createSession('新对话')).id : recent.id
+      const id = newSession || !recent ? (await session.createSession()).id : recent.id
       await session.sendToSession(id, text.value.trim())
       await router.push(`/chat/${id}`)
     }

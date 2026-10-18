@@ -1,24 +1,40 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
-import { t } from '@/i18n'
-import type { AwaitItem } from '@/api/events'
+import { computed, nextTick, ref, watch } from 'vue'
+import type { AwaitItem, QuestionOption } from '@/api/events'
 import { useInboxStore } from '@/stores/inbox'
 import InkButton from '@/components/common/InkButton.vue'
 import { awaitFocus } from '@/utils/await-focus'
+import { questionCaption, questionOptionLabel } from '@/utils/question-presentation'
 const card = ref<HTMLElement | null>(null)
 const props = defineProps<{ item: AwaitItem }>()
 const inbox = useInboxStore()
 const answer = ref(''),
   failure = ref('')
-const caption = computed(() =>
-  props.item.title?.trim() ? props.item.title : t('Agent 在等你回答'),
+const selectedValue = ref<string | null>(null)
+const caption = computed(() => questionCaption(props.item))
+const choiceOnly = computed(
+  () =>
+    props.item.toolCallId?.startsWith('safety_') &&
+    props.item.options?.some((option) => option.value),
 )
+watch(
+  () => [props.item.id, props.item.version],
+  () => {
+    answer.value = ''
+    selectedValue.value = null
+    failure.value = ''
+  },
+)
+function selectOption(option: QuestionOption) {
+  selectedValue.value = option.value || option.label
+  answer.value = questionOptionLabel(option)
+}
 async function submit() {
   if (!answer.value.trim() || inbox.busy.includes(props.item.id)) return
   failure.value = ''
   const restoreFocus = awaitFocus(card.value)
   try {
-    await inbox.answer(props.item, answer.value)
+    await inbox.answer(props.item, selectedValue.value ?? answer.value)
   } catch (reason) {
     failure.value = reason instanceof Error ? reason.message : String(reason)
   } finally {
@@ -44,18 +60,18 @@ async function submit() {
       >
         <button
           v-for="option in item.options"
-          :key="option.label"
+          :key="option.value || option.label"
           type="button"
           class="secondary-button"
           data-await-action
-          :aria-pressed="answer === option.label"
+          :aria-pressed="selectedValue === (option.value || option.label)"
           :disabled="inbox.busy.includes(item.id)"
-          @click="answer = option.label"
+          @click="selectOption(option)"
         >
-          {{ option.label }}{{ option.recommended ? $t(' · 推荐') : '' }}
+          {{ questionOptionLabel(option) }}{{ option.recommended ? $t(' · 推荐') : '' }}
         </button>
       </div>
-      <label>
+      <label v-if="!choiceOnly">
         {{ $t('你的回答') }}
         <textarea
           v-model="answer"
@@ -63,6 +79,7 @@ async function submit() {
           maxlength="10000"
           :disabled="inbox.busy.includes(item.id)"
           :placeholder="$t('选择建议答案，或输入自己的回答')"
+          @input="selectedValue = null"
         />
       </label>
       <p

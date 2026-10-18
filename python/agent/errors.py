@@ -7,10 +7,28 @@ Only explicitly authored product diagnostics may cross these boundaries intact.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
+
+type ErrorParameter = str | int | float | bool
 
 
 class UserFacingError(ValueError):
     """A product-authored diagnostic containing no third-party exception text."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "",
+        params: Mapping[str, ErrorParameter] | None = None,
+        status_code: int = 400,
+    ) -> None:
+        super().__init__(message)
+        # Codes and safe scalar parameters travel separately from the fallback
+        # copy. Never populate these fields from third-party exception bodies.
+        self.code = code
+        self.params = dict(params or {})
+        self.status_code = status_code
 
 
 class UserFacingCancellation(asyncio.CancelledError):

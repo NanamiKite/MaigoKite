@@ -294,7 +294,7 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
   async function createSession(
-    title: string,
+    title = '',
     folderId = workspace.selectedId,
     subagents?: SubagentSettings,
   ) {
@@ -740,14 +740,25 @@ export const useSessionStore = defineStore('session', () => {
     else if (turn.status === 'completed' && !result.replayed) void sendNext(id, result.task_id)
     else queuedPaused.value[id] = true
     const item = sessions.value.find((s) => s.id === id)
+    const needsTitleRefresh = item?.title_source === 'pending'
     if (item) {
       item.updated_at = new Date().toISOString()
-      if (item.title === '新对话') item.title = content.slice(0, 28)
       sessions.value.sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
     }
     try {
       await loadingSessions.get(id)
       if (epoch !== lifecycle || deletedSessions.has(id)) return
+      if (needsTitleRefresh) {
+        // The admission transaction owns automatic titles. Do not infer one
+        // locally or overwrite a manual rename made while the request ran.
+        const saved = await api.getConversation(id)
+        if (epoch !== lifecycle || deletedSessions.has(id)) return
+        const current = sessions.value.find((entry) => entry.id === id)
+        if (current?.title_source === 'pending') {
+          current.title = saved.title
+          current.title_source = saved.title_source
+        }
+      }
       await refreshSnapshot(id)
     } catch {
       error.value = t('消息已提交，状态更新失败。请重新打开对话，勿重复发送。')

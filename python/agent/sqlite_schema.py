@@ -138,6 +138,13 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
     }
     if "response_mode" not in conversation_columns:
         connection.execute("ALTER TABLE conversations ADD COLUMN response_mode TEXT NOT NULL DEFAULT 'balanced'")
+    if "title_source" not in conversation_columns:
+        # Old titles have no provenance: preserve them, including deliberately
+        # named "新对话" conversations, rather than infer intent from display text.
+        connection.execute(
+            "ALTER TABLE conversations ADD COLUMN title_source TEXT NOT NULL DEFAULT 'manual' "
+            "CHECK(title_source IN ('pending','automatic','manual'))"
+        )
     for column, definition in (
         ("memory_enabled", "INTEGER NOT NULL DEFAULT 0"),
         ("thinking", "TEXT NOT NULL DEFAULT ''"),

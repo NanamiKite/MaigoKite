@@ -26,7 +26,7 @@ async function create(folderId?: string) {
   if (creating.value) return
   creating.value = true
   try {
-    const item = await session.createSession('新对话', folderId)
+    const item = await session.createSession('', folderId)
     await router.push('/chat/' + item.id)
     closeSearch()
     closeOnNarrowScreen()

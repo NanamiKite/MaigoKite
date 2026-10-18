@@ -9,6 +9,7 @@ import {
 } from '@/utils/tool-presentation'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import SealMark from './SealMark.vue'
+import { questionAnswerLabel, questionCaption } from '@/utils/question-presentation'
 const props = defineProps<{ item: AwaitItem; record?: Approval }>()
 const opened = ref(false)
 const description = computed(() => approvalDescription(props.item, props.record))
@@ -57,7 +58,7 @@ function toggle(event: Event) {
       />
       <span class="approval-title">
         <span>
-          {{ item.mode === 'approval' ? description.action : item.title || $t('Agent 在等你回答') }}
+          {{ item.mode === 'approval' ? description.action : questionCaption(item) }}
         </span>
         <small v-if="item.mode === 'approval'">{{ description.target }}</small>
       </span>
@@ -73,7 +74,7 @@ function toggle(event: Event) {
         <code>{{ description.command }}</code>
       </p>
       <p v-if="item.answer !== undefined">
-        {{ item.answer }}
+        {{ questionAnswerLabel(item) }}
       </p>
       <p v-if="item.note || record?.note">
         {{ item.note || record?.note }}

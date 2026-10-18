@@ -10,7 +10,7 @@ export function useShortcuts() {
   const ui = useUIStore(), session = useSessionStore(), inbox = useInboxStore(), router = useRouter()
   let nodeIndex = -1
   async function newPage() {
-    const item = await session.createSession('新对话')
+    const item = await session.createSession()
     await router.push('/chat/' + item.id)
   }
   function onKey(event: KeyboardEvent) {

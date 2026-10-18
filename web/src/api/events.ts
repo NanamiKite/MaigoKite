@@ -134,7 +134,7 @@ export type GatewayEvent = {
       title: string
       detail: string
       risk?: string
-      options?: { label: string; recommended?: boolean }[]
+      options?: QuestionOption[]
       version?: number
       toolCallId?: string
     }
@@ -165,6 +165,11 @@ export interface Step {
   errorCode?: string
   action?: ToolHintAction
 }
+export interface QuestionOption {
+  label: string
+  value?: string | null
+  recommended?: boolean
+}
 export interface AwaitItem {
   id: string
   sessionId: string
@@ -173,7 +178,7 @@ export interface AwaitItem {
   title: string
   detail: string
   risk?: string
-  options?: { label: string; recommended?: boolean }[]
+  options?: QuestionOption[]
   version: number
   verdict?: Verdict
   answer?: string

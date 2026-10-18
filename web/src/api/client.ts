@@ -53,6 +53,7 @@ export interface ToolSettings {
 }
 
 export interface Conversation {
+  title_source?: 'pending' | 'automatic' | 'manual'
   memory_enabled?: boolean
   subagent_model_ids?: string[]
   max_subagent_calls?: number

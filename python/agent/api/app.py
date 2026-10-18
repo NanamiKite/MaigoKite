@@ -22,10 +22,10 @@ from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from agent.api import sessions, settings, statistics, workspace
-from agent.api.contracts import APIError
+from agent.api.contracts import APIError, ErrorDetail, ErrorResponse
 from agent.api.credentials import Credentials
 from agent.api.execution import Execution
-from agent.errors import public_error
+from agent.errors import UserFacingError, public_error
 from agent.repository import ConversationBusyError, MessageConflictError
 from agent.tools.native.file_search import file_search_status
 from agent.utils.sandbox import process_sandbox_status
@@ -190,7 +190,10 @@ def create_app(core: AgentCore, web_dir: Path | None = None) -> FastAPI:
             finally:
                 await core.shutdown()
 
-    app = FastAPI(title="MaigoKite", version="0.1.0", lifespan=lifespan, redirect_slashes=False)
+    app = FastAPI(
+        title="MaigoKite", version="0.1.0", lifespan=lifespan, redirect_slashes=False,
+        responses={"default": {"model": ErrorResponse}},
+    )
     app.state.core = core
     app.add_middleware(LocalBoundary)
     # Starlette owns preflight and response headers; LocalBoundary still guards every API/WS action.
@@ -213,6 +216,8 @@ def create_app(core: AgentCore, web_dir: Path | None = None) -> FastAPI:
             status, code, message = error.status, error.code, str(error)
         elif isinstance(error, (ConversationBusyError, MessageConflictError)):
             status, code, message = 409, "CONFLICT", public_error(error)
+        elif isinstance(error, UserFacingError):
+            status, code, message = error.status_code, "VALIDATION", public_error(error)
         elif isinstance(error, (KeyError, FileNotFoundError)):
             status, code, message = 404, "NOT_FOUND", "目标记录或文件不存在。"
         elif isinstance(error, FileExistsError):
@@ -235,8 +240,13 @@ def create_app(core: AgentCore, web_dir: Path | None = None) -> FastAPI:
             status, code, message = 503, "UNAVAILABLE", public_error(error)
         else:
             status, code, message = 500, "INTERNAL", public_error(error)
+        params = {}
+        if isinstance(error, UserFacingError):
+            code = error.code or code
+            params = error.params
         logger.warning("API operation failed: %s (%s)", code, type(error).__name__)
-        return JSONResponse({"error": {"code": code, "message": message}}, status_code=status)
+        body = ErrorResponse(error=ErrorDetail(code=code, message=message, params=params))
+        return JSONResponse(body.model_dump(), status_code=status)
 
     for error in (APIError, ConversationBusyError, MessageConflictError, KeyError, OSError, ValueError,
                   RuntimeError, RequestValidationError, WebSocketRequestValidationError, HTTPException,

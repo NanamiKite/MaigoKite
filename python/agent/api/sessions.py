@@ -14,7 +14,7 @@ from starlette.requests import HTTPConnection
 
 from agent.api import contracts as dto
 from agent.data_contracts import available_approval_scopes
-from agent.errors import public_error
+from agent.errors import UserFacingError, public_error
 
 if TYPE_CHECKING:
     from agent.api.credentials import Credentials
@@ -47,6 +47,8 @@ async def interaction[T](operation: Awaitable[T]) -> T:
         return await operation
     except (dto.APIError, ValidationError):
         raise
+    except UserFacingError as exc:
+        raise dto.APIError(409, exc.code or "CONFLICT", public_error(exc), params=exc.params) from exc
     except ValueError as exc:
         raise dto.APIError(409, "CONFLICT", public_error(exc)) from exc
 

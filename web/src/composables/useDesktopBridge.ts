@@ -89,7 +89,7 @@ export function useDesktopBridge() {
           let id = request.newSession ? undefined : session.sessions.find(
             (item) => !item.archived && (item.folder_id || '') === workspace.selectedId,
           )?.id
-          if (!id) id = (await session.createSession('新对话')).id
+          if (!id) id = (await session.createSession()).id
           queued = { sessionId: id, content: request.content, time: Date.now() }
           capsuleRequests.push(queued)
           await session.sendToSession(id, request.content)

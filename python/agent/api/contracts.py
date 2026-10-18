@@ -21,7 +21,7 @@ from agent.data_contracts import (
     approval_notice,
 )
 from agent.data_contracts import PermissionMode as ActivePermissionMode
-from agent.errors import UserFacingError
+from agent.errors import ErrorParameter, UserFacingError
 from agent.event_contracts import WireEvent, wire_event
 from agent.media import ImageReference
 from agent.structured_output import validate_output_schema
@@ -35,13 +35,25 @@ ModelID = Annotated[str, Field(max_length=100)]
 
 
 class APIError(UserFacingError):
-    def __init__(self, status: int, code: str, message: str) -> None:
-        super().__init__(message)
+    def __init__(
+        self, status: int, code: str, message: str, *, params: dict[str, ErrorParameter] | None = None,
+    ) -> None:
+        super().__init__(message, code=code, params=params, status_code=status)
         self.status, self.code = status, code
 
 
 class Input(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+    params: dict[str, ErrorParameter] = Field(default_factory=dict)
+
+
+class ErrorResponse(BaseModel):
+    error: ErrorDetail
 
 
 class WorkspaceFileResponse(BaseModel):
@@ -246,6 +258,7 @@ class ConversationResponse(Output):
     id: str
     workspace_id: str
     title: str
+    title_source: Literal["pending", "automatic", "manual"] = "manual"
     model_id: str
     permission_mode: ActivePermissionMode
     response_mode: Literal["fast", "balanced", "thorough"]
@@ -347,6 +360,7 @@ class QuestionFields(Output):
 class QuestionOption(Output):
     label: str
     recommended: bool = False
+    value: str | None = None
 
 
 class QuestionResponse(QuestionFields):

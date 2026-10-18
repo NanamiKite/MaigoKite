@@ -323,7 +323,7 @@ async function send(
     if (controlError) throw new Error(controlError)
     if (!id) {
       const useMemory = draftMemory.value
-      const item = await session.createSession('新对话', workspace.selectedId, draftSubagents.value)
+      const item = await session.createSession('', workspace.selectedId, draftSubagents.value)
       id = item.id
       await router.replace('/chat/' + id)
       await session.setPermissionMode(mode.value, id)

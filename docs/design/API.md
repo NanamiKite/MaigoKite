@@ -120,6 +120,8 @@ GET    /workspaces/{workspace_id}/conversations/{conversation_id}/snapshot
 
 会话包含 `folder_id / archived`；创建可指定 `folder_id`，PATCH 可更新 `title / folder_id / archived`。既有会话迁移后仍使用默认目录且未归档。前端按文件夹与归档状态显示列表；直接进入会话时切换到其归属目录。归档会话拒绝发送消息；未结束的任务禁止移动、归档、删除（409）。DELETE 清理产品任务、消息及 LangGraph checkpoint，不删除工作区文件，保留安全审计。
 
+`title_source` 为只读状态：`pending / automatic / manual`。创建时省略标题或传空值进入 `pending`；首条用户消息在同一事务中生成标题并改为 `automatic`。显式命名、重命名及分岔标题为 `manual`，不因文字恰好是“新对话”而覆盖。旧记录没有来源证据，升级时统一保留标题并设为 `manual`；不根据语言或标题内容猜测来源。GUI 新建入口发送空标题，不发送翻译后的默认名称。
+
 归档仅禁止新执行，不禁止相同幂等键/内容查询已存在的提交回执。幂等请求中的会话若已删除，返回 404，不悄悄新建会话。`snapshot` 的空列表返回 `[]`，不返回 `null`。
 
 `files / files/content / changes / changes/diff / runtime-status` 支持可选 `folder_id` 查询参数，API 通过 `core.conversations` 解析已登记目录，客户端不能直接传任意根目录。Runtime 权限校验与工具上下文使用会话所属目录，不变更共享全局根目录；MCP 进程启动目录和技能加载目录不因切换而变化。
@@ -362,6 +364,8 @@ API 密钥的注入提示返回 `risk_probability: 1.0` 并转换为 `risk_score
 `api_key` 只出现在 PATCH 请求中，按 `safety.decision_model` 凭证引用保存；GET 只返回 `credential_configured`，不回传密钥。密钥留空保留既有凭证，保存或离开面板后清除输入中的密钥。更换服务地址时须重新提供密钥或移除旧凭证，避免发送到其他服务。
 
 配置按工作区持久化，不随会话变化。设置页「安全」位于「权限」之后，支持配置读取、保存、审查凭证移除，以及 `?tab=safety` 和字段搜索定位。
+
+安全确认的提问选项含独立的 `value` 与 `label`：新记录提交 `safety.continue / safety.stop`，运行时只用标识决定继续或停止，GUI 按标识翻译标签。回答仍走原提问 API、版本检查和 LangGraph 恢复；未知选项拒绝提交。普通模型提问继续允许自由文本。升级前没有 `value` 的安全确认保留原记录，仅在读取此类旧回执时兼容原确切回答；不改写 checkpoint。历史消息保存可读标签，提问回执保存决策标识。
 
 `capabilities.safety_review` 表示配置与运行时审查能力可用。启用后，主模型每次调用前审查新增的人类提示词；可信模型跳过审查，审查失败保守拦截，高于阈值时复用结构化提问/恢复链路等待人工决定。接口和 GUI 测试已完成，KEV 与 LAYA HTTP 联调已完成；完整端到端验收仍待执行。验收记录见 [交付路线与状态](../project/Roadmap.md)。
 
@@ -717,16 +721,16 @@ risk_score / threshold / skipped / skip_reason / blocked / reason`。`skipped: t
 ```json
 {
   "error": {
-    "code": "APPROVAL_EXPIRED",
-    "message": "审批已过期",
-    "request_id": "req_...",
-    "retryable": false,
-    "details": {}
+    "code": "CONVERSATION_TITLE_LENGTH",
+    "message": "对话名称须为 1–200 个字符。",
+    "params": {"min": 1, "max": 200}
   }
 }
 ```
 
-稳定类别：Validation、Unauthenticated、AccessDenied、NotFound、Conflict、ApprovalRequired、ToolDenied、RateLimited、Timeout、DependencyUnavailable、Internal。
+继续使用 `{error: {code, message}}` 信封，`params` 为可选的安全标量参数映射（字符串、数字、布尔值），缺省为空。`message` 是可直接展示的安全兜底，不是原始第三方异常；不再把尚未实现的 `request_id / retryable / details` 写成现有响应。
+
+会话/工作区校验及安全确认逐步细化错误码，如 `CONVERSATION_TITLE_LENGTH / CONVERSATION_BUSY / WORKSPACE_FOLDER_CHANGED / WORKSPACE_TASK_ACTIVE / QUESTION_CHOICE_REQUIRED`，不改变原有 HTTP 状态语义。前端仅对已登记的具体错误码使用现有 i18n 和已校验参数；未知码、缺失参数或旧服务响应继续显示安全兜底。未迁移接口仍使用 `VALIDATION / CONFLICT / ACCESS_DENIED / NOT_FOUND / INTERNAL` 等通用码，不按中文提示文本反推错误类型。
 
 错误消息不得包含敏感凭证、原始系统提示、内部路径或未脱敏工具输出。
 

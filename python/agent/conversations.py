@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.data_contracts import ConversationRecord, MessageRecord
+from agent.errors import UserFacingError
 from agent.models.runtime import ChatModelRuntime
 from agent.repository import ConversationBusyError, SQLiteRepository, validate_subagent_model_ids
 from agent.tools.permission_mgr import PermissionManager
@@ -48,7 +49,7 @@ class ConversationService:
         try:
             default_mode = self._policy.normalize_mode(default_mode)
         except ValueError as exc:
-            raise ValueError("invalid permission mode") from exc
+            raise UserFacingError("无效的权限模式。", code="INVALID_PERMISSION_MODE") from exc
         value = {"default_mode": default_mode}
         await self.repository.save_workspace_setting(workspace_id, "permissions.policy", value)
         return value
@@ -71,9 +72,9 @@ class ConversationService:
         try:
             mode = self._policy.normalize_mode(mode)
         except ValueError as exc:
-            raise ValueError("invalid permission mode") from exc
+            raise UserFacingError("无效的权限模式。", code="INVALID_PERMISSION_MODE") from exc
         if response_mode not in self.RESPONSE_MODES:
-            raise ValueError("invalid response mode")
+            raise UserFacingError("无效的响应模式。", code="INVALID_RESPONSE_MODE")
         if model_id:
             await self.models.get_profile(workspace_id, model_id)
         else:
@@ -101,7 +102,7 @@ class ConversationService:
         try:
             permission_mode = self._policy.normalize_mode(permission_mode)
         except ValueError as exc:
-            raise ValueError("invalid permission mode") from exc
+            raise UserFacingError("无效的权限模式。", code="INVALID_PERMISSION_MODE") from exc
         return await self.repository.update_conversation_permission(workspace_id, conversation_id, permission_mode)
 
     async def update_conversation_settings(
@@ -128,14 +129,18 @@ class ConversationService:
         if title is not None:
             title = title.strip()
             if not title or len(title) > 200:
-                raise ValueError("对话名称须为 1–200 个字符。")
+                raise UserFacingError(
+                    "对话名称须为 1–200 个字符。",
+                    code="CONVERSATION_TITLE_LENGTH",
+                    params={"min": 1, "max": 200},
+                )
         if permission_mode is not None:
             try:
                 permission_mode = self._policy.normalize_mode(permission_mode)
             except ValueError as exc:
-                raise ValueError("invalid permission mode") from exc
+                raise UserFacingError("无效的权限模式。", code="INVALID_PERMISSION_MODE") from exc
         if response_mode is not None and response_mode not in self.RESPONSE_MODES:
-            raise ValueError("invalid response mode")
+            raise UserFacingError("无效的响应模式。", code="INVALID_RESPONSE_MODE")
         if model_id is not None and model_id:
             await self.models.get_profile(workspace_id, model_id)
         if model_id is not None or thinking is not None:
@@ -187,7 +192,7 @@ class ConversationService:
     ) -> ConversationRecord:
         self._require_inactive_conversation(conversation_id)
         if len(message_id) > 200:
-            raise ValueError("Invalid source message ID")
+            raise UserFacingError("来源消息标识无效。", code="INVALID_SOURCE_MESSAGE")
         return await self.repository.fork_conversation(workspace_id, conversation_id, message_id, request_key)
 
     async def get_workspace_folder(self, workspace_id: str, folder_id: str) -> dict[str, Any]:
@@ -196,7 +201,10 @@ class ConversationService:
         item = await self.repository.get_workspace_folder(workspace_id, folder_id)
         root = Path(item["root_path"])
         if not root.is_dir() or str(root.resolve(strict=True)) != item["root_path"]:
-            raise ValueError("工作区文件夹不存在或路径已变更，请重新选择文件夹。")
+            raise UserFacingError(
+                "工作区文件夹不存在或路径已变更，请重新选择文件夹。",
+                code="WORKSPACE_FOLDER_CHANGED",
+            )
         return item
 
     async def list_workspace_folders(self, workspace_id: str) -> list[dict[str, Any]]:
@@ -207,19 +215,23 @@ class ConversationService:
 
     async def create_workspace_folder(self, workspace_id: str, root_path: str, name: str = "") -> dict[str, Any]:
         if not root_path.strip() or len(root_path) > 4096 or "\0" in root_path:
-            raise ValueError("请选择有效的文件夹。")
+            raise UserFacingError("请选择有效的文件夹。", code="WORKSPACE_FOLDER_INVALID")
         root = Path(root_path).expanduser()
         if not root.is_absolute():
-            raise ValueError("工作区文件夹须使用绝对路径。")
+            raise UserFacingError("工作区文件夹须使用绝对路径。", code="WORKSPACE_FOLDER_ABSOLUTE")
         root = root.resolve(strict=True)
         if not root.is_dir():
-            raise ValueError("工作区路径不是文件夹。")
+            raise UserFacingError("工作区路径不是文件夹。", code="WORKSPACE_NOT_DIRECTORY")
         self._policy.for_workspace(root)  # Preserve the existing filesystem-root boundary.
         if root == self._policy.workspace_root:
             return await self.get_workspace_folder(workspace_id, "")
         name = name.strip() or root.name
         if len(name) > 120:
-            raise ValueError("工作区名称不能超过 120 个字符。")
+            raise UserFacingError(
+                "工作区名称不能超过 120 个字符。",
+                code="WORKSPACE_NAME_LENGTH",
+                params={"max": 120},
+            )
         return await self.repository.create_workspace_folder(workspace_id, name, str(root))
 
     async def delete_workspace_folder(
@@ -229,20 +241,30 @@ class ConversationService:
         principal_id: str = "local-user",
     ) -> None:
         if await self.repository.check_workspace_access(workspace_id, principal_id) != "owner":
-            raise PermissionError("只有工作区所有者可以删除工作区。")
+            raise UserFacingError(
+                "只有工作区所有者可以删除工作区。",
+                code="WORKSPACE_OWNER_REQUIRED",
+                status_code=403,
+            )
         if not folder_id:
-            raise ValueError("默认工作区不能删除。")
+            raise UserFacingError("默认工作区不能删除。", code="DEFAULT_WORKSPACE_PROTECTED")
         # Read the registration, not the directory: a missing disk folder must
         # remain removable from the app. Terminal projections may still be cleaning up.
         await self.repository.get_workspace_folder(workspace_id, folder_id)
         for conversation in await self.repository.list_conversations(workspace_id):
             if conversation.get("folder_id") == folder_id:
                 if any(job["live"] for job in await self._list_jobs(workspace_id, str(conversation["id"]))):
-                    raise ConversationBusyError("工作区中有运行中的进程，请停止后再删除。")
+                    raise ConversationBusyError(
+                        "工作区中有运行中的进程，请停止后再删除。",
+                        code="WORKSPACE_PROCESS_ACTIVE",
+                    )
                 try:
                     self._require_inactive_conversation(str(conversation["id"]))
                 except ConversationBusyError:
-                    raise ConversationBusyError("工作区中有未结束的任务，请完成或停止后再删除。") from None
+                    raise ConversationBusyError(
+                        "工作区中有未结束的任务，请完成或停止后再删除。",
+                        code="WORKSPACE_TASK_ACTIVE",
+                    ) from None
         await self.repository.delete_workspace_folder(workspace_id, folder_id, principal_id)
 
     async def list_messages(self, conversation_id: str, workspace_id: str = "personal") -> list[MessageRecord]:

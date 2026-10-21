@@ -26,7 +26,9 @@ MaigoKite 是一个运行在你电脑上的个人 Agent，用来处理文件、�
 
 看图使用支持图片输入的聊天模型；生图需在工具设置中单独配置 Images 或 Responses 服务，不会自动借用聊天密钥。操作步骤见 [看图、生图与文件预览](docs/user-guide/Configuration.md#12-看图生图与文件预览)。
 
-侧栏“扩展”用于管理本地 `SKILL.md` 和 stdio MCP Server。Skill 提供任务指令，本身不执行代码；MCP 接入外部工具。保存后需显式应用配置，有运行或待处理交互时须先完成或取消任务。
+侧栏“扩展”用于管理本地 `SKILL.md` 和 stdio MCP Server。Skill 提供任务指令，本身不执行代码；MCP 接入外部工具。保存后点击应用；有运行或待处理交互时，先完成或取消任务。
+
+仓库还提供可单独安装的[天线计算扩展](extensions/antenna_design/README.md)，用于薄线模型求解和方向图输出。它不随主应用安装，目前尚未完成新增入口的运行验收，也不是完整的天线设计助手。接入方式见[配置指南](docs/user-guide/Configuration.md#81-天线计算与方向图)。
 
 修改默认目录、权限和扩展的操作步骤见 [配置指南](docs/user-guide/Configuration.md)。
 
@@ -95,7 +97,7 @@ Web `built` 地址为 `http://127.0.0.1:8080`，页面和 API 都由 Python 后�
 
 启动失败时先查看 [常见启动问题](docs/user-guide/Installation.md#3-常见启动问题)，包括 Electron 安装不完整、端口冲突和模型连接问题。
 
-这些命令仍依赖本机开发环境，不会生成自带 Python 等运行资源的独立安装包。发布限制见 [构建与发布指南](docs/deployment/ReleaseGuide.md)。
+独立安装包的进度见 [构建与发布指南](docs/deployment/ReleaseGuide.md)。
 
 ### 浏览器工具
 
@@ -128,17 +130,11 @@ Web `built` 地址为 `http://127.0.0.1:8080`，页面和 API 都由 Python 后�
 
 ## 当前状态
 
-项目还没有进入稳定发布阶段。使用前请留意这些限制：
+项目仍在开发，部分执行和界面改动尚未完成回归验证，真实模型与跨平台测试也不完整。
 
-- 执行内核和 UI 的部分新增功能尚未完成回归验证
-- 任务停止或失败后，不是所有情况都能从原位置恢复
-- 远程 MCP 操作不一定能被本地取消立即终止
-- 浏览器会话不能跨 Core 重启恢复
-- 手工记忆需同时开启文件夹和对话开关；自动提取和语义检索未实现，已验证范围及剩余分支见交付路线
-- 看图、生图和 SVG 预览已有本机协议与实际 Web 验证，真实模型服务及跨平台使用仍需验证
-- 子 Agent 目前只支持单层只读委派；后台、写入和递归委派尚未实现，持久工作流与手机远程也未完成
+停止或失败的任务不保证能从原位置恢复，浏览器页面不能跨后端重启保留。本地取消也不保证远端 MCP 操作立即停止；重新执行前请先确认实际结果。恢复规则见 [断线、停止与重启](docs/user-guide/Installation.md#4-断线停止与重启)。
 
-历史数据的恢复限制见 [断线、停止与重启](docs/user-guide/Installation.md#4-断线停止与重启)。功能进度与验证记录见 [交付路线与状态](docs/project/Roadmap.md)，版本变化见 [更新日志](docs/project/Changelog.md)。
+个人记忆目前需要手工维护，并同时开启文件夹和对话开关，不会自动提取或做语义检索。子 Agent 只支持单层只读委派；持久工作流和手机远程尚未完成。其他功能的进度、已知问题和测试范围见 [交付路线与状态](docs/project/Roadmap.md)，近期变化见 [更新日志](docs/project/Changelog.md)。
 
 ## 项目结构
 
@@ -147,6 +143,8 @@ Web `built` 地址为 `http://127.0.0.1:8080`，页面和 API 都由 Python 后�
 | `python/agent/api/` | FastAPI HTTP/WebSocket、系统凭证、工作区文件与 Git 查询 |
 | `python/agent/` | Python Core、Agent Runtime、Tools、权限和持久化 |
 | `web/` | Vue 前端、Electron |
+| `extensions/antenna_design/` | 独立安装的天线计算包与可选 MCP 服务 |
+| `experiments/` | 开发实验与兼容性评估，不参与应用默认启动 |
 | `scripts/` | Linux / PowerShell 成套安装、构建和启停入口 |
 
 ## 开发

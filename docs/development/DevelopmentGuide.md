@@ -10,6 +10,8 @@
 | `python/agent/api/` | FastAPI HTTP/WebSocket、系统凭证和工作区文件接口 |
 | `python/agent/` | 核心服务、运行时桥接、工具和业务持久化 |
 | `web/src/` | Vue；`electron/` 下为主进程/预加载层 |
+| `extensions/antenna_design/` | 可单独安装的天线计算包，自有依赖清单、锁文件与可选 MCP 入口 |
+| `experiments/mmana_compatibility/` | MMANA 开发采集、求解器对照与差异分析；不参与主应用启动 |
 | `config/`、`scripts/` | 运行配置、开发/构建/测试脚本 |
 | `docs/` | 按 [文档索引](../README.md) 分配权威范围 |
 
@@ -21,7 +23,7 @@
 
 不再需要 Go SDK、protoc 或 gRPC 绑定生成。Python 固定使用 3.14.x：`.python-version` 选择 3.14，`pyproject.toml` 限定 `>=3.14,<3.15`，不自动接受旧版或下一小版本。Node/npm 版本与依赖以 `web/package.json` 和锁文件为准。
 
-Python 依赖在根目录的 `pyproject.toml` 中声明，解析结果保存在根目录的 `uv.lock`。`python/` 只存放源码，不单独安装，也不维护另一份 requirements 清单。
+主应用 Python 依赖在根目录的 `pyproject.toml` 中声明，解析结果保存在根目录的 `uv.lock`。`python/` 只存放源码，不单独安装，也不维护另一份 requirements 清单。
 
 推荐从仓库根目录执行，按锁文件安装运行依赖到根 `.venv`：
 
@@ -34,6 +36,8 @@ uv sync --locked --no-default-groups --python 3.14
 `--no-dev` 仅针对 dependency group，不能替代去掉 `--extra dev`。默认不添加 `--all-extras`。
 
 `vectorstores` 只用于尚未接入聊天的实验适配器，默认不安装，也不表示知识库功能已经交付。维护者修改依赖后须运行 `uv lock` 更新锁文件；依赖锁定成功不代表运行或发布验收通过。
+
+天线扩展是独立 distribution，不在根项目的 extras 中。需要它时，进入 `extensions/antenna_design/`，按[包说明](../../extensions/antenna_design/README.md)安装；其 `engineering` / `mcp` 依赖使用该目录自己的 `uv.lock` 和虚拟环境。普通 setup 不安装求解器，根项目检查也不等于已检查或运行该扩展。实验脚本与可安装包分开维护，不能把旧数值对照当作新入口的运行结果。
 
 也可以让 `setup.sh` / `setup.ps1` 安装应用所需依赖。默认 Python 只安装运行依赖，显式 `setup dev` 才包含 Python 开发工具。脚本优先使用 uv；没有 uv 时，用可用的 Python 3.14.x 创建项目环境，再通过 pip 安装同一清单。pip 安装不保证使用 uv 锁定的版本，也不会清除先前安装的开发工具，脚本会明确提示；不另写依赖卸载器。解释器命令名也不必是 `python3`：
 

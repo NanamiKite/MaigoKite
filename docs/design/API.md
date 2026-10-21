@@ -1,9 +1,7 @@
 # MaigoKite API 设计
 
-> **状态**：当前有效
-> **架构版本**：v1
-> **基线核验**：2026-09-18；后续增量的验证范围见 [交付路线与状态](../project/Roadmap.md)。
-> **权威范围**：REST 资源、WebSocket 事件及兼容规则
+> 本文说明当前 REST 资源、WebSocket 事件和兼容规则，API 主版本为 v1。
+> 功能进度与实际测试范围见 [交付路线与状态](../project/Roadmap.md)。
 
 请求模型由 FastAPI 生成 OpenAPI，事件继续沿用稳定产品 DTO；本文档说明稳定资源与行为，不复制生成代码。
 
@@ -514,7 +512,7 @@ POST 接口为用户显式文件操作，限工作区所有者；不作为 Agent
 
 ### 3.8 GUI 交互与执行检查接口（2026-10-10）
 
-本节以 2026-10-10 的后端接口为基线，包含后续 GUI 接线说明。最初批次未修改前端，也未运行测试、类型检查、lint 或构建；不能用这份历史记录推断当前界面缺少接口。各项当前验证范围见 [交付路线与状态](../project/Roadmap.md)，未验收项仍单独标注。
+本节说明任务恢复、执行检查和运行中交互的现有接口。界面行为见 [前端设计](FrontendDesign.md)，测试范围见 [交付路线与状态](../project/Roadmap.md)。
 
 以下路径均以 `/api/v1/workspaces/{workspace_id}` 为前缀，沿用现有工作区访问校验：
 
@@ -542,12 +540,14 @@ POST 接口为用户显式文件操作，限工作区所有者；不作为 Agent
 
 首版恢复只接受保留的 checkpoint 中工具调用均为 `file_read / file_write` 的任务，以及这两种直接 `/tool` 命令。保留历史若包含旧回合的其他工具也会保守拒绝；命令、Browser、MCP 等不自动重放。恢复不等于重新授权：未批准的调用仍暂停等待，已批准的调用仍核对当前策略及审批 hash/version。文件内容匹配时可零写入核对；不同内容可能被再次覆盖，接口不提供外部编辑冲突保护、回滚或 exactly-once 保证。调用者应先检查目标文件，确认重放意图。
 
-接受事件 `task.resumed` 使用既有 AgentEvent DTO 和持久 event_id/sequence/occurred_at，payload 包含 `execution_resumed: true` 与本次 `trace_id`。API 收到该请求的确认才返回 202，后续事件透传原 WS 通道；并发拒绝请求不会冒领其他恢复请求的事件。执行与订阅分离：断线不取消；用户停止与 Core shutdown 都取消并等待同一根任务。UI 不接触 checkpoint/continuation，不新增前端状态机。当前批次只补后端接口与样例，验收状态见 [交付路线与状态](../project/Roadmap.md)。
+接受事件 `task.resumed` 使用既有 AgentEvent DTO 和持久 event_id/sequence/occurred_at，payload 包含 `execution_resumed: true` 与本次 `trace_id`。API 收到该请求的确认才返回 202，后续事件透传原 WS 通道；并发拒绝请求不会冒领其他恢复请求的事件。执行与订阅分离：断线不取消；用户停止与 Core shutdown 都取消并等待同一根任务。UI 不接触 checkpoint/continuation，不新增前端状态机。验收范围见 [交付路线与状态](../project/Roadmap.md)。
 
 **任务详情。** `tool_calls` 返回工具名、参数、结果、状态和时间；不暴露 checkpoint、运行时对象或 `continuation_json`。
 `projection` 包含 `plan / context / changes / summary / questions / usage / truncated`；问题包含 `options` 数组和已保存回答。快照在同一 Repository 锁内读取。最多 50 条工具调用、50 条审批和最近 100 条相关事件；工具结果、审批、文件差异与问题另外共用约 900 KB 的输出预算，过大条目省略并标记 `truncated`。`usage` 独立汇总该任务全部已保存的用量事件，不受最近 100 条活动限制；按 purpose 返回 `calls / failed_calls / reported_calls / tokens`，另有 `compactions`。它仅汇总已有回执，不将缺失字段填零，不计算价格；cached/reasoning 不额外加到总 token。`last_sequence` 是该任务的事件水位，不是整个会话所有任务的完整快照水位。截断时应补读既有事件历史，不能将省略的内容判为不存在。
 
-**结构化提问。** LangGraph 路径注册 `ask_user_question(title, options)`，选项为 `{label, recommended}`，也允许自由输入。使用原生 `interrupt / Command(resume=...)`，Repository 只保存产品问题、回答和审计。`question.requested` 携带 `question_id / tool_call_id / title / options / version`；`question.answered` 携带 `question_id / answer / version`。等待期间沿用已有任务状态 `waiting_approval`，UI 必须按问题事件/记录区分提问与权限审批，不能把提问渲染成“允许/拒绝”。回答验证工作区、主体、版本及 checkpoint；重复或过期回答返回 409。回答与审计、可见用户历史同事务保存，实际恢复仍看 checkpoint。进程重启恢复未在本批运行验证。
+**结构化提问。** LangGraph 路径注册 `ask_user_question(title, options)`。普通模型提问的选项为 `{label, recommended}`，也允许自由输入。产品返回的选项还可包含独立 `value`（缺省为 null）；安全确认用它保存 `safety.continue / safety.stop`，不能用翻译后的 label 代替决策标识，也不接受未知选择，详见上方安全设置。
+
+提问使用原生 `interrupt / Command(resume=...)`，Repository 保存问题、回答和审计。`question.requested` 携带 `question_id / tool_call_id / title / options / version`；`question.answered` 携带 `question_id / answer / version`。等待期间沿用任务状态 `waiting_approval`，UI 按问题事件/记录区分提问与权限审批，不能将提问渲染成“允许/拒绝”。回答验证工作区、主体、版本及 checkpoint；重复或过期回答返回 409。回答、审计与可见用户历史同事务保存，执行恢复仍看 checkpoint。新增安全决策标识的跨进程恢复尚未验收。
 
 GUI 的收件箱与活动卡片已接入问题选项、自由文本及“回答并继续”。提交当前展示的 version；
 成功、冲突或网络失败后重读快照和持久事件，不用 HTTP 202 冒充执行完成，也不自动重复回答。

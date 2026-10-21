@@ -1,9 +1,13 @@
 # 业余无线电天线工作流与求解器评估
 
-> 状态：窄 spike 已在技术选型层收口，2026-10-19。A01/A02、六例主频、23 项多导线/扫频参考完成对照；又补齐冻结接线的复电流幅相及五点材料表示诊断。采用未修改的 pymininec 与公开接口薄适配，不自研数值内核。正式工程验收 profile、方环缺失接点和更广材料/结构覆盖尚未完成，不是生产全面兼容认证。详见[工程评估](../../experiments/mmana_compatibility/ENGINEERING.md)及[实验范围](../../experiments/mmana_compatibility/README.md)。
-> 权威范围：可独立提取的天线领域包、工程契约、MMANA 兼容边界、方向图、材料、预算与求解器准入。MaigoKite 仅作为 adapter/reference host；其接入遵循 [AgentRuntime](AgentRuntime.md) 和 [MCP](../agent-capabilities/mcp/mcp-integration.md)，这些产品 API 不是领域包的运行前提。
+> 本文说明独立天线包的工程契约、MMANA 兼容范围、方向图、材料和预算，以及求解器选择。
+> 当前采用未修改的 pymininec，通过公开接口适配，不自研数值内核。MaigoKite 是可选宿主，接入遵循 [运行时设计](AgentRuntime.md) 和 [MCP 集成](../agent-capabilities/mcp/mcp-integration.md)；领域包不依赖这些产品 API。
 
-当前实现已推进到 [独立 `antenna-design` 工程入口](../../extensions/antenna_design/README.md)、可选 MCP Server 与宿主结果适配：显式 JSON/受限 MAA 输入、公开 solver API、复电流/原始远场、PNG/SVG、完整性清单、单进程预算，以及获准后导入当前对话目录和聊天图片展示。包不依赖主应用或 LangGraph；新接线仅完成静态检查，未运行行为/数值验收。需求访谈、累计预算、优化器和完整宿主领域工作流仍未交付，旧 spike 结果不能自动作为新入口的验收结果。
+当前实现包括 [独立 `antenna-design` 工程入口](../../extensions/antenna_design/README.md)、可选 MCP Server 和宿主结果适配。它接受显式 JSON 或受限 MAA 输入，通过公开 solver API 计算，保存复电流、原始远场、PNG/SVG 和完整性清单，并限制单次计算进程的运行时间。经批准后，宿主可将结果导入当前对话目录并展示图片。包不依赖主应用或 LangGraph；新增入口只完成静态检查，尚未运行行为和数值验收。
+
+2026-10-19 的求解器评估已完成 A01/A02、六例主频和 23 项多导线/扫频参考的对照，也检查了冻结接线的复电流幅相及五点材料表示。这些结果支持继续采用 pymininec，但正式工程验收 profile、方环缺失接点和更广的材料/结构覆盖尚未完成，不能称为全面兼容认证。详情见[工程评估](../../experiments/mmana_compatibility/ENGINEERING.md)及[实验范围](../../experiments/mmana_compatibility/README.md)。
+
+需求访谈、累计预算、优化器和完整设计工作流尚未交付。已有数值实验不等于新增 CLI、MCP 或主应用接入已经验收。
 
 补充判断：四变体总场 RMS 主要受 CSV 的 0.01 dB 导出步长影响；候选同样保留两位小数后有 98.5%～100% 的有效样本与参考相同。该量级不构成继续修改内核或自研求解器的依据。保留电流/电抗差异和未覆盖语义，不把当前模型的方向图接近等同于全面 MMANA 兼容。
 

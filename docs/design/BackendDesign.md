@@ -1,6 +1,6 @@
 # 后端设计
 
-> 权威范围：Python 后端的入口、职责和资源所有权。Go Gateway 与内部 gRPC 已移除。
+> 本文说明 Python 后端的入口、模块职责和资源所有权。当前不使用 Go Gateway 或内部 gRPC。
 > 执行机制见 [智能体运行时设计](AgentRuntime.md)，对外契约见 [API 设计](API.md)，存储见 [数据库设计](Database.md)。
 
 ## 1. 单进程调用链
@@ -33,13 +33,21 @@ Vue Web / Electron Renderer
 
 协议层不能运行第二套 Agent Loop、审批状态机、续接数据或事件仓库。`AgentCore` 与 Repository 的现有命令被直接复用，不为去掉 RPC 再造 Service/Manager 框架。
 
-Core 的扩展数据归入 `extensions.ExtensionCatalog`：已应用配置、ToolRegistry、Skill 目录、MCP 连接及临时凭证由同一个快照持有。目录自身负责凭证筛选、健康连接复用、工具重新发现及候选连接状态；Core 仍负责运行准入、准备候选快照、同时切换目录与 graph，以及按顺序关闭旧资源。失败时只清理候选新建的连接，不关闭复用的现有连接；不引入通用插件生命周期。
+API 调用的业务对象分工如下。它们共享同一个 Repository，不各自维护数据库或执行状态：
 
-会话与工作区管理通过 `core.conversations`（`ConversationService`）执行：API 只做传输与凭证准备，产品层负责名称、模型/思考配置、子 Agent 模型选择、目录与权限校验。Core 原有会话方法仅保留签名兼容的薄转发，新调用直接使用服务。服务通过窄回调检查活跃运行、清理会话 checkpoint 和查询进程，回调在调用时解析当前 Runtime，避免扩展重载后继续指向已关闭实例；根任务、资源关闭与扩展切换仍由 Core/Runtime 持有。Repository 的锁、SQL 与业务事务未改变。
+| 对象 | 职责与边界 |
+| --- | --- |
+| `core.conversations`（`ConversationService`） | 管理会话、工作区登记、默认权限及模型/思考/子 Agent 设置校验；通过回调检查活跃运行、查询进程和清理 checkpoint，不持有 Runtime |
+| `core.models`（`ChatModelRuntime`） | 模型配置、默认模型、连接验证、内存凭证与用量查询 |
+| `core.memories`（`FolderMemories`） | 记忆内容和敏感信息检查、文件夹归属与开关；路径检查复用会话服务，写入及审计交给 Repository，不缓存记忆或模型请求 |
+| `ExtensionCatalog` | 持有已应用配置、ToolRegistry、Skill 目录、MCP 连接及临时凭证；负责凭证筛选、连接复用和工具发现 |
+| `AgentCore` | 运行准入、任务协调、扩展目录与 graph 同时切换，以及资源关闭顺序 |
 
-模型配置、凭证同步与统计接口直接调用现有 `core.models`；记忆管理接口调用 `core.memories`（`memory.notes.FolderMemories`）。后者集中保存内容校验、敏感信息拒绝、文件夹作用域和开关管理，路径解析复用 ConversationService 的工作区检查，写入与审计仍由 Repository 提交。仓库中无调用方的六个 Core 模型转发方法已移除，模型配置读写/列表/删除/默认值/连接验证统一使用 `core.models`；仍有调用方的入口保留显式委托。记忆对象不缓存记忆、开关或模型请求，不接入预留的 MemorySystem。
+新的会话调用直接使用 `core.conversations`，旧 Core 会话入口保留薄转发。涉及 Runtime 的回调在调用时取得当前实例，避免扩展重载后继续使用已关闭的对象。工作区删除需要协调活跃任务和进程，仍通过 Core 检查。
 
-聊天、审批恢复、中断恢复和回答提问共用 `_wait_for_run`，统一消费事件、等待根任务及传播调用方取消。Core 的运行准入、扩展原子切换和资源关闭顺序不变；涉及活跃任务/进程的工作区删除仍保留在协调入口中。
+扩展更新先准备候选目录与连接，成功后再切换。失败时只清理候选新建的连接，不关闭复用的健康连接。聊天、审批恢复、中断恢复和回答提问共用 `_wait_for_run`，消费事件、等待根任务，并传播调用方取消；接口和 Core 的关闭顺序见第 4 节。
+
+可选领域集成位于 `integrations/`。当前 `antenna.py` 只解释版本化 MCP 结果、校验资源并按权限导入工作区，不导入天线求解包。求解器和数值依赖在独立的 `extensions/antenna_design/` 中安装，不进入普通聊天依赖。协议见 [MCP 结果资源适配](../agent-capabilities/mcp/mcp-integration.md#31-天线结果资源适配)。
 
 ## 3. 凭证与访问边界
 
@@ -79,7 +87,7 @@ API/ASGI 复用 FastAPI、Uvicorn 和 AnyIO，系统凭证复用 keyring；MCP�
 
 Web 与 Electron 继续共用相对路径构建产物。HTTP 返回的入口 HTML 补充 `<base href="/">`，让直接打开 `/chat/<id>` 时资源仍从站点根目录加载；磁盘文件不改写，Electron `file://` 保持相对路径。不存在的资源与 API（含 HEAD 请求）不回退为 SPA 页面。Windows 构建参数与共享脚本一致，不再接受 `go` 目标。
 
-2026-10-12 迁移落码时未执行运行验收；2026-10-15 已补当前 Python HTTP/WS、真实 Core 恢复与 Web 定向验收，后续图片增量也有独立通过/失败记录，见 [当前验收状态](../project/Roadmap.md#当前验收状态)。这不是全部路由或发布验收；独立桌面 Python runtime bundling、手机远程认证和平台凭证迁移仍未完成。不能把旧 Go 链路记录当成新接口证据。
+Python HTTP/WS、Core 恢复与 Web 主路径已有定向验收，后续模块调整和天线集成尚未完成行为回归。完整范围见 [当前验收状态](../project/Roadmap.md#当前验收状态)。独立桌面运行资源打包、手机远程认证和平台凭证迁移仍未完成；旧 Go 链路的测试不能作为现有接口的验证结果。
 
 ## 6. 保留但未接入的基础设施
 
@@ -99,6 +107,6 @@ Web 与 Electron 继续共用相对路径构建产物。HTTP 返回的入口 HTM
 
 向量适配使用预计算向量契约，文本 Retriever 使用已配置 embedding 的 SDK VectorStore；两者不能直接互换，本轮不增加桥接框架。FAISS/Chroma 的距离与 Qdrant 的相似度也不是统一分数；SDK Retriever 不提供分数时返回 `None`，不造一个 `0.0`。
 
-向量/检索依赖仅放在 `vectorstores` 可选组，未进入默认依赖。本轮同步了依赖锁文件，没有安装这些后端、启动服务或调用模型。预留类明确失败是防止误用，不是能力交付；接入之前仍须完成实际工作流、数据归属、权限、资源关闭与取消边界，以及用户批准的验收。
+向量/检索依赖仅放在 `vectorstores` 可选组，未进入默认依赖。这些适配器尚无实际后端验收结果。预留类明确失败是为了防止误用；接入之前仍须完成实际工作流、数据归属、权限、资源关闭和取消处理，并通过相应验收。
 
 适配依据是现有 SDK 的公开接口：[LangChain FAISS](https://github.com/langchain-ai/langchain-community/blob/main/libs/community/langchain_community/vectorstores/faiss.py)、[Chroma Collection](https://github.com/chroma-core/chroma/blob/main/chromadb/api/models/Collection.py)、[Qdrant async API](https://qdrant.tech/documentation/tutorials-develop/async-api/)。不实现自有向量检索或排序引擎。

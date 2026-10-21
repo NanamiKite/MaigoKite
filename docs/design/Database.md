@@ -1,9 +1,7 @@
 # MaigoKite 数据库设计
 
-> **状态**：当前有效 + 规划中（逐节标注）
-> **架构版本**：v1
-> **检查记录**：2026-09-18 的结果保留为历史记录；后续改动的测试范围见 [路线图](../project/Roadmap.md#当前验收状态)。
-> **权威范围**：当前持久化事实、归属、事务债务和目标演进
+> 本文说明当前业务表、数据归属和事务边界，尚未实现的部分另行标注。
+> 数据库升级与恢复的测试范围见 [路线图](../project/Roadmap.md#当前验收状态)。
 
 建表和旧库增量升级 SQL 见 `python/agent/sqlite_schema.py`，业务查询和事务见 `python/agent/repository.py`；本文不把目标表写成已经存在的迁移。
 
@@ -18,7 +16,7 @@
 
 当前 Repository 采用单进程写入模型。不能仅凭接口抽象，就推断它已支持多实例并发或 PostgreSQL。
 
-Schema helper 使用 Repository 创建的同一个连接，不自行 commit、close 或持有锁。连接参数、升级语句顺序、提交点与 Repository 业务方法不变；审批决定、授权复用、任务与审计更新没有拆成独立 Store。本次整理不改变表结构或迁移已有用户数据。
+`sqlite_schema.py` 使用 Repository 创建的连接，不自行 commit、close 或持有锁。Repository 负责连接、锁和提交；审批决定、授权复用、任务与审计更新不拆成独立 Store。
 
 会话级子 Agent 存储增量（新库设置/调用已验收，旧库迁移/子图恢复未覆盖）：启动迁移为 conversations 增加
 `max_subagent_calls DEFAULT 0`、`max_concurrent_subagents DEFAULT 1`、`subagent_model_ids_json DEFAULT '[]'`；新任务准入事务复制三项设置到 tasks，
@@ -46,8 +44,9 @@ Schema helper 使用 Repository 创建的同一个连接，不自行 commit、cl
 |---|---|
 | `workspaces` | `id / name / kind / created_at / updated_at` |
 | `workspace_memberships` | `(workspace_id, user_id)` 主键与 `role`；当前主要用于访问检查 |
-| `conversations` | 工作区、标题及 `title_source`、`model_id`、权限模式、响应档位和时间 |
-| `messages` | 会话、`role / content / created_at`；没有显式 sequence/词元列 |
+| `workspace_folders` | 工作区下登记的 `name / root_path`；同工作区根路径唯一，删除登记不删除磁盘目录 |
+| `conversations` | 工作区、`folder_id`、标题及 `title_source`、`model_id`、权限模式、思考/记忆/子 Agent 设置、分岔来源和时间；旧响应档位字段仍保留 |
+| `messages` | 会话、`role / content / attachments_json / created_at`；没有显式 sequence/词元列 |
 | `user_preferences` | `(workspace_id, subject_user_id, key)` 唯一，保存非敏感 JSON |
 | `workspace_settings` | `(workspace_id, key)` 唯一，保存非敏感 JSON |
 | `tasks` | 工作区/会话、输入、状态、最后错误、版本、时间、可选提交指纹 `request_hash`，以及本次输出契约 `output_schema_json` 与已校验结果 `output_result_json` |
@@ -56,7 +55,11 @@ Schema helper 使用 Repository 创建的同一个连接，不自行 commit、cl
 | `approvals` | 任务/工具调用、principal、参数摘要值、风险、版本、过期和决定时间；`reuse_scope_json / authorization_scope / authorization_expires_at / authorization_revoked_at` 保存有限期窄授权 |
 | `audit_events` | 工作区、actor、action、resource、result、脱敏详情和时间 |
 | `todos` | 工作区内的文本、完成状态和时间 |
+| `questions` | 任务/工具调用、提问主体、标题、`options_json`、状态、版本与回答；工具调用 ID 唯一，等待回答不等于权限授权 |
+| `task_inputs` | 任务内逐步插话的内容、状态、时间与幂等键；`(task_id, idempotency_key)` 唯一 |
 | `user_memories` | 工作区 + subject user + `folder_scope`、类别、内容、来源、置信度和时间；旧记录归属为 NULL，不自动归入默认目录 |
+
+安全确认复用 `questions`，不增加审批表或新的执行状态。新选项在 `options_json` 中保存稳定 `value` 和可读 `label`；回答保存 `safety.continue / safety.stop`，可见历史保存标签。旧无标识记录只按原确切回答兼容读取，不改写原 checkpoint。
 
 User Preference 与用户记忆不合并：前者是显式产品设置，后者是用户可管理的长期信息。用户记忆支持手动 CRUD 和关键词查询；文件夹与对话开关同时开启时，手工条目可在预算内附带到当前模型请求，不写入消息或 checkpoint。双开关、遗忘和 checkpoint 分离已通过定向验收；自动提取和向量嵌入检索未实现。选择与隔离规则见 [记忆与检索边界](../agent-capabilities/memory/memory-system.md)，剩余门禁见 [当前验收状态](../project/Roadmap.md#当前验收状态)。
 

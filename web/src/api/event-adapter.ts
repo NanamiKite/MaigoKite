@@ -199,11 +199,13 @@ export function mapGatewayEvent(event: AgentEvent): GatewayEvent[] {
           ? p.options.flatMap((option) => {
               const value = object(option)
               return typeof value.label === 'string'
-                ? [{
-                    label: value.label,
-                    value: typeof value.value === 'string' ? value.value : undefined,
-                    recommended: value.recommended === true,
-                  }]
+                ? [
+                    {
+                      label: value.label,
+                      value: typeof value.value === 'string' ? value.value : undefined,
+                      recommended: value.recommended === true,
+                    },
+                  ]
                 : []
             })
           : [],

@@ -1,7 +1,7 @@
 # 智能体运行时设计
 
-> 权威范围：聊天执行、工具编排、审批桥接、上下文与运行资源的边界。
-> 文档归并日期：2026-10-09。后续更新描述当前代码路径；交付与验证记录见 [交付路线与状态](../project/Roadmap.md)，不以新增代码或历史测试代替验收。
+> 本文说明聊天执行、工具编排、审批、上下文和运行资源如何协作。
+> 以下描述当前实现；已测试的范围与已知问题见 [交付路线与状态](../project/Roadmap.md)。
 
 ## 1. 执行入口与迁移范围
 
@@ -18,23 +18,27 @@ ExecutionEngine、TaskManager、IChatProvider/ChatAdapter 和执行后端开关�
 2026-10-10 按用户要求先完成源码切换，随后获准补做前四批定向后端验收；实际范围与结果见
 [交付路线与状态](../project/Roadmap.md)，不外推为全量发布验收。
 
-运行时集成按四类职责维护：运行调用、界面事件映射、审批桥接、产品持久投影。`langgraph_runtime.py` 保留 graph 创建、准入/恢复与权限桥接；`runtime/product_tools.py` 承接产品工具 middleware；`runtime/projection.py` 持有单次运行的流式文本解析、推理展示、工具结果投影和事件去重。后者的终态标志仅表示 UI 终态已投递，不作为任务状态或恢复依据。模型协议、工具调度、检查点、暂停恢复和上下文摘要仍由现有成熟组件承担。
+MaigoKite 只维护产品接入部分。模型协议、工具调度、检查点、暂停恢复和上下文摘要由现有 SDK 与运行时承担：
 
-共享请求 `RuntimeRunRequest`、父运行上下文 `RunContext` 和只读子运行上下文 `ChildContext` 定义在 `runtime/run_context.py`。上下文不再持有整个 Runtime：父上下文直接引用同一个 Repository 和单次运行投影，子上下文从父上下文取得 Repository；这些是借用的资源，不由工具关闭。原 Runtime 模块仍导出请求类型，子 Agent 模块仍导出子上下文类型，保留原导入路径。工具权限快照不复制展示标志；聊天和工具事件字段不变，结构化结果仍由 Repository 的原有事务提交。
+| 模块 | 负责的内容 | 不负责的内容 |
+| --- | --- | --- |
+| `runtime/langgraph_runtime.py` | 创建与缓存 graph、运行准入、HITL 批次匹配、`Command(resume=...)`、根任务及 checkpoint 生命周期 | 第二套 Agent Loop 或续接状态机 |
+| `runtime/product_tools.py` | 参数规范化、调用拦截、执行前权限重查、审批记录匹配及审计/事件投影 | 自定义权限规则、活跃任务或检查点存储 |
+| `runtime/projection.py` | 每轮流式文本、公开思考、工具结果的界面映射与事件去重 | 执行状态和恢复；终态标志只表示 UI 终态已投递 |
+| `runtime/prompt_safety.py` | 主模型调用前的审查，复用 SafetyReviewer、设置/凭证回调及原生 `interrupt` | 独立审批状态机或运行资源生命周期 |
+| `runtime/run_context.py` | `RuntimeRunRequest`、`RunContext`、`ChildContext` 等请求与临时上下文 | 依赖容器或运行时所有者 |
 
-`ProductToolMiddleware` 显式复用 PermissionManager、工具目录、Repository 和最新执行元数据回调，承担参数规范化、执行前权限重查、审批回执匹配、工具调用拦截及审计/事件投影；权限规则仍由 PermissionManager 判断，审计写入仍由 Repository 提交。Runtime 通过明确回调调用原生 `interrupt`，继续持有 HITL 批次匹配、`Command(resume=...)`、根任务、图缓存和 checkpoint 生命周期。middleware 不持有活跃任务或另一套审批状态机，其顺序及图节点名 `_ProductToolMiddleware` 保持不变。
+`ProductToolMiddleware` 使用 PermissionManager 判断权限，使用 Repository 保存审计，通过明确回调请求 Runtime 中断。图节点名 `_ProductToolMiddleware` 与 middleware 顺序保持稳定，便于恢复已有检查点。ToolRegistry 只提供发现、元数据和权限信息，不提供另一条 invoke 调度路径。
 
-上下文预算与记忆注入直接使用 Repository/RunProjection，不访问 Runtime；子 Agent 在图装配时取得模型目录、模型解析、只读图工厂和最新执行元数据回调，沿用已有模型服务与客户端生命周期，不关闭共享资源。子 Agent 仍只读、共享父任务预算、由原 TaskGroup 和并发信号量管理；父任务的可复用授权不传给子 Agent。推理展示仍使用同一投影对象，子 Agent 文本仍通过 `models/reasoning.py` 的公开函数提取。
+父运行上下文引用同一个 Repository 和单次 `RunProjection`，子上下文从父上下文取得 Repository；上下文不持有整个 Runtime，工具也不关闭借用的资源。请求类型仍从原 Runtime 模块导出，子上下文仍从子 Agent 模块导出。工具权限快照不复制界面展示标志，结构化结果由 Repository 提交。
 
-Core 保留 ToolRegistry、PermissionPolicy、Repository 等产品能力；ToolRegistry 只做发现和元数据，不再提供另一个 invoke 执行入口。
-
-提示词安全审查由 `runtime/prompt_safety.py` 中的 `PromptSafetyMiddleware` 完成，显式复用 Repository、SafetyReviewer、设置/凭证回调和当前运行的事件投影，不反向调用 Runtime 私有方法。它在原 middleware 顺序中执行，仍使用原生 `interrupt` 处理用户确认；不持有 graph、根任务或独立审批状态。工具执行拦截和授权重查由 ProductToolMiddleware 承担，HITL 批次匹配与审批恢复仍由 Runtime 桥接。
+上下文预算和记忆注入直接使用 Repository/RunProjection。子 Agent 在图装配时取得模型目录、解析函数、只读图工厂和最新执行元数据回调，借用共享模型客户端；它只读、共享父任务预算，由 TaskGroup 和并发信号量管理，不继承父任务的可复用授权。公开文本通过 `models/reasoning.py` 提取，不另建一套解析和显示逻辑。
 
 聊天的 `thinking` 是独立于输出预算的会话设置：保存和开始运行时均按模型能力校验，切换模型默认清空，
 空值不发推理参数。原 `response_mode` 仅保留旧客户端兼容字段，不再将 fast/balanced/thorough 映射到
 max_tokens。思考配置进入模型/图缓存身份，但不重建 Runtime。原生 SDK 负责 Responses、Anthropic
 adaptive/effort 和 Ollama think；元数据客户端由 Core 模型生命周期持有并关闭，不读取第三方私有字段。
-能力来源与未接通接口的边界见 [API：会话思考控制](API.md#36-设置模型和凭证引用)。未运行本批行为测试或真实 Provider 验收。
+能力来源与未接通接口的边界见 [API：会话思考控制](API.md#36-设置模型和凭证引用)，真实 Provider 的验证范围见路线图。
 
 ## 2. 状态与资源所有权
 

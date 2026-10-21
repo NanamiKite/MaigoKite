@@ -7,7 +7,10 @@ import { revealRailNode } from '@/utils/rail-navigation'
 import { overlayPanel } from '@/utils/layout-media'
 import { pendingItem } from '@/utils/rail-presentation'
 export function useShortcuts() {
-  const ui = useUIStore(), session = useSessionStore(), inbox = useInboxStore(), router = useRouter()
+  const ui = useUIStore(),
+    session = useSessionStore(),
+    inbox = useInboxStore(),
+    router = useRouter()
   let nodeIndex = -1
   async function newPage() {
     const item = await session.createSession()
@@ -17,7 +20,8 @@ export function useShortcuts() {
     if (event.isComposing || event.defaultPrevented) return
     const target = event.target as HTMLElement | null
     const editing = Boolean(target?.closest('input,textarea,select,[contenteditable="true"]'))
-    const modifier = event.ctrlKey || event.metaKey, key = event.key.toLowerCase()
+    const modifier = event.ctrlKey || event.metaKey,
+      key = event.key.toLowerCase()
     // Native dialogs own their keyboard/focus scope; no background decisions.
     if (document.querySelector('dialog[open]')) return
     if (modifier && ['k', 'j', 'n', 'b', '.', '/'].includes(key)) {
@@ -42,16 +46,25 @@ export function useShortcuts() {
     if (editing || modifier || event.altKey) return
     const drawerScope = ui.drawerOpen && ui.drawerTab === 'pending'
     if (target?.closest('#work-drawer') && !drawerScope) return
-    const scope = document.querySelector<HTMLElement>(drawerScope ? '#work-drawer' : 'main.main-content')
+    const scope = document.querySelector<HTMLElement>(
+      drawerScope ? '#work-drawer' : 'main.main-content',
+    )
     if (scope?.closest('[inert]') || target?.closest('#session-sidebar')) return
     if (['y', 'n'].includes(key)) {
-      const pending = inbox.items.find(item => pendingItem(item) && item.mode === 'approval' &&
-        (drawerScope || item.sessionId === session.activeSessionId) &&
-        scope?.querySelector(`[data-await="${CSS.escape(item.id)}"]`))
+      const pending = inbox.items.find(
+        (item) =>
+          pendingItem(item) &&
+          item.mode === 'approval' &&
+          (drawerScope || item.sessionId === session.activeSessionId) &&
+          scope?.querySelector(`[data-await="${CSS.escape(item.id)}"]`),
+      )
       if (pending) {
         event.preventDefault()
-        scope?.querySelector<HTMLButtonElement>(
-          `[data-await="${CSS.escape(pending.id)}"] [data-verdict="${key === 'y' ? 'allow' : 'deny'}"]:not(:disabled)`)?.click()
+        scope
+          ?.querySelector<HTMLButtonElement>(
+            `[data-await="${CSS.escape(pending.id)}"] [data-verdict="${key === 'y' ? 'allow' : 'deny'}"]:not(:disabled)`,
+          )
+          ?.click()
       }
     }
     if (key === '[' || key === ']') {

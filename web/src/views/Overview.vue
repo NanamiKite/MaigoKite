@@ -56,6 +56,9 @@ function statusLabel(value?: string) {
 function folder(id?: string) {
   return workspace.folders.find((item) => item.id === (id || ''))?.name || t('未选择工作区')
 }
+function sessionTitle(id: string) {
+  return session.sessions.find((item) => item.id === id)?.title || t('未命名对话')
+}
 function operation(id: string) {
   const turn = run.turns[id]?.at(-1)
   return (
@@ -127,7 +130,8 @@ async function create() {
         <IconSymbol
           name="compose"
           :size="18"
-        />{{ creating ? $t('正在创建') : $t('新建对话') }}
+        />
+        {{ creating ? $t('正在创建') : $t('新建对话') }}
       </button>
     </header>
     <p
@@ -135,8 +139,8 @@ async function create() {
       class="record-error"
       role="alert"
     >
-      {{ session.error
-      }}<button
+      {{ session.error }}
+      <button
         class="secondary-button"
         :disabled="session.isLoading"
         @click="refresh"
@@ -148,7 +152,9 @@ async function create() {
       v-if="session.isLoading && !session.sessions.length"
       class="record-loading"
     >
-      <InkLoader /><InkLoader /><InkLoader />
+      <InkLoader />
+      <InkLoader />
+      <InkLoader />
     </div>
     <section
       v-if="pending.length"
@@ -167,12 +173,15 @@ async function create() {
         <Pulse
           state="waiting"
           :size="14"
-        /><span class="record-copy"><strong>{{ pendingCopy(item).action }}</strong>
-          <small>{{
-            session.sessions.find((entry) => entry.id === item.sessionId)?.title ||
-              $t('未命名对话')
-          }}
-            · {{ pendingCopy(item).target }}</small></span><IconSymbol
+        />
+        <span class="record-copy">
+          <strong>{{ pendingCopy(item).action }}</strong>
+          <small>
+            {{ sessionTitle(item.sessionId) }}
+            · {{ pendingCopy(item).target }}
+          </small>
+        </span>
+        <IconSymbol
           name="chevron"
           :size="14"
         />
@@ -183,8 +192,8 @@ async function create() {
       class="record-error"
       role="alert"
     >
-      {{ inbox.error
-      }}<button
+      {{ inbox.error }}
+      <button
         class="secondary-button"
         @click="inbox.refresh"
       >
@@ -207,7 +216,12 @@ async function create() {
         <Pulse
           :state="run.pulse(item.id)"
           :size="14"
-        /><span class="record-copy"><strong>{{ item.title || $t('未命名对话') }}</strong><small>{{ operation(item.id) }}</small></span><span class="record-status">{{ statusLabel(item.status) }}</span>
+        />
+        <span class="record-copy">
+          <strong>{{ item.title || $t('未命名对话') }}</strong>
+          <small>{{ operation(item.id) }}</small>
+        </span>
+        <span class="record-status">{{ statusLabel(item.status) }}</span>
       </router-link>
     </section>
     <section
@@ -237,8 +251,15 @@ async function create() {
         <IconSymbol
           name="review"
           :size="18"
-        /><span class="record-copy"><strong>{{ item.title || $t('未命名对话') }}</strong><small>{{ folder(item.folder_id) }} ·
-          <time :datetime="item.updated_at">{{ updated(item.updated_at) }}</time></small></span><span class="record-status">{{ statusLabel(item.status) }}</span>
+        />
+        <span class="record-copy">
+          <strong>{{ item.title || $t('未命名对话') }}</strong>
+          <small>
+            {{ folder(item.folder_id) }} ·
+            <time :datetime="item.updated_at">{{ updated(item.updated_at) }}</time>
+          </small>
+        </span>
+        <span class="record-status">{{ statusLabel(item.status) }}</span>
       </router-link>
       <p
         v-if="!recent.length"
@@ -275,8 +296,8 @@ async function create() {
         class="record-error"
         role="alert"
       >
-        {{ workspace.error
-        }}<button
+        {{ workspace.error }}
+        <button
           class="secondary-button"
           @click="workspace.load"
         >

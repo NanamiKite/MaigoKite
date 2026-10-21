@@ -24,7 +24,7 @@ Linux/Windows 的 `start desktop built` 从源码目录启动，使用本地 Pyt
 
 环境安装与构建命令见 [开发指南](../development/DevelopmentGuide.md)。[GitHub Actions CI](../../.github/workflows/ci.yml) 已配置 Python/前端检查与 Linux/Windows 源码构建，结果以对应提交的 Actions 记录为准。具体覆盖范围见 [测试与验收](../testing/TestPlan.md#github-actions)；独立安装包、桌面启动和真实模型仍须按下述要求验收。
 
-Python 构建与安装统一读取根目录的 `pyproject.toml`，依赖锁定使用根目录的 `uv.lock`，不从 `python/` 安装另一套分发包。第一批轻量化只修改了入口和锁文件，当时没有执行构建或安装包验收，也没有完成 runtime bundling。
+主应用 Python 构建与安装读取根目录的 `pyproject.toml` 和 `uv.lock`，不从 `python/` 安装另一套分发包。独立的 `extensions/antenna_design/` 使用自己的清单和锁文件，不随普通 setup 或桌面构建安装；它的 CLI/MCP 分发也尚未完成跨平台运行验收。数值实验结果不能代替安装或宿主接入测试。
 
 ## 2. 个人桌面发布闭环
 

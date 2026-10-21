@@ -31,7 +31,7 @@ export function useDesktopBridge() {
         if (!document.hasFocus())
           void desktop
             .notify({
-              title: t("{0} · 等你", [settings.profile.assistantName]),
+              title: t('{0} · 等你', [settings.profile.assistantName]),
               body: item.title,
               sessionId: item.sessionId,
               approvalId: item.mode === 'approval' ? item.id : undefined,
@@ -69,10 +69,10 @@ export function useDesktopBridge() {
                 title: settings.profile.assistantName,
                 body:
                   turn.status === 'completed'
-                    ? t("任务已完成。")
+                    ? t('任务已完成。')
                     : turn.status === 'failed'
-                      ? t("任务失败。")
-                      : t("任务已停止。"),
+                      ? t('任务失败。')
+                      : t('任务已停止。'),
                 sessionId: turn.sessionId,
               })
               .catch(() => undefined)
@@ -86,9 +86,11 @@ export function useDesktopBridge() {
       api.onCapsule(async (request) => {
         let queued: { sessionId: string; content: string; time: number } | undefined
         try {
-          let id = request.newSession ? undefined : session.sessions.find(
-            (item) => !item.archived && (item.folder_id || '') === workspace.selectedId,
-          )?.id
+          let id = request.newSession
+            ? undefined
+            : session.sessions.find(
+                (item) => !item.archived && (item.folder_id || '') === workspace.selectedId,
+              )?.id
           if (!id) id = (await session.createSession()).id
           queued = { sessionId: id, content: request.content, time: Date.now() }
           capsuleRequests.push(queued)
@@ -102,7 +104,7 @@ export function useDesktopBridge() {
           void api
             .notify({
               title: settings.profile.assistantName,
-              body: t("速记未能发送，请打开主窗口重试。"),
+              body: t('速记未能发送，请打开主窗口重试。'),
             })
             .catch(() => undefined)
         }

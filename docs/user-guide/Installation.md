@@ -23,7 +23,7 @@
 
 - **设置保存 404**：确认连接的是当前 Python 后端，再检查前端代理、服务版本和启动状态。不必反复填写凭证。
 - **Python 不可用**：检查实际使用的解释器和依赖。Python 后端在 Core 初始化完成后提供 HTTP `/health`，默认地址为 `http://127.0.0.1:8080/health`。
-- **Electron 安装不完整**：更新仓库后运行 `bash scripts/setup.sh electron`（Windows：`.\scripts\setup.ps1 electron`），再用 `start desktop built` 启动。重复编译不能补齐 Electron。新机器应先按开发指南安装受支持的 Node/npm，再执行完整 setup。
+- **Electron 安装不完整**：更新仓库后运行 `bash scripts/setup.sh electron`（Windows：`.\scripts\setup.ps1 electron`）修复依赖，再重新执行 `build desktop` 和 `start desktop built`。仅编译不能补齐 Electron，仅修复依赖也不能更新旧构建。新机器应先按开发指南安装受支持的 Node/npm，再执行完整 setup。
 - **端口冲突**：检查是否同时启动了开发脚本和 Electron 管理的服务，再检查配置中的端口。
 - **模型连得上却不能回答/调用工具**：确认真实模型 ID、模型提供方协议和服务端能力。HTTP 200 不代表响应中有正确的 completion。
 - **LM Studio/兼容服务端点错误**：填写服务的 OpenAI-compatible 基础地址，通常包含 `/v1`；已有 `/v1` 时不会重复追加。不要填写完整 `/chat/completions` 地址，应用不保证剥离这个后缀，具体规则见模型接入设计。模型 ID 也不能用显示名称代替。

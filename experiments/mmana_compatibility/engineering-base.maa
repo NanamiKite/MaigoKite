@@ -1,0 +1,20 @@
+Engineering reference base - 20m bare dipole
+*
+7.1
+***Wires***
+1
+-10,0,5,10,0,5,0.0005,-1
+***Source***
+1,1
+w1c,0,1
+***Load***
+0,1
+***Segmentation***
+800,80,2.0,1
+***G/H/M/R/AzEl/X***
+0,0,0,50,120,60,0
+###Comment###
+Free space, lossless base only. Follow ENGINEERING.md for each separate condition.
+Z coordinates already include 5m height. Add height must remain zero.
+Use GAL native automatic segmentation; no required pulse count.
+This input has not yet been opened or calculated in GAL. Not a construction design.

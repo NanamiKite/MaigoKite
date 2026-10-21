@@ -1,0 +1,3 @@
+# The standalone Windows collector supports Python 3.10, unlike the main Agent.
+extend = "../../../pyproject.toml"
+target-version = "py310"

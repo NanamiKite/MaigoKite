@@ -36,6 +36,10 @@ const splitLines = (value: string) =>
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
+function setResultAdapter(value: string) {
+  if (server.value && (value === 'none' || value === 'antenna_design'))
+    server.value.result_adapter = value
+}
 function editServer(item?: MCPConfiguration) {
   server.value = item
     ? JSON.parse(JSON.stringify(item))
@@ -50,6 +54,7 @@ function editServer(item?: MCPConfiguration) {
         secret_env: [],
         enabled_tools: null,
         disabled_tools: [],
+        result_adapter: 'none',
       }
   editingServer.value = !!item
   argumentsText.value = item?.args.join('\n') || ''
@@ -434,6 +439,27 @@ watch([server, skill, credentialServer], async () => {
               {{ $t('工作目录（留空使用默认工作区）') }}
               <input v-model="server.cwd" />
             </label>
+            <label>
+              {{ $t('结果展示') }}
+              <InkSelect
+                :model-value="server.result_adapter || 'none'"
+                :options="[
+                  { value: 'none', label: $t('标准工具结果') },
+                  { value: 'antenna_design', label: $t('天线结果与方向图') },
+                ]"
+                @update:model-value="setResultAdapter"
+              />
+            </label>
+            <p
+              v-if="server.result_adapter === 'antenna_design'"
+              class="page-copy"
+            >
+              {{
+                $t(
+                  '批准天线计算后，将校验结果文件并保存到当前对话工作区，显示方向图。只用于可信的天线服务。',
+                )
+              }}
+            </p>
             <label>
               {{ $t('继承的环境变量名，每行一个') }}
               <textarea

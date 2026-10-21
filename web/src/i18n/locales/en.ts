@@ -1,4 +1,9 @@
 const en: Record<string, string> = {
+  结果展示: 'Result display',
+  标准工具结果: 'Standard tool results',
+  天线结果与方向图: 'Antenna results and radiation patterns',
+  '批准天线计算后，将校验结果文件并保存到当前对话工作区，显示方向图。只用于可信的天线服务。':
+    'After you approve a calculation, verify and save its result files in this chat’s workspace and display the patterns. Use only with a trusted antenna service.',
   '无效的权限模式。': 'Invalid permission mode.',
   '无效的响应模式。': 'Invalid response mode.',
   '来源消息标识无效。': 'Invalid source message ID.',

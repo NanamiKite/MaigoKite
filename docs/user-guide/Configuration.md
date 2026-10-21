@@ -345,6 +345,7 @@ mcp:
       # 使用服务端原始工具名，不带 namespace。
       enabled_tools: ["search", "read"]
       disabled_tools: []
+      result_adapter: "none"  # 默认；仅显式接入天线服务时选 antenna_design
 ```
 
 `command` 以 argv 方式直接执行，不经过 shell；`cwd` 必须位于默认工作区内。`{workspace}` 在 cwd/args 中替换为该路径，而不是当前会话选择的目录。`env_allowlist` 只声明从 Core 启动环境继承的变量名，不得与 `secret_env` 重名，凭证值不得写入 YAML。工具命名为 `<server>__<tool>`，调用沿用 ToolPolicy、审批和审计；此审批不限制 MCP 程序自行启动的行为，不等于系统沙箱。
@@ -354,6 +355,32 @@ Core 重启后，MCP 内存凭证需要重新注入。可点击“恢复已有�
 应用失败时查看页面错误和逐项状态。Skill 扫描出错或任一启用 MCP 未连接时，不提交新版本。原普通聊天入口保留，但已断开的外部工具仍需恢复；保存配置不等于生效，连接成功也不保证持续健康。
 
 停用或移除在应用后生效，不删除程序、Skill 源目录或密钥链值。清除凭证需单独操作，并再次应用/恢复连接以移出进程环境。当前没有自动健康重启、空闲回收或远端副作用取消保证，新增扩展管理链路仍待运行验收。
+
+### 8.1 天线计算与方向图
+
+这是可选的本地工程扩展，不随普通聊天安装求解器，也不表示完整天线设计工作流已经交付。
+
+1. 在 `extensions/antenna_design` 目录运行 `uv sync --locked --extra engineering --extra mcp`，建立独立服务环境。
+2. 在“扩展 → MCP”添加服务，命名空间可填 `antenna`。命令填写独立环境的 Python **绝对路径**：Linux 为 `<包目录>/.venv/bin/python`，Windows 为 `<包目录>\.venv\Scripts\python.exe`，不是主应用的 Python。
+3. 参数框逐行填写以下六项；工作目录留空。`{workspace}` 指默认工作区，不随对话切换。服务在该专用子目录保存完整证据包；不要多个服务共用同一结果目录。
+
+```text
+-m
+antenna_workflow.mcp_server
+--root
+{workspace}/antenna-service-results
+--timeout
+20
+```
+
+4. “结果展示”选择“天线结果与方向图”，保存并点击“应用并检查连接”。此选择允许在获准计算后，把校验过的结果复制到当前对话文件夹；只用于可信的天线服务。其他 MCP 保持“标准工具结果”。
+5. 服务提供 `antenna.model_validate / antenna.solve`；若命名空间为 `antenna`，模型看到 `antenna__antenna_model_validate / antenna__antenna_solve`。参数使用工程 JSON 对象，示例与输入限制见[独立包说明](../../extensions/antenna_design/README.md)，不是把任意文件路径交给服务。
+
+调用仍经过现有 MCP 审批。成功结果导入当前对话文件夹的 `antenna-results/<调用标识>/`，聊天展示水平/垂直方向图，点击可打开文件；SVG、数值 JSON 和可导出的 `.maa` 也保留在该目录。服务原件不会被搬走或覆盖。
+
+导入前逐文件验证 URI、MIME、大小和 SHA256；每次写入重新检查权限。只读或权限中途降级时停止后续导入。部分文件导入失败不自动重算，结果保留 `import_warning`；已核验文件不会被删除。只有最后写入 `import-receipt.json` 的副本才标记导入完成。
+
+本入口只提供明确输入的薄线计算与图表，结果仍为 `COMPUTED_NOT_VALIDATED`，不能据此声称已经通过收敛、MMANA 兼容或制作验证。宿主接线当前仅完成静态检查，未执行新增端到端验收。
 
 ## 9. 凭证
 

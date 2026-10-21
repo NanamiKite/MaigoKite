@@ -1,0 +1,3 @@
+# Numerical captures are generated locally; the probe and input recipe are versioned.
+artifacts/
+windows/results/

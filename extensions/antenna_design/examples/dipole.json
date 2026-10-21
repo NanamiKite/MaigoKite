@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "name": "20m-wire-dipole",
+  "frequency_hz": 7100000,
+  "wires": [{"start_m": [-10, 0, 5], "end_m": [10, 0, 5], "radius_m": 0.0005}],
+  "feed": {"wire": 1, "position": "center", "voltage_v": 1, "phase_deg": 0},
+  "material": {"mode": "ideal", "basis": "Lossless comparison fixture, not a material recommendation"},
+  "ground": {"mode": "free_space"},
+  "mesh": {"mode": "uniform", "segments_per_wire": 80},
+  "pattern": {"step_deg": 5, "azimuth_cut_elevation_deg": 0, "elevation_cut_phi_deg": 90},
+  "reference_impedance_ohm": 50,
+  "max_pulses": 512
+}

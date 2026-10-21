@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING
 
 from agent.tools.base import BaseTool
+
+if TYPE_CHECKING:
+    from agent.integrations.antenna import AntennaResults
+    from agent.mcp.client import MCPClient
 
 
 class ToolRegistry:
@@ -31,8 +35,9 @@ class ToolRegistry:
         return [self._tools[name] for name in sorted(self._tools)]
 
     async def discover_mcp(
-        self, client: Any, namespace: str, *,
+        self, client: MCPClient, namespace: str, *,
         enabled_tools: list[str] | None = None, disabled_tools: Sequence[str] = (),
+        antenna_results: AntennaResults | None = None,
     ) -> list[BaseTool]:
         from agent.tools.mcp_wrapper import MCPToolWrapper
         discovered: list[BaseTool] = []
@@ -40,7 +45,7 @@ class ToolRegistry:
             source_name = str(definition.get("name", ""))
             if source_name in disabled_tools or (enabled_tools is not None and source_name not in enabled_tools):
                 continue
-            tool = MCPToolWrapper(client, definition, namespace)
+            tool = MCPToolWrapper(client, definition, namespace, antenna_results=antenna_results)
             self.register(tool)
             discovered.append(tool)
         return discovered

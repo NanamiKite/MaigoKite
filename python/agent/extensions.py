@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
-from typing import Annotated, Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -17,6 +17,9 @@ from agent.observability import Observability
 from agent.skill_registry import SkillRegistry
 from agent.tools.mcp_wrapper import mcp_tool_prefix
 from agent.tools.tool_registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from agent.integrations.antenna import AntennaResults
 
 Name = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]{0,47}$")]
 EnvName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
@@ -34,6 +37,7 @@ class MCPSettings(BaseModel):
     secret_env: list[EnvName] = Field(default_factory=list, max_length=64)
     enabled_tools: list[str] | None = Field(default=None, max_length=256)
     disabled_tools: list[str] = Field(default_factory=list, max_length=256)
+    result_adapter: Literal["none", "antenna_design"] = "none"
 
     @model_validator(mode="after")
     def validate_command(self) -> MCPSettings:
@@ -159,6 +163,7 @@ class ExtensionCatalog:
     clients: dict[str, MCPClient] = field(default_factory=dict)
     servers: list[MCPServerStatus] = field(default_factory=list)
     env: dict[str, dict[str, str]] = field(default_factory=dict)
+    antenna_results: AntennaResults | None = None
 
     async def load_skills(self, workspace_root: Path) -> None:
         stop = Event()
@@ -241,9 +246,9 @@ class ExtensionCatalog:
             client_secrets = {
                 name: client.env[name] for name in server.secret_env if name in client.env
             } if client is not None else {}
-            # Tool visibility edits require discovery, not a new process.
+            # Tool selection/result projection edits require discovery, not a new process.
             # Command/cwd/environment or credential changes do require one.
-            selection_fields = {"enabled_tools", "disabled_tools"}
+            selection_fields = {"enabled_tools", "disabled_tools", "result_adapter"}
             if (
                 not server.enabled
                 or client is None
@@ -274,7 +279,8 @@ class ExtensionCatalog:
                 # SDK connection, without launching a duplicate server process.
                 async with asyncio.timeout(30):
                     tools = await registry.discover_mcp(client, namespace,
-                        enabled_tools=server.enabled_tools, disabled_tools=server.disabled_tools)
+                        enabled_tools=server.enabled_tools, disabled_tools=server.disabled_tools,
+                        antenna_results=self.antenna_results if server.result_adapter == "antenna_design" else None)
                 names = [tool.name for tool in tools]
             states.append(
                 {"namespace": namespace, "status": "running", "transport": "stdio", "tool_names": list(names)}
@@ -325,6 +331,7 @@ class ExtensionCatalog:
                     server_registry = ToolRegistry()
                     discovered = await server_registry.discover_mcp(
                         client, namespace, enabled_tools=server.enabled_tools, disabled_tools=server.disabled_tools,
+                        antenna_results=self.antenna_results if server.result_adapter == "antenna_design" else None,
                     )
             except BaseException as exc:
                 state["status"] = "timeout" if isinstance(exc, TimeoutError) else "error"

@@ -1,0 +1,16 @@
+{
+  "case_id": "A01-uniform20",
+  "product": "MMANA-GAL",
+  "version": "1.2.0.20",
+  "version_source": "user_report",
+  "reported_on": "2026-10-19",
+  "executable_sha256": null,
+  "runtime_environment": null,
+  "associated_files_sha256": {
+    "test1.maa": "d3adcbddf64f4347fd66271e5ae0fd203420d1b4e0fa1de6e360759426b56c9a",
+    "test1.csv": "5e79c68f1900a37d95878e5af6639b7e9d0c88f013dd4975ec486531a6cca2d8",
+    "angel.csv": "3445e4e6816543066d21ca668d8966d25d781d44bac71a6219b6907ab1bb8576",
+    "comparison-20261019/comparison.json": "a7c30e3539a86cd63b4f3fba8ae1a5f6860ec55ab92687c616a1d79a649e2257"
+  },
+  "note": "Version supplied after numerical comparison; original CSVs, report and manifests are unchanged."
+}

@@ -258,7 +258,9 @@ POST /workspaces/{workspace_id}/extension-settings/apply
 
 三个 `extension-settings` 接口只允许个人工作区 owner（Core 同时要求 `workspace_id=personal`）。GET/PUT/apply 返回同一个快照：`config / active_config / applied_revision / reload_required / reloading / runtime_ready / servers / skills / skill_errors / extension_error`。其中 skills 包括停用的已扫描元数据；config 是期望配置，active_config 仅含上次生效配置的 `revision / mcp_servers`，不重复返回 Skill 正文；extension_error 提示应用或资源清理失败。应用新版本要求 Skill 扫描成功且所有启用 MCP 已连接；已应用的 revision 不保证连接持续健康，仍须检查逐项状态。`runtime_ready=false` 时不宣称聊天链可运行。
 
-PUT 完整替换 `config`（2 MiB 上限）：`revision / mcp_servers / skill_directories / skills / disabled_skills`，校验通过后递增 revision，写现有 `workspace_settings` 并记审计，不操作运行中的进程。MCP 项包括 `namespace / transport=stdio / command / args / cwd / enabled / env_allowlist / secret_env / enabled_tools / disabled_tools`；托管 Skill 项包括 `name / content / enabled`，每个 Markdown 最大 256 KiB。只接受声明字段，不接受原始 env/secret 值。
+PUT 完整替换 `config`（2 MiB 上限）：`revision / mcp_servers / skill_directories / skills / disabled_skills`，校验通过后递增 revision，写现有 `workspace_settings` 并记审计，不操作运行中的进程。MCP 项包括 `namespace / transport=stdio / command / args / cwd / enabled / env_allowlist / secret_env / enabled_tools / disabled_tools / result_adapter`；托管 Skill 项包括 `name / content / enabled`，每个 Markdown 最大 256 KiB。只接受声明字段，不接受原始 env/secret 值。
+
+`result_adapter` 为 `none | antenna_design`，缺省为 `none`。后者仅对该服务器的 `antenna.solve` 生效：现有审批通过后读取版本 1 的结构化回执，经同一个 SDK 连接读取固定资源、校验并写入当前对话目录；不接受任意 URL 或改变 MCP 风险等级。投影沿用 `tool.completed.data`，含 `antenna_result / output_directory / images / files / import_complete / import_warning`，图片复用既有 `ImageReference`。导入失败不把已完成的计算标成失败、不自动重算；无效回执返回 `ANTENNA_RESULT_INVALID`，不读取文件。配置变更沿用 save/apply 与上次生效配置机制，不新增 HTTP 资源代理。详见 [MCP 结果资源](../agent-capabilities/mcp/mcp-integration.md#31-天线结果资源适配)。
 
 apply 默认接受 `{"revision": <保存后的版本>}`，应用新配置。API 按 `secret_env` 从现有密钥链读取引用 `mcp.<namespace>.<ENV_NAME>`，在进程内传递凭证给 Core。Core 拒绝旧版本、重复应用或仍有运行/待审批/待回答的任务（409）；无效配置 400，非 owner 403。
 

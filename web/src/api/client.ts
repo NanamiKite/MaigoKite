@@ -359,6 +359,7 @@ export interface MCPConfiguration {
   secret_env: string[]
   enabled_tools: string[] | null
   disabled_tools: string[]
+  result_adapter?: 'none' | 'antenna_design'
 }
 export interface ManagedSkill {
   name: string

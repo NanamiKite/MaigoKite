@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "name": "three-element-yagi",
+  "frequency_hz": 145000000,
+  "wires": [
+    {"start_m": [-0.52, -0.4, 0], "end_m": [0.52, -0.4, 0], "radius_m": 0.001},
+    {"start_m": [-0.5, 0, 0], "end_m": [0.5, 0, 0], "radius_m": 0.001},
+    {"start_m": [-0.47, 0.3, 0], "end_m": [0.47, 0.3, 0], "radius_m": 0.001}
+  ],
+  "feed": {"wire": 2, "position": "center", "voltage_v": 1, "phase_deg": 0},
+  "material": {"mode": "ideal", "basis": "Lossless comparison fixture, not a construction design"},
+  "ground": {"mode": "free_space"},
+  "mesh": {"mode": "both_end_taper", "segments_per_wire": 32},
+  "pattern": {"step_deg": 5, "azimuth_cut_elevation_deg": 0, "elevation_cut_phi_deg": 90, "front_phi_deg": 90},
+  "reference_impedance_ohm": 50,
+  "max_pulses": 512
+}

@@ -31,6 +31,7 @@ from agent.data_contracts import (
 )
 from agent.event_bus import EventBus
 from agent.extensions import ExtensionCatalog, ExtensionConfig, MCPServerStatus, close_mcp_clients, startup_config
+from agent.integrations.antenna import AntennaResults
 from agent.mcp import MCPClient
 from agent.media import ImageReference
 from agent.memory.notes import FolderMemories
@@ -285,7 +286,9 @@ class AgentCore:
     async def _prepare_extension_catalog(
         self, config: ExtensionConfig, *, restore_only: bool = False,
     ) -> ExtensionCatalog:
-        catalog = ExtensionCatalog(config=config)
+        catalog = ExtensionCatalog(
+            config=config, antenna_results=AntennaResults(self.repository, self.conversations.folder_root),
+        )
         registry = catalog.registry
         for tool_type in (FileReadTool, FileWriteTool, FileEditTool, BashTool, ExecCommandTool,
                           WebSearchTool, WebFetchTool, GlobTool, GrepTool, SleepTool):

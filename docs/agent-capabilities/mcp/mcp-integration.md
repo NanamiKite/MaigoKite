@@ -5,7 +5,7 @@
 
 ## 1. 当前生命周期
 
-Python 核心服务是唯一 MCP Client 所有者，API 层和 Electron 不直接调用 MCP 工具。2026-10-10 已用官方 Python SDK 替换自研 stdio 协议实现；`agent.mcp.MCPClient` 仅保留配置校验、SDK 生命周期桥接和字典结果转换，调用入口不变。
+Python 核心服务是唯一 MCP Client 所有者，API 层和 Electron 不直接调用 MCP 工具。2026-10-10 已用官方 Python SDK 替换自研 stdio 协议实现；`agent.mcp.MCPClient` 保留配置校验、SDK 生命周期桥接、结果转换与有界资源读取，协议仍由 SDK 负责。
 
 Linux 本地定向验收覆盖真实 SDK stdio 子进程、发现/调用/审批、取消后连接复用、超时、关闭和启动失败清理。2026-10-15 又通过真实 Core 的扩展配置保存/应用、失败保留健康配置及重启加载生效配置；凭证与故障分支的准确范围见 [当前验收状态](../../project/Roadmap.md#当前验收状态)。
 
@@ -72,6 +72,18 @@ ToolRegistry resolve / 参数规范化
 返回内容是不可信数据，不授予权限。SDK 负责协议结果模型校验；产品包装仍保留非对象结果的 MCP_INVALID_RESULT 防御分支。`isError: true` 映射为 MCP_TOOL_ERROR/ToolResult.failure，保留原始结果和检查连接、凭证、参数的简短提示，不记成工具成功，也不伪造不存在的设置链接。
 
 连接错误不盲目重试副作用。请求/工具调用 ID 用于关联；完整追踪上下文传播和 stderr 脱敏采集尚未接线。配置示例只在 [配置指南](../../user-guide/Configuration.md) 维护。
+
+### 3.1 天线结果资源适配
+
+`result_adapter=antenna_design` 是显式启用的宿主结果投影，缺省 `none`；不根据工具描述、服务名或端口猜测。切换时通过既有 apply 刷新工具包装，可复用配置和凭证未改变的健康连接，不另起服务。
+
+仅所选服务的 `antenna.solve` 成功回执进入 `agent.integrations.antenna.AntennaResults`。调用本身仍走 ToolPolicy、审批和审计，不降低 MCP 风险。适配器校验 `schema_version=1`、调用 run ID、有界摘要、固定资源清单；随后通过相同 SDK 会话 `resources/read`，核对返回 URI、MIME、字节长度、SHA256 和 PNG 文件头，使用既有安全文件访问写入当前对话工作区。
+
+资源读取不开放为任意 URL 下载或模型工具；单文件最多 16 MiB，整个导入最多 48 MiB、30 秒（文件写入清理另计）。限制约束接受的资源内容，不等于 SDK JSON-RPC 分配上限或系统磁盘配额。每次读资源和落盘前查询当前目录/权限；只读时不继续写，写入不覆盖不同内容的已存在文件。
+
+完成后模型只得到紧凑回执与引用，数值数组和图片字节不进入 ToolMessage。PNG 沿用聊天图片组件和受控工作区文件 API，SVG/JSON/MAA 保存在同目录供查看。最后写 `import-receipt.json`；部分导入失败保留已校验文件，以 `import_complete=false / import_warning` 提醒，不重跑求解。取消时等待正在写入的本地线程结束，但这不是 MCP 远端执行停止回执。
+
+领域包仍独立安装，不导入主应用或 LangGraph；结果适配不新增 Runtime、领域阶段状态或项目预算。该新链路尚未运行端到端/Windows 验收，不纳入此前通用 MCP 验收的通过范围。
 
 ## 4. 取消、关闭和隔离限制
 

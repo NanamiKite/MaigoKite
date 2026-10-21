@@ -7,7 +7,7 @@ import WorkspaceImage from './WorkspaceImage.vue'
 const props = defineProps<{ steps: Step[] }>()
 const images = computed(() =>
   props.steps
-    .filter((step) => step.tool === 'image_generate' && step.status === 'completed')
+    .filter((step) => step.status === 'completed')
     .flatMap((step) => parseImages(step.output)),
 )
 </script>

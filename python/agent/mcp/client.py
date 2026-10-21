@@ -8,6 +8,7 @@ never retry a tool call automatically or close a shared session on run cancellat
 from __future__ import annotations
 
 import asyncio
+import base64
 import math
 import os
 from datetime import timedelta
@@ -18,7 +19,8 @@ from anyio.streams.memory import MemoryObjectReceiveStream
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.shared.message import SessionMessage
-from mcp.types import Implementation, PaginatedRequestParams
+from mcp.types import BlobResourceContents, Implementation, PaginatedRequestParams, TextResourceContents
+from pydantic import AnyUrl
 
 
 class MCPError(RuntimeError):
@@ -181,3 +183,38 @@ class MCPClient:
             # CancelledError deliberately propagates. SDK request IDs and readers
             # remain private; MaigoKite must not recreate the wire cancellation protocol.
             raise MCPError("MCP tool request failed; remote execution outcome may be unknown") from exc
+
+    async def read_resource(self, uri: str, *, max_bytes: int) -> tuple[bytes, str]:
+        """Read one bounded resource through this connection, never through an HTTP fallback.
+
+        Callers authorize the URI. The limit bounds accepted content after SDK
+        decoding, not the JSON-RPC transport's allocation or remote execution.
+        """
+        if not 0 < max_bytes <= 16 * 1024 * 1024:
+            raise ValueError("MCP resource limit must be between 1 byte and 16 MiB")
+        session = self._get_session()
+        try:
+            async with asyncio.timeout(self.request_timeout):
+                result = await session.read_resource(AnyUrl(uri))
+            if len(result.contents) != 1:
+                raise MCPError("MCP resource must contain exactly one item")
+            item = result.contents[0]
+            if str(item.uri) != uri:
+                raise MCPError("MCP resource URI did not match the request")
+            if isinstance(item, BlobResourceContents):
+                if len(item.blob) > 4 * ((max_bytes + 2) // 3):
+                    raise MCPError("MCP resource exceeds the read limit")
+                data = base64.b64decode(item.blob, validate=True)
+            elif isinstance(item, TextResourceContents):
+                if len(item.text) > max_bytes:
+                    raise MCPError("MCP resource exceeds the read limit")
+                data = item.text.encode("utf-8")
+            else:
+                raise MCPError("MCP resource content is unsupported")
+            if len(data) > max_bytes:
+                raise MCPError("MCP resource exceeds the read limit")
+            return data, item.mimeType or ""
+        except MCPError:
+            raise
+        except Exception as exc:
+            raise MCPError("MCP resource read failed") from exc

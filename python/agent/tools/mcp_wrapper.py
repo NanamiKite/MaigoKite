@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent.mcp.client import MCPClient, MCPError
 from agent.tools.base import BaseTool, ExecutionContext, ToolResult
+
+if TYPE_CHECKING:
+    from agent.integrations.antenna import AntennaResults
 
 
 def _model_safe_name(value: str) -> str:
@@ -28,7 +31,8 @@ def mcp_tool_prefix(namespace: str) -> str:
 
 class MCPToolWrapper(BaseTool):
     def __init__(
-        self, client: MCPClient, definition: dict[str, Any], namespace: str
+        self, client: MCPClient, definition: dict[str, Any], namespace: str,
+        *, antenna_results: AntennaResults | None = None,
     ) -> None:
         source_name = str(definition.get("name") or "")
         schema = definition.get("inputSchema", {"type": "object"})
@@ -43,6 +47,8 @@ class MCPToolWrapper(BaseTool):
         self._definition = definition
         self._source_name = source_name
         self._schema = dict(schema)
+        self._namespace = namespace
+        self._antenna_results = antenna_results
         self._name = mcp_tool_prefix(namespace) + _model_safe_name(source_name)
         if len(self._name) > 64:
             raise ValueError(f"MCP tool name is too long: {self._name}")
@@ -58,7 +64,14 @@ class MCPToolWrapper(BaseTool):
 
     @property
     def description(self) -> str:
-        return str(self._definition.get("description", ""))[:4_000]
+        description = str(self._definition.get("description", ""))[:4_000]
+        if self._antenna_results is not None and self._source_name == "antenna.solve":
+            description += (
+                " MaigoKite imports verified result files into antenna-results/ in this conversation's workspace "
+                "and shows PNG previews. This requires write permission. Approval also covers these resource reads "
+                "and local copies. An import failure is not a reason to solve again."
+            )
+        return description
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
@@ -82,6 +95,11 @@ class MCPToolWrapper(BaseTool):
                 {}, "MCP 请求未取得可靠回执，远端操作可能已经执行。", error_code="MCP_OUTCOME_UNKNOWN",
                 user_hint="先核实目标服务中的实际结果，不要自动重试；可继续处理不依赖此操作的任务。",
                 action={"label": "查看扩展", "to": "/integrations"},
+            )
+        if (self._antenna_results is not None and self._source_name == "antenna.solve"
+                and isinstance(response, dict) and response.get("isError") is not True):
+            return await self._antenna_results.project(
+                self._client, self._namespace, context, arguments, response,
             )
         text = json.dumps(response, ensure_ascii=False, default=str)
         metadata = {"tool": self.name, "source": "mcp"}

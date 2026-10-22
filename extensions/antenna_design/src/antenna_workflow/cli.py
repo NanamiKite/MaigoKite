@@ -1,4 +1,4 @@
-"""One owned solver process per CLI invocation; no Agent host or GUI dependency."""
+"""Run calculation or rendering in an owned process and publish its result bundle."""
 
 from __future__ import annotations
 
@@ -13,7 +13,15 @@ from typing import Literal
 
 from pydantic import ValidationError
 
-from .artifacts import complete_bundle, fail_bundle, prepare_bundle, worker_command, worker_environment
+from .artifacts import (
+    complete_bundle,
+    fail_bundle,
+    prepare_bundle,
+    prepare_render,
+    preserve_numerical_result,
+    worker_command,
+    worker_environment,
+)
 from .contracts import EngineeringRequest, EngineeringSummary, Mesh
 from .mmana import read_maa
 
@@ -36,11 +44,14 @@ def _request(path: Path, mesh_name: str | None, encoding: str) -> tuple[Engineer
     return EngineeringRequest.model_validate_json(original), original
 
 
-def _worker(root: Path) -> int:
-    from .artifacts import compute_bundle
+def _worker(root: Path, *, render_only: bool = False) -> int:
+    from .artifacts import compute_bundle, render_bundle
 
     try:
-        compute_bundle(root)
+        if render_only:
+            render_bundle(root)
+        else:
+            compute_bundle(root)
     except Exception:
         traceback.print_exc()  # Worker output is a local diagnostic artifact, never a model tool response.
         return 1
@@ -56,11 +67,19 @@ def run(input_path: Path, output: Path, *, mesh: str | None, encoding: str, time
     try:
         with (root / f"original{input_path.suffix.lower()}").open("xb") as stream:
             stream.write(original)
+    except OSError as error:
+        fail_bundle(root, error)
+        raise
+    return _execute(root, timeout=timeout)
+
+
+def _execute(root: Path, *, timeout: int, render_only: bool = False) -> EngineeringSummary:
+    try:
         with (
             TemporaryDirectory(prefix="antenna-plot-") as plot_cache,
             (root / "diagnostics.log").open("xb") as log,
             subprocess.Popen(
-                worker_command(root),
+                worker_command(root, render_only=render_only),
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=subprocess.STDOUT,
@@ -77,6 +96,9 @@ def run(input_path: Path, output: Path, *, mesh: str | None, encoding: str, time
             raise RuntimeError("Solver/renderer failed; see diagnostics.log. No completed result was published")
         return complete_bundle(root)
     except (Exception, KeyboardInterrupt) as error:
+        preserved = preserve_numerical_result(root)
+        if preserved is not None and not isinstance(error, KeyboardInterrupt):
+            return preserved
         fail_bundle(root, error)
         raise
 
@@ -91,18 +113,70 @@ def main() -> int:
     solve.add_argument("--mesh", choices=("uniform80", "taper32"), help="Required for MAA only")
     solve.add_argument("--maa-encoding", default="cp936", choices=("cp936", "utf-8-sig", "cp1252", "ascii"))
     solve.add_argument("--timeout", type=int, default=120, help="Worker wall-clock deadline, 1..600 seconds")
+    render = commands.add_parser("render", help="Plot saved numerical evidence into a new bundle; no solver run")
+    render.add_argument("source", type=Path)
+    render.add_argument("--output", type=Path, required=True)
+    render.add_argument("--timeout", type=int, default=120)
+    skill = commands.add_parser("skill", help="Print or export the bundled workflow Skill; no solver dependency")
+    skill.add_argument("--output", type=Path, help="New SKILL.md file to create, without overwriting")
+    connect = commands.add_parser("connect", help="Export MCP + Skill settings for import into MaigoKite")
+    connect.add_argument("--root", type=Path, required=True, help="Persistent result directory for this project")
+    connect.add_argument("--namespace", default="antenna")
+    connect.add_argument("--timeout", type=int, default=120)
+    connect.add_argument(
+        "--max-solver-runs", type=int, default=None, help="Explicit total cap; omit to keep stored cap"
+    )
+    connect.add_argument(
+        "--output", type=Path, required=True, help="New JSON bundle; does not overwrite or auto-install"
+    )
     worker = commands.add_parser("_worker", help=argparse.SUPPRESS)
     worker.add_argument("output", type=Path)
+    render_worker = commands.add_parser("_render", help=argparse.SUPPRESS)
+    render_worker.add_argument("output", type=Path)
     args = parser.parse_args()
     if args.command == "schema":
         print(json.dumps(EngineeringRequest.model_json_schema(), indent=2))
         return 0
-    if args.command == "_worker":
-        return _worker(args.output)
+    if args.command in {"_worker", "_render"}:
+        return _worker(args.output, render_only=args.command == "_render")
+    if args.command == "connect":
+        from .artifacts import write_json
+        from .connection import connection_bundle
+
+        try:
+            bundle = connection_bundle(
+                args.root, namespace=args.namespace, timeout=args.timeout, solve_limit=args.max_solver_runs
+            )
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            write_json(args.output, bundle)
+        except (ValueError, OSError) as error:
+            print(f"antenna-design: {error}", file=sys.stderr)
+            return 1
+        print(f"Bundle saved: {args.output}. Import it in Extensions, review, save, then apply.")
+        return 0
+    if args.command == "skill":
+        from importlib.resources import files
+
+        try:
+            content = files("antenna_workflow").joinpath("skills/antenna-design/SKILL.md").read_text(encoding="utf-8")
+            if args.output is None:
+                print(content)
+            else:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                with args.output.open("x", encoding="utf-8") as stream:
+                    stream.write(content)
+        except OSError as error:
+            print(f"antenna-design: {error}", file=sys.stderr)
+            return 1
+        return 0
     if not 1 <= args.timeout <= 600:
         parser.error("--timeout must be between 1 and 600 seconds")
     try:
-        summary = run(args.input, args.output, mesh=args.mesh, encoding=args.maa_encoding, timeout=args.timeout)
+        if args.command == "render":
+            prepare_render(args.source.resolve(), args.output.absolute(), timeout=args.timeout)
+            summary = _execute(args.output.absolute(), timeout=args.timeout, render_only=True)
+        else:
+            summary = run(args.input, args.output, mesh=args.mesh, encoding=args.maa_encoding, timeout=args.timeout)
     except KeyboardInterrupt:
         print(
             "Cancelled; owned solver process has exited. Check the bundle completion/failure receipt.", file=sys.stderr

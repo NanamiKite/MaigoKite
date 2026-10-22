@@ -6,11 +6,16 @@ import json
 import re
 from typing import TYPE_CHECKING, Any
 
+from agent.integrations.antenna import antenna_failure, call_antenna_tool
 from agent.mcp.client import MCPClient, MCPError
 from agent.tools.base import BaseTool, ExecutionContext, ToolResult
 
 if TYPE_CHECKING:
     from agent.integrations.antenna import AntennaResults
+
+_ANTENNA_RESULTS = {
+    "antenna.solve", "antenna.get_result", "antenna.render", "antenna.export", "antenna.get_delivery",
+}
 
 
 def _model_safe_name(value: str) -> str:
@@ -65,10 +70,10 @@ class MCPToolWrapper(BaseTool):
     @property
     def description(self) -> str:
         description = str(self._definition.get("description", ""))[:4_000]
-        if self._antenna_results is not None and self._source_name == "antenna.solve":
+        if self._antenna_results is not None and self._source_name in _ANTENNA_RESULTS:
             description += (
                 " MaigoKite imports verified result files into antenna-results/ in this conversation's workspace "
-                "and shows PNG previews. This requires write permission. Approval also covers these resource reads "
+                "with previews/downloads. This requires write permission. Approval also covers these resource reads "
                 "and local copies. An import failure is not a reason to solve again."
             )
         return description
@@ -87,7 +92,11 @@ class MCPToolWrapper(BaseTool):
                 action={"label": "查看扩展", "to": "/integrations"},
             )
         try:
-            response = await self._client.call_tool(self._source_name, arguments)
+            response = (
+                await call_antenna_tool(self._client, self._source_name, arguments)
+                if self._antenna_results is not None
+                else await self._client.call_tool(self._source_name, arguments)
+            )
         except MCPError:
             # An SDK timeout/disconnect is not evidence that the remote action
             # stopped. Return a tool failure, without retrying or leaking errors.
@@ -96,10 +105,10 @@ class MCPToolWrapper(BaseTool):
                 user_hint="先核实目标服务中的实际结果，不要自动重试；可继续处理不依赖此操作的任务。",
                 action={"label": "查看扩展", "to": "/integrations"},
             )
-        if (self._antenna_results is not None and self._source_name == "antenna.solve"
+        if (self._antenna_results is not None and self._source_name in _ANTENNA_RESULTS
                 and isinstance(response, dict) and response.get("isError") is not True):
             return await self._antenna_results.project(
-                self._client, self._namespace, context, arguments, response,
+                self._client, self._namespace, context, arguments, response, source_tool=self._source_name,
             )
         text = json.dumps(response, ensure_ascii=False, default=str)
         metadata = {"tool": self.name, "source": "mcp"}
@@ -113,6 +122,10 @@ class MCPToolWrapper(BaseTool):
                 metadata=metadata,
             )
         if response.get("isError") is True:
+            if self._antenna_results is not None:
+                failure = antenna_failure(response)
+                if failure is not None:
+                    return failure
             return ToolResult.failure(
                 data={"result": response},
                 summary=f"MCP tool {self._source_name} reported a failure.",

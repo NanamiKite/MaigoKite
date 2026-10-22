@@ -133,6 +133,7 @@ GET    /workspaces/{workspace_id}/conversations/{conversation_id}/snapshot
 - protocol 为 `images` 时复用 OpenAI SDK `images.generate`，一次请求一张图片；`responses` 时调用官方 Responses `image_generation` 工具，限制一次工具调用并设置 `store=false`。不按端口或模型名猜协议、不自动换接口、不自动重试；兼容服务必须实际实现所选接口。
 - `image_generate` 走现有权限审批与审计，L5 单次授权；显式完全访问沿用既有放行语义。审批哈希绑定当前配置摘要。请求前使用工具调用 ID 原子写入审计意图，同一 ID 的崩溃重放不再请求服务；结果不确定时提示先检查产物，再显式发起新的调用。成功结果 `images` 只含工作区文件信息，保存到 `generated-images/`，并沿现有 `file.changed` 通知文件变化。取消不能保证远端停止或未计费；不提供跨崩溃 exactly-once 保证。
 - `GET /files/content` 增加 mime_type/data_url。文本上限 512 KiB，受支持栅格图片上限 16 MiB，超限不返回截断 Base64。Markdown 由前端净化后渲染；HTML 为无脚本、无网络、无同源权限的静态 iframe。SVG 沿用文本接口，由前端 XML 解析与 DOMPurify 净化后作为 `<img>` 图片预览，不作为内联 DOM 或可执行文档；外部引用、脚本与嵌入网页不可用，保留本地片段引用和内嵌栅格图片。截断、畸形或含自定义实体的 SVG 不渲染，保留源码入口。
+- `GET /files/download?folder_id=...&path=...` 使用相同工作区前缀与认证，额外要求 owner；只读注册目录内的非敏感普通文件，安全句柄读取拒绝链接/越界，最多 48 MiB。返回 `application/octet-stream`、安全 `Content-Disposition: attachment`、`no-store/nosniff`；超限为 `413 FILE_DOWNLOAD_TOO_LARGE`。前端使用携带认证的 Blob 下载，不把带凭证 URL 交给浏览器。它不解压 ZIP，也不要求文件可预览。
 
 上面的路径仍受既有本机访问和工作区授权边界约束。不新增多模态 Runtime，不表示所有模型均支持图片输入，也不包含任意厂商原生图片输出、图生图/蒙版编辑、视频或音频。
 

@@ -38,6 +38,7 @@ class MCPSettings(BaseModel):
     enabled_tools: list[str] | None = Field(default=None, max_length=256)
     disabled_tools: list[str] = Field(default_factory=list, max_length=256)
     result_adapter: Literal["none", "antenna_design"] = "none"
+    request_timeout_seconds: int = Field(default=30, ge=1, le=660)
 
     @model_validator(mode="after")
     def validate_command(self) -> MCPSettings:
@@ -321,6 +322,7 @@ class ExtensionCatalog:
                     **{name: secret_env[name] for name in server.secret_env},
                 },
                 cwd=cwd,
+                request_timeout=server.request_timeout_seconds,
             )
             # Own the connection before awaiting discovery, including failed/cancelled startup.
             self.clients[namespace] = client

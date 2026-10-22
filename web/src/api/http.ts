@@ -23,6 +23,7 @@ export async function request<T>(
   url: string,
   init?: RequestInit,
   validate?: (value: unknown) => value is T,
+  readResponse?: (response: Response) => Promise<T>,
 ): Promise<T> {
   const controller = new AbortController()
   const abort = () => controller.abort()
@@ -40,8 +41,11 @@ export async function request<T>(
     return value as T
   }
   try {
-    if (import.meta.env.VITE_MOCK === '1')
+    if (import.meta.env.VITE_MOCK === '1') {
+      if (readResponse)
+        throw new GatewayError(t('此操作不可用，请重启或更新应用。'), 501, 'MOCK_UNAVAILABLE')
       return decode(await (await import('./mock')).mockRequest<unknown>(url, init))
+    }
     const headers = new Headers(init?.headers)
     headers.set('Content-Type', 'application/json')
     if (bearer) headers.set('Authorization', `Bearer ${bearer}`)
@@ -67,6 +71,7 @@ export async function request<T>(
       const params = errorParameters(detail.params)
       throw new GatewayError(errorCopy(code, message, params), response.status, code, params)
     }
+    if (readResponse) return await readResponse(response)
     const body: unknown = response.status === 204 ? undefined : await response.json()
     return decode(body)
   } catch (reason) {
@@ -82,4 +87,8 @@ export async function request<T>(
     clearTimeout(timeout)
     init?.signal?.removeEventListener('abort', abort)
   }
+}
+
+export function requestBlob(url: string, init?: RequestInit): Promise<Blob> {
+  return request(url, init, undefined, (response) => response.blob())
 }

@@ -6,6 +6,7 @@ import base64
 import binascii
 import codecs
 import contextlib
+import errno
 import os
 import re
 import subprocess
@@ -15,6 +16,7 @@ from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, cast
+from urllib.parse import quote
 
 from anyio import to_thread
 from fastapi import APIRouter, Depends, Request, Response
@@ -23,7 +25,7 @@ from agent.api import contracts as dto
 from agent.api.sessions import owner
 from agent.api.workspace_fs import create_entry, read_file
 from agent.media import IMAGE_LIMIT, IMAGE_SUFFIXES, ImageReference, image_mime, save_image
-from agent.security.sensitive_paths import validate_windows_path
+from agent.security.sensitive_paths import is_sensitive_path, validate_windows_path
 from agent.tools.native.file_search import file_search_status
 from agent.utils.sandbox import process_sandbox_status
 
@@ -33,6 +35,7 @@ if TYPE_CHECKING:
 
 IGNORED = {".git", ".venv", "node_modules", "__pycache__", "dist", "build", ".pytest_cache"}
 PREVIEW_LIMIT = 512 * 1024
+DOWNLOAD_LIMIT = 48 * 1024 * 1024
 DIFF_LIMIT = 256 * 1024
 
 
@@ -128,6 +131,30 @@ def preview(root: Path, relative: str, limit: int = PREVIEW_LIMIT) -> FilePrevie
     return {"path": relative, "content": "" if binary else content, "binary": binary,
             "size": info.st_size, "modified_at": timestamp(info.st_mtime), "truncated": truncated,
             "mime_type": "application/octet-stream" if binary else "text/plain", "data_url": ""}
+
+
+def download(root: Path, relative: str) -> Response:
+    path = resolve(root, relative)
+    if is_sensitive_path(path) or any(part.casefold() == ".git" for part in Path(relative).parts):
+        raise dto.APIError(403, "ACCESS_DENIED", "不能下载敏感路径中的文件。")
+    # Keep the original relative spelling: canonicalizing it before read_file
+    # would turn a symlink into an apparently safe regular-file path.
+    try:
+        data, info = read_file(root, relative, DOWNLOAD_LIMIT)
+    except OSError as exc:
+        if exc.errno in {errno.ELOOP, errno.ENOTDIR, errno.EISDIR}:
+            raise dto.APIError(403, "ACCESS_DENIED", "只能下载工作区内的普通文件。") from exc
+        raise
+    if info.st_size > DOWNLOAD_LIMIT or len(data) > DOWNLOAD_LIMIT:
+        raise dto.APIError(413, "FILE_DOWNLOAD_TOO_LARGE", "文件超过下载大小限制（48 MiB）。")
+    filename = re.sub(r'[\\/\x00-\x1f\x7f]', "_", path.name)
+    fallback = re.sub(r"[^A-Za-z0-9._-]", "_", filename).strip(".") or "download"
+    encoded = quote(filename, safe="", errors="replace")
+    return Response(data, media_type="application/octet-stream", headers={
+        "Content-Disposition": f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}",
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+    })
 
 
 def new_entry(root: Path, parent: str, name: str, kind: str) -> FileEntry:
@@ -303,6 +330,10 @@ def routes(core: AgentCore, execution: Execution) -> APIRouter:
     @router.get("/files/content", response_model=dto.WorkspaceFileResponse)
     async def content(workspace_id: str, folder_id: str = "", path: str = "") -> FilePreview:
         return await to_thread.run_sync(partial(preview, await root(workspace_id, folder_id), path))
+
+    @router.get("/files/download", dependencies=[Depends(owner)], response_model=None)
+    async def download_file(workspace_id: str, folder_id: str = "", path: str = "") -> Response:
+        return await to_thread.run_sync(partial(download, await root(workspace_id, folder_id), path))
 
     @router.post("/files/images", status_code=201, dependencies=[Depends(owner)], response_model=ImageReference)
     async def upload_image(workspace_id: str, body: dto.ImageUpload, folder_id: str = "") -> ImageReference:

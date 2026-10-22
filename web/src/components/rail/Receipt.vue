@@ -27,7 +27,7 @@ const folderId = computed(() => {
 const root = computed(
   () => workspace.folders.find((item) => item.id === folderId.value)?.root_path || '',
 )
-const files = computed(() => changedFiles(props.turn, root.value))
+const files = computed(() => changedFiles(props.turn, root.value, folderId.value))
 const commands = computed(() => commandSteps(props.turn))
 const failures = computed(() => props.turn.steps.filter((step) => step.status === 'failed'))
 const facts = computed(

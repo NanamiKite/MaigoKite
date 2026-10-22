@@ -346,6 +346,7 @@ mcp:
       enabled_tools: ["search", "read"]
       disabled_tools: []
       result_adapter: "none"  # 默认；仅显式接入天线服务时选 antenna_design
+      request_timeout_seconds: 30  # 1～660；仅工具调用，资源导入仍限 30 秒
 ```
 
 `command` 以 argv 方式直接执行，不经过 shell；`cwd` 必须位于默认工作区内。`{workspace}` 在 cwd/args 中替换为该路径，而不是当前会话选择的目录。`env_allowlist` 只声明从 Core 启动环境继承的变量名，不得与 `secret_env` 重名，凭证值不得写入 YAML。工具命名为 `<server>__<tool>`，调用沿用 ToolPolicy、审批和审计；此审批不限制 MCP 程序自行启动的行为，不等于系统沙箱。
@@ -358,7 +359,22 @@ mcp:
 
 ### 8.1 天线计算与方向图
 
-这是可选的本地工程扩展，不随普通聊天安装求解器，也不表示完整天线设计工作流已经交付。
+这是可选的本地工程扩展，不随普通聊天安装求解器。已有结果可导出候选设计包；自动优化和可直接制作的工程验收仍不包含在内。
+
+推荐在仓库根目录生成 **MCP + Skill 联合配置**，Linux / Windows PowerShell 使用相同命令（将结果目录改成自己的绝对路径）：
+
+```sh
+uv sync --project extensions/antenna_design --locked --extra engineering --extra mcp
+uv run --project extensions/antenna_design --no-sync antenna-design connect --root /absolute/antenna-project --output antenna-workflow.json
+```
+
+Windows 的 `--root` 可用 `D:/antenna-project`。生成器保存本机独立环境的 Python 路径、工具白名单、结果适配、计算/请求时限和随包 Skill；不启动服务、不改现有设置。配置不能直接拷给另一台电脑使用，应在目标机器重新生成。
+
+打开 **扩展 → 导入工作流**，选择 JSON，核对命令、目录和 Skill，确认需要覆盖的同名条目；旧工具白名单变化另行确认。保存后点击 **应用并检查连接**。导入不安装依赖、不自动执行命令，也不覆盖其他服务或凭证。扫描目录中已有同名 Skill 时需先自行移走旧副本或调整扫描目录，不能覆盖托管条目来假装更新成功；原来明确停用的 Skill 也不会被暗中启用。
+
+已有 OB11 项目应继续指向原 `service-results`，省略 `--max-solver-runs` 保留总额度和已用次数。升级后重新生成配置，明确确认新增 `antenna.evaluate / antenna.export / antenna.get_delivery`，否则旧白名单仍可能隐藏这些工具。
+
+手动配置方式仍可用：
 
 1. 在 `extensions/antenna_design` 目录运行 `uv sync --locked --extra engineering --extra mcp`，建立独立服务环境。
 2. 在“扩展 → MCP”添加服务，命名空间可填 `antenna`。命令填写独立环境的 Python **绝对路径**：Linux 为 `<包目录>/.venv/bin/python`，Windows 为 `<包目录>\.venv\Scripts\python.exe`，不是主应用的 Python。
@@ -374,13 +390,27 @@ antenna_workflow.mcp_server
 ```
 
 4. “结果展示”选择“天线结果与方向图”，保存并点击“应用并检查连接”。此选择允许在获准计算后，把校验过的结果复制到当前对话文件夹；只用于可信的天线服务。其他 MCP 保持“标准工具结果”。
-5. 服务提供 `antenna.model_validate / antenna.solve`；若命名空间为 `antenna`，模型看到 `antenna__antenna_model_validate / antenna__antenna_solve`。参数使用工程 JSON 对象，示例与输入限制见[独立包说明](../../extensions/antenna_design/README.md)，不是把任意文件路径交给服务。
+5. “工具请求超时（秒）”默认 30。较慢计算可将参数中的 `--timeout` 设为 120，同时把此项设为 150，留出回执与清理余量；保存后应用才能生效。仅修改服务器参数不会自动延长宿主等待。
+6. 服务提供 `antenna.project_status / antenna.model_validate / antenna.solve / antenna.evaluate / antenna.get_result / antenna.render / antenna.cancel / antenna.export / antenna.get_delivery`；若命名空间为 `antenna`，模型看到 `antenna__antenna_solve` 等名称。先查询项目记录，再使用工程 JSON 对象求解；输入限制见[独立包说明](../../extensions/antenna_design/README.md)，不是把任意文件路径交给服务。
+7. 在独立包目录用 `uv run --no-sync antenna-design skill --output <新目录>/SKILL.md` 导出随包工作流说明，在“扩展 → Skill”导入并应用。Skill 指导保存需求、输入版本、run_id 和下一步；不增加执行器，也不负责强制累计预算。
 
-调用仍经过现有 MCP 审批。成功结果导入当前对话文件夹的 `antenna-results/<调用标识>/`，聊天展示水平/垂直方向图，点击可打开文件；SVG、数值 JSON 和可导出的 `.maa` 也保留在该目录。服务原件不会被搬走或覆盖。
+服务以专用结果目录为一个项目，SQLite 持久保存预算与运行编号。新目录默认允许 3 次求解尝试；需要调整时，在参数框另外增加 `--max-solver-runs` 和总次数两行，然后应用配置。省略参数则继续使用已保存限额，重启不重置已用次数。失败/取消保守占用次数，取回和补画不占求解额度；旧目录首次接管按目录数保守计入。`project_status` 可查询剩余额度和丢失的编号。额度仅控制该 MCP 项目，不是模型服务余额，也不是整个聊天的 token 限额。
+
+调用仍经过现有 MCP 审批。成功结果导入当前对话文件夹的 `antenna-results/<结果内容标识>/`，聊天展示已完成的水平/垂直方向图，点击可打开文件；SVG、数值 JSON 和可导出的 `.maa` 也保留在该目录。服务原件不会被搬走或覆盖。
+
+要求设计成果时，Skill 在评价后继续调用 `antenna.export`，产出报告、几何 SVG、尺寸 CSV、模型、材料说明、验证缺口、施工调试说明、复算入口和 `design.zip`。ZIP 按原 run_id 分目录保留各频点数值及方向图，不混覆盖同名文件。聊天回执可打开已导入文件，文件预览提供下载按钮，二进制 ZIP 不要求能文本预览。下载沿用身份和工作区检查，上限 48 MiB。
+
+交付包标记 `CANDIDATE_NOT_VALIDATED`：尺寸是数值模型，不是已经验证的下料清单，材料/匹配/机械未知项保持未知。导出不调用求解器、模型或增加额度；重复同编号同输入复用，导出回执丢失用 `get_delivery(delivery_id)`，不要重新计算。包读取/导入沿用逐文件完整性和权限检查。
 
 导入前逐文件验证 URI、MIME、大小和 SHA256；每次写入重新检查权限。只读或权限中途降级时停止后续导入。部分文件导入失败不自动重算，结果保留 `import_warning`；已核验文件不会被删除。只有最后写入 `import-receipt.json` 的副本才标记导入完成。
 
-本入口只提供明确输入的薄线计算与图表，结果仍为 `COMPUTED_NOT_VALIDATED`，不能据此声称已经通过收敛、MMANA 兼容或制作验证。宿主接线当前仅完成静态检查，未执行新增端到端验收。
+丢失回执或导入中断时，用 `get_result(run_id)` 取回原结果并补齐同一目录，不新增计算、不覆盖用户修改。数值已保存而图片不完整时，回执为 `render_status=incomplete`；用 `render(run_id, output_run_id)` 在新编号下补画。补画回执丢失应查询新的输出编号。旧版缺少数值阶段清单的包可读取，但不能直接补画；未知或损坏的结果不自动重算。
+
+启用此结果适配后，停止任务或计算请求超时会自动向服务取消**本次调用**并等待停止回执；不停止同服务的其他调用。连接中断或旧服务不支持时，仍会提示远端停止未确认，不能据此直接重新求解。单独停止已知计算可调用 `cancel(run_id)`，补画使用输出编号；未返回 `worker_stopped=true` 不视作已确认停止。升级代码后重启 Python 后端，再“应用并检查连接”重载扩展工具。
+
+运行中会明确提示等待查询；缺失、未完成、损坏和编号冲突分别提示下一步。本地结果已有修改时，提示中给出相对文件位置；先自行保留并移走冲突副本，再取回原结果，不用重新计算。
+
+本入口只提供明确输入的薄线计算与图表，结果仍为 `COMPUTED_NOT_VALIDATED`，不能据此声称已经通过收敛、MMANA 兼容或制作验证。Linux 已定向复跑 MCP/计算/结果导入与显式工具审批路径，尚未完成 GUI、Windows 或完整自主设计工作流验收。
 
 ## 9. 凭证
 

@@ -58,7 +58,7 @@ def parse_uri(uri: str) -> tuple[str, str]:
     return match[1], match[2]
 
 
-def _read(root: Path, relative: str, limit: int) -> bytes:
+def read_bounded(root: Path, relative: str, limit: int) -> bytes:
     """Only internal fixed filenames enter here; also refuse linked paths and special files."""
     path = root / relative
     for component in (root, *path.parents[: len(path.parts) - len(root.parts) - 1], path):
@@ -78,8 +78,8 @@ def _read(root: Path, relative: str, limit: int) -> bytes:
 
 
 def read_manifest(root: Path) -> dict[str, ArtifactRef]:
-    receipt = Completion.model_validate_json(_read(root, "completed.json", 1024))
-    raw = _read(root, "manifest.json", MAX_METADATA_BYTES)
+    receipt = Completion.model_validate_json(read_bounded(root, "completed.json", 1024))
+    raw = read_bounded(root, "manifest.json", MAX_METADATA_BYTES)
     if hashlib.sha256(raw).hexdigest() != receipt.manifest_sha256:
         raise ArtifactUnavailableError("Manifest digest mismatch")
     manifest = _MANIFEST.validate_json(raw)
@@ -94,7 +94,7 @@ def read_artifact(root: Path, manifest: dict[str, ArtifactRef], artifact_id: str
     if entry is None or entry.path != relative:
         raise ArtifactUnavailableError("Artifact not published")
     limit = MAX_METADATA_BYTES if artifact_id in {"request", "summary", "compatibility"} else MAX_RESOURCE_BYTES
-    data = _read(root, relative, limit)
+    data = read_bounded(root, relative, limit)
     if len(data) != entry.size_bytes or hashlib.sha256(data).hexdigest() != entry.sha256:
         raise ArtifactUnavailableError("Artifact digest mismatch")
     return data

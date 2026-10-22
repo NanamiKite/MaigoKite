@@ -19,6 +19,7 @@ const messages: Record<string, { text: string; numbers?: string[] }> = {
   WORKSPACE_NAME_LENGTH: { text: '工作区名称不能超过 {max} 个字符。', numbers: ['max'] },
   WORKSPACE_OWNER_REQUIRED: { text: '只有工作区所有者可以删除工作区。' },
   DEFAULT_WORKSPACE_PROTECTED: { text: '默认工作区不能删除。' },
+  FILE_DOWNLOAD_TOO_LARGE: { text: '文件超过下载大小限制（48 MiB）。' },
   WORKSPACE_PROCESS_ACTIVE: { text: '工作区中有运行中的进程，请停止后再删除。' },
   WORKSPACE_TASK_ACTIVE: { text: '工作区中有未结束的任务，请完成或停止后再删除。' },
   WORKSPACE_TASK_RECOVERABLE: { text: '工作区中有可恢复的任务，请完成或停止后再删除。' },

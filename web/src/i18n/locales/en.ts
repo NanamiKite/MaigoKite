@@ -1,4 +1,49 @@
 const en: Record<string, string> = {
+  下载文件: 'Download file',
+  '正在下载…': 'Downloading…',
+  '文件超过下载大小限制（48 MiB）。': 'The file exceeds the download limit (48 MiB).',
+  导入工作流: 'Import workflow',
+  '选择可信来源的工作流 JSON，同时导入 MCP 配置与 Skill。只保存配置，不安装依赖或启动程序。':
+    'Select a trusted workflow JSON file to import MCP settings and Skills together. This only saves settings; it does not install dependencies or start programs.',
+  '工作流 JSON（最多 1 MiB）': 'Workflow JSON (up to 1 MiB)',
+  '工作流文件不能超过 1 MiB。': 'Workflow files must not exceed 1 MiB.',
+  '工作流文件格式无效或包含不支持的字段。':
+    'The workflow file is invalid or contains unsupported fields.',
+  '合并后的扩展数量超限或服务名称冲突。':
+    'The merged settings exceed extension limits or contain conflicting server names.',
+  '工作流预览：{0}': 'Workflow preview: {0}',
+  '请核对命令、路径和技能全文。应用后程序可在本机运行；不相关配置、扫描目录和全局工具开关保持不变。':
+    'Review commands, paths and full Skill instructions. Applying can run programs locally. Unrelated settings, scan directories and global tool switches are preserved.',
+  将替换同名服务: 'Will replace the existing server with this name',
+  将添加服务: 'Will add a server',
+  '启动参数（JSON 数组，逐项传入，不经 shell）':
+    'Arguments (JSON array; passed individually, without a shell)',
+  继承环境变量名: 'Inherited environment variable names',
+  凭证环境变量名: 'Secret environment variable names',
+  导入后允许工具: 'Allowed tools after import',
+  导入后禁用工具: 'Disabled tools after import',
+  当前允许工具: 'Currently allowed tools',
+  当前禁用工具: 'Currently disabled tools',
+  无: 'None',
+  '全部工具（包括今后新增）': 'All tools (including future additions)',
+  将替换已导入的同名技能副本: 'Will replace the imported Skill copy with this name',
+  将添加技能: 'Will add a Skill',
+  查看技能全文: 'View full Skill instructions',
+  '技能全文：{0}': 'Full Skill instructions: {0}',
+  '扫描目录中已有同名技能：{0}。不能覆盖；请先移除目录中的重复项或调整扫描目录，应用后重新导入。':
+    'Scanned directories already contain these Skills: {0}. They cannot be overwritten. Remove the duplicates or adjust scan directories, apply those changes, then import again.',
+  '我确认替换上述同名服务配置和技能副本。':
+    'I confirm replacing the server settings and Skill copies listed above.',
+  '这些服务的工具范围将改变：{0}。新增工具需在允许列表中，且不在禁用列表中；全局停用的工具仍需手动启用。':
+    'Tool access will change for: {0}. New tools must be allowed and not disabled. Globally disabled tools still require manual enabling.',
+  '我已核对前后差异，同意更新这些服务的允许/禁用工具列表。':
+    'I reviewed the differences and agree to update these servers’ allowed and disabled tool lists.',
+  '若更新了正在运行的服务源码，请先完成任务并重启应用后端，再应用配置；仅重新发现工具不会重启健康进程。':
+    'If running server source code was updated, finish tasks and restart the application backend before applying. Tool discovery alone does not restart a healthy process.',
+  确认导入并保存: 'Confirm import and save',
+  '工作流已保存；尚未启动，请点击“应用并检查连接”。':
+    'Workflow saved, but not started. Select “Apply and check connections”.',
+  '工具请求超时（秒）': 'Tool request timeout (seconds)',
   结果展示: 'Result display',
   标准工具结果: 'Standard tool results',
   天线结果与方向图: 'Antenna results and radiation patterns',

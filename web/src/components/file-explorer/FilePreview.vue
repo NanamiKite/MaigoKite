@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 import type { FileTreeNode } from '@/composables/useFileTree'
-import type { WorkspaceFileContent } from '@/api/client'
+import { api, type WorkspaceFileContent } from '@/api/client'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import CodeBlock from '@/components/common/CodeBlock.vue'
 import InkLoader from '@/components/common/InkLoader.vue'
@@ -18,7 +18,12 @@ const props = defineProps<{
 defineEmits<{ (event: 'retry' | 'close'): void }>()
 const isElectron = Boolean(desktopEffects),
   error = ref(''),
-  opening = ref(false)
+  opening = ref(false),
+  downloading = ref(false)
+let openingRequest = 0
+let downloadRequest: AbortController | undefined
+let downloadURL: string | undefined
+let downloadCleanup: ReturnType<typeof setTimeout> | undefined
 const workspace = useWorkspaceStore()
 const mode = ref<'source' | 'preview'>('preview')
 const modes = [
@@ -74,6 +79,9 @@ function navigateMode(event: KeyboardEvent) {
 watch(
   () => [props.node.path, workspace.selectedId],
   () => {
+    openingRequest += 1
+    opening.value = false
+    clearDownload()
     error.value = ''
     imageError.value = false
     mode.value = 'preview'
@@ -81,18 +89,84 @@ watch(
 )
 async function openFile() {
   if (opening.value) return
+  const request = ++openingRequest
   opening.value = true
   const path = props.node.path
   const folderId = workspace.selectedId
   try {
     const result = await desktopEffects?.openPath(path, folderId)
-    if (path === props.node.path && folderId === workspace.selectedId) error.value = result || ''
+    if (request === openingRequest && path === props.node.path && folderId === workspace.selectedId)
+      error.value = result || ''
   } catch (reason) {
-    if (path === props.node.path && folderId === workspace.selectedId) error.value = String(reason)
+    if (request === openingRequest && path === props.node.path && folderId === workspace.selectedId)
+      error.value = String(reason)
   } finally {
-    opening.value = false
+    if (request === openingRequest) opening.value = false
   }
 }
+function releaseDownloadURL() {
+  if (downloadCleanup !== undefined) clearTimeout(downloadCleanup)
+  downloadCleanup = undefined
+  if (downloadURL) URL.revokeObjectURL(downloadURL)
+  downloadURL = undefined
+}
+function clearDownload() {
+  downloadRequest?.abort()
+  downloadRequest = undefined
+  downloading.value = false
+  releaseDownloadURL()
+}
+async function downloadFile() {
+  if (downloading.value || props.node.type !== 'file') return
+  releaseDownloadURL()
+  const request = (downloadRequest = new AbortController())
+  const path = props.node.path
+  const folderId = workspace.selectedId
+  const name = props.node.name
+  downloading.value = true
+  error.value = ''
+  try {
+    const blob = await api.downloadWorkspaceFile(path, folderId, request.signal)
+    if (
+      request.signal.aborted ||
+      downloadRequest !== request ||
+      path !== props.node.path ||
+      folderId !== workspace.selectedId
+    )
+      return
+    downloadURL = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = downloadURL
+    link.download = name
+    document.body.append(link)
+    try {
+      link.click()
+    } finally {
+      link.remove()
+      // Let the browser start consuming the object URL before releasing it.
+      downloadCleanup = setTimeout(releaseDownloadURL, 1000)
+    }
+  } catch (reason) {
+    if (
+      !request.signal.aborted &&
+      downloadRequest === request &&
+      path === props.node.path &&
+      folderId === workspace.selectedId
+    ) {
+      releaseDownloadURL()
+      error.value = reason instanceof Error ? reason.message : String(reason)
+    }
+  } finally {
+    if (downloadRequest === request) {
+      downloadRequest = undefined
+      downloading.value = false
+    }
+  }
+}
+onScopeDispose(() => {
+  openingRequest += 1
+  clearDownload()
+})
 </script>
 
 <template>
@@ -128,6 +202,16 @@ async function openFile() {
       @click="openFile"
     >
       {{ opening ? $t('正在打开…') : $t('在本机打开') }}
+    </button>
+    <button
+      v-if="node.type === 'file'"
+      type="button"
+      class="secondary-button"
+      :disabled="downloading"
+      :aria-busy="downloading || undefined"
+      @click="downloadFile"
+    >
+      {{ downloading ? $t('正在下载…') : $t('下载文件') }}
     </button>
     <p
       v-if="error"

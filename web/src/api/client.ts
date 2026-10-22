@@ -1,4 +1,4 @@
-import { GatewayError, request, workspacePath } from './http'
+import { GatewayError, request, requestBlob, workspacePath } from './http'
 import type { components } from './generated/transport'
 import {
   validateConversationResponse,
@@ -360,6 +360,7 @@ export interface MCPConfiguration {
   enabled_tools: string[] | null
   disabled_tools: string[]
   result_adapter?: 'none' | 'antenna_design'
+  request_timeout_seconds?: number
 }
 export interface ManagedSkill {
   name: string
@@ -1033,6 +1034,12 @@ export const api = {
       `${path}/files/content?path=${encodeURIComponent(relativePath)}&${folderQuery(folderId)}`,
       { signal },
       validateWorkspaceFileResponse,
+    )
+  },
+  downloadWorkspaceFile(relativePath: string, folderId = '', signal?: AbortSignal): Promise<Blob> {
+    return requestBlob(
+      `${path}/files/download?path=${encodeURIComponent(relativePath)}&${folderQuery(folderId)}`,
+      { signal, cache: 'no-store' },
     )
   },
   createWorkspaceEntry(

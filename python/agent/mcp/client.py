@@ -93,7 +93,7 @@ class MCPClient:
                     self._read_stream = read
                     async with ClientSession(
                         read, write,
-                        read_timeout_seconds=timedelta(seconds=self.request_timeout),
+                        read_timeout_seconds=timedelta(seconds=max(30, self.request_timeout)),
                         client_info=Implementation(name="MaigoKite", version="0.1.0"),
                     ) as session:
                         await session.initialize()
@@ -173,11 +173,19 @@ class MCPClient:
         except Exception as exc:
             raise MCPError("MCP tool discovery failed; check service configuration") from exc
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def call_tool(
+        self, name: str, arguments: dict[str, Any], *,
+        meta: dict[str, Any] | None = None, timeout: float | None = None,
+    ) -> dict[str, Any]:
         session = self._get_session()
+        deadline = self.request_timeout if timeout is None else timeout
+        if not math.isfinite(deadline) or deadline <= 0:
+            raise ValueError("Tool timeout must be finite and positive")
         try:
-            async with asyncio.timeout(self.request_timeout):
-                result = await session.call_tool(name, arguments)
+            async with asyncio.timeout(deadline):
+                result = await session.call_tool(
+                    name, arguments, meta=meta, read_timeout_seconds=timedelta(seconds=deadline),
+                )
             return result.model_dump(mode="json", by_alias=True, exclude_none=True)
         except Exception as exc:
             # CancelledError deliberately propagates. SDK request IDs and readers
@@ -194,7 +202,8 @@ class MCPClient:
             raise ValueError("MCP resource limit must be between 1 byte and 16 MiB")
         session = self._get_session()
         try:
-            async with asyncio.timeout(self.request_timeout):
+            # Large compute deadlines must not turn artifact reads into equally long waits.
+            async with asyncio.timeout(30):
                 result = await session.read_resource(AnyUrl(uri))
             if len(result.contents) != 1:
                 raise MCPError("MCP resource must contain exactly one item")

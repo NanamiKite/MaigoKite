@@ -3,11 +3,23 @@
 > 本文说明独立天线包的工程契约、MMANA 兼容范围、方向图、材料和预算，以及求解器选择。
 > 当前采用未修改的 pymininec，通过公开接口适配，不自研数值内核。MaigoKite 是可选宿主，接入遵循 [运行时设计](AgentRuntime.md) 和 [MCP 集成](../agent-capabilities/mcp/mcp-integration.md)；领域包不依赖这些产品 API。
 
-当前实现包括 [独立 `antenna-design` 工程入口](../../extensions/antenna_design/README.md)、可选 MCP Server 和宿主结果适配。它接受显式 JSON 或受限 MAA 输入，通过公开 solver API 计算，保存复电流、原始远场、PNG/SVG 和完整性清单，并限制单次计算进程的运行时间。经批准后，宿主可将结果导入当前对话目录并展示图片。包不依赖主应用或 LangGraph；新增入口只完成静态检查，尚未运行行为和数值验收。
+当前实现包括 [独立 `antenna-design` 工程入口](../../extensions/antenna_design/README.md)、可选 MCP Server 和宿主结果适配。它接受显式 JSON 或受限 MAA 输入，通过公开 solver API 计算，保存复电流、原始远场、PNG/SVG 和完整性清单，并限制单次计算进程的运行时间。经批准后，宿主可将结果导入当前对话目录并展示图片。包不依赖主应用或 LangGraph；Linux 的计算、取消、取回和导入已有定向运行记录，不代表完整工程验证或 Windows 验收。
+
+2026-10-22 增加结果取回、使用已保存数值补画和可安装的工作流 Skill；MCP 工具超时可按服务设置。数值阶段先保存并校验，绘图失败不再丢弃完整数值；`render_status` 与工程验证状态分开。Skill 用现有文件工具记录需求、输入版本和 run_id，供后续继续；不是新的阶段执行器。
+
+2026-10-23 增加独立 SQLite 项目记账和 `antenna.project_status`：一个操作员指定的结果根目录是一份预算，求解准入先提交、失败/取消不退回，跨回合和重启保留；查询、复用和补画不扣求解额度。状态查询投影已有 AnyIO owner 和产物证据，不持久化另一套 worker 状态机。同日 OB11 原创候选三频计算及后续 Linux 恢复验收已核对预算保留；后续 25 项定向检查没有新增求解。LLM/token 预算、完整阶段准入和 AV680 加载结构支持仍未实现。
 
 2026-10-19 的求解器评估已完成 A01/A02、六例主频和 23 项多导线/扫频参考的对照，也检查了冻结接线的复电流幅相及五点材料表示。这些结果支持继续采用 pymininec，但正式工程验收 profile、方环缺失接点和更广的材料/结构覆盖尚未完成，不能称为全面兼容认证。详情见[工程评估](../../experiments/mmana_compatibility/ENGINEERING.md)及[实验范围](../../experiments/mmana_compatibility/README.md)。
 
-需求访谈、累计预算、优化器和完整设计工作流尚未交付。已有数值实验不等于新增 CLI、MCP 或主应用接入已经验收。
+自动需求访谈、工作流级 LLM/token 预算、优化器和完整设计工作流尚未交付。当前恢复验收包括两个独立 Core 进程的审批续接、MCP 重启取回、补画/取消恢复、冲突文件保护、图片 API 与历史工具事件；不等于模型自主编排、GUI、Windows 或强杀恢复验收，也不能用旧数值实验代替工程收敛与制作验证。
+
+绘图证据与计算证据分别记录：原 `environment.json` 随数值保留；`render-environment.json` 与 `render-source/antenna_workflow/` 记录当前绘图实现和依赖。补画准备失败在已创建的新目录内尽力保存安全失败回执，不覆盖源文件、不退还预留或自动重放。
+
+工作流现增加只读 `antenna.evaluate`：以明确参考/设计目标比较同一几何、馈点和数值设置的已有频点；核对结果完整性及内部一致性，从原始方向样本求前向增益与 F/B，不将峰值或图像显示值代入。参考比较、设计目标、原生 R+jX、直连 SWR 与尚未计算的匹配后性能分开。缺失点/下一批提案使用现有项目预算快照计算缺口，不启动求解、预留或另建阶段机。接口见[扩展目标评价](../../extensions/antenna_design/README.md#计算后的目标评价)。
+
+配套 Skill 将“性能目标原创设计”与“已有实物复算”分开：初始设计不再被原厂尺寸阻塞；每次计算后保存指标差额、证据和下一步。预算用尽不阻止评价、候选文件导出/取回或准备下一批，但不自动加额度；三频中心点仍不能代表全带性能。
+
+同日补齐产品交付入口：CLI `connect` 生成本机 MCP + Skill 联合配置，宿主复用原设置 API 保存/应用；同名覆盖和工具范围变化显式确认，不创建插件生命周期框架。`antenna.export / antenna.get_delivery` 在独立领域包内把已有同设计数值投影成固定设计文件及 ZIP，服务存于 `.deliveries`，不计求解次数；宿主只校验传输回执和固定资源，再投影文件引用。文件查看增加鉴权下载，ZIP 不被宿主解压。原 Runtime、Repository 和审批不变。交付状态固定为候选未验证，未建自动优化器或制造认证流程。
 
 补充判断：四变体总场 RMS 主要受 CSV 的 0.01 dB 导出步长影响；候选同样保留两位小数后有 98.5%～100% 的有效样本与参考相同。该量级不构成继续修改内核或自研求解器的依据。保留电流/电抗差异和未覆盖语义，不把当前模型的方向图接近等同于全面 MMANA 兼容。
 
@@ -138,7 +150,7 @@ Domain Reasoning 不新增常驻专家 Agent。领域层定义需求、候选取
 
 同仓库的 `extensions/antenna_design/` 已建立独立 Python distribution：自有 `pyproject.toml`、`uv.lock`、LICENSE、README、输入示例和 `src/antenna_workflow/`。基础安装只含 Pydantic，求解/绘图放在 `engineering` extra，官方 MCP SDK 放在 `mcp` extra，不进入普通聊天默认安装。当前工程 CLI 与可选 MCP stdio 入口共用 worker；没有创建尚未实现的领域阶段、持久化或执行框架空壳。MaigoKite 结果 adapter 已位于主应用集成层，只按版本化 MCP 传输回执接线。
 
-已编码的 MCP 只开放 `antenna.model_validate` 和 `antenna.solve`，不提供几十个低层 CRUD。验证工具明确只检查输入；求解工具返回有界摘要与资源链接，原始数组、PNG/SVG、可导出子集的 MAA 按需读取。每次最多一项数值计算，单实例并发拒绝，默认 20 秒 worker 限额；结果发布、取消清理和 artifact 读取边界见[独立包说明](../../extensions/antenna_design/README.md#独立-mcp-server)。本轮仅静态检查，不称为已完成跨平台/端到端验收，也未注册主应用专用天线模式。
+已编码的 MCP 开放 `antenna.model_validate / solve / get_result / render / cancel`，不提供低层 CRUD。验证工具只检查输入；新求解最多一次数值计算，返回有界摘要与资源链接。`get_result` 查询原 run_id，不需原始输入、不执行 worker；`render` 复制核验过的数值到新 output_run_id 后补画，不调用 solver、不改旧目录。数值已保存但图不完整的结果可以发布，图不进入资源清单。单实例只容纳一个 solve/render，默认 20 秒 worker 限额；宿主工具时限默认 30，可单独调长。`cancel` 按运行编号及可选调用身份停止 worker，清理后才确认；活动状态只来自本进程资源所有权，历史结果仍来自磁盘证据。结果发布、取消清理和读取边界见[独立包说明](../../extensions/antenna_design/README.md#独立-mcp-server)。已做 Linux 真实 MCP/solver、生产 Core 显式工具复跑，不称为自然语言、GUI 或跨平台验收，也未注册主应用专用天线模式。
 
 `antenna-design` 是本地 distribution 名，`antenna_workflow` 是导入命名空间，不表示已经公开发布。后续包内职责如下；这是实现边界，不要求一次创建全部目录或空类：
 
@@ -146,18 +158,18 @@ Domain Reasoning 不新增常驻专家 Agent。领域层定义需求、候选取
 | --- | --- | --- |
 | `contracts` / `domain` | Brief、材料依据、候选、阶段准入、预算与结果判据 | MaigoKite、HTTP/UI、LangGraph 执行对象 |
 | 可选执行适配器 | 将领域步骤交给现有执行器；MaigoKite 可用 LangGraph，独立 CLI 不必使用它 | 核心反向导入、`AgentCore` 私有方法 |
-| 持久化适配器 | 保存领域记录与预算，提供明确原子提交语义；具体存储实现延后 | 核心绑定某个数据库或 checkpoint 格式 |
+| `project_store` | 标准 SQLite 保存项目身份、求解准入、补画来源、额度修改；Brief 与阶段持久化待实现 | 主应用 Repository、聊天 checkpoint 或活跃 worker 状态 |
 | `engineering` | 所选 solver/optimizer 的公开接口适配、计算产物与高层 MCP handlers | 聊天历史、LLM 决策、宿主权限实现 |
 | `mmana` / `patterns` | 必要的兼容映射与差异规则、现有绘图组件的有界适配 | GUI 自动化、图片反推原始数据 |
 | `resources` | 分阶段领域知识、Schema、材料/兼容资料 | 宿主 SkillRegistry 才能读取的格式 |
 
-MaigoKite 的 `python/agent/integrations/antenna.py` 只负责结果传输契约、现有权限查询和产物落盘，不导入独立包或实现求解。用户在 MCP 设置显式选择 `result_adapter=antenna_design`，获准的 `antenna.solve` 才经过此投影；默认保持通用 MCP 行为。标准工具结果保存后，现有 UI 读取图片引用并打开工作区文件。配置步骤见[配置指南](../user-guide/Configuration.md#81-天线计算与方向图)。
+MaigoKite 的 `python/agent/integrations/antenna.py` 只负责结果传输契约、现有权限查询和产物落盘，不导入独立包或实现求解。用户在 MCP 设置显式选择 `result_adapter=antenna_design`，获准的 `solve / get_result / render` 才经过此投影；默认保持通用 MCP 行为。目录以命名空间、run_id 和资源 hash 标识，重复取回补齐同一副本，不覆盖用户修改；每次写入仍重新检查权限。标准工具结果保存后，现有 UI 读取图片引用并打开工作区文件。配置步骤见[配置指南](../user-guide/Configuration.md#81-天线计算与方向图)。
 
 LangGraph 依赖只存在于外部执行适配器，其 `thread_id`、interrupt、Command、checkpointer 不进入核心 API。MCP server 入口不导入执行适配器，也不强制安装模型 Provider；科学计算在工程进程执行。主应用 wheel 仅包含 `python/agent`，独立包有自己的构建元数据与资源声明，须独立安装，不能只把目录放进仓库就认为会随应用安装。[当前打包声明](../../pyproject.toml)
 
 领域包及天线 MCP 不导入 `agent.core`、`agent.runtime`、`agent.repository`、权限管理器、全局配置或产品事件模块；不使用动态导入、环境探测或 `sys.path` 修改绕过边界。配置、模型调用能力、存储和受限文件访问由组合入口显式提供。导入包本身不启动服务、不连接 MaigoKite 数据库、不读取宿主密钥。
 
-领域 Skill/提示资源随包分发，可按阶段直接加载，不要求先安装 MaigoKite SkillRegistry。宿主可以将其登记为 Skill，但阶段约束、预算和兼容判据仍由领域代码执行，不仅存在于宿主提示词中。MCP 只承担工程计算，不选择用户偏好或替 Agent 接受结果。首版不建插件市场、通用 DI、Capability Framework 或另一套 Agent Loop。
+随包 `skills/antenna-design/SKILL.md` 可通过 `antenna-design skill` 查看或导出，不要求安装 MaigoKite SkillRegistry；宿主可登记为 Skill。当前内容是输入整理、文件记录与恢复操作指引；已强制执行输入校验、MCP 项目累计求解准入、单次时间限制、结果完整性与宿主权限。确定性阶段准入、LLM/token 预算和工程兼容判据仍待实现，不能用 Skill 文本替代。MCP 不选择用户偏好或替 Agent 接受结果；不建插件市场、通用 DI、Capability Framework 或另一套 Agent Loop。
 
 ### 3.2 最小外部契约
 
@@ -185,7 +197,7 @@ LangGraph 依赖只存在于外部执行适配器，其 `thread_id`、interrupt�
 | solver 进程与计算任务 | MCP Server 的本次计算资源 | Agent 只持有受作用域约束的 job ID |
 | oracle、兼容 profile 与差异报告 | 开发验证资源及版本化报告 | 生产只使用明确覆盖范围的 profile，不调用 GUI |
 
-持久化实施时优先复用标准 SQLite 和一份可共享的存储适配，不同时开发两套等价实现；这不是当前 spike 的内容。现有 Repository 没有天线项目事务，不能把“复用 Repository”当成已有实现。领域只要求 revision 校验和预算预留/对账，不定义通用仓储框架或 event sourcing。模型/求解调用不跨持有数据库事务，重试使用同一 operation 身份对账，不承诺通用 exactly-once。
+当前 `project_store` 直接使用标准 SQLite 的事务保存求解准入，不借用主应用 Repository。预算提交先于目录创建和 worker 启动；调用期间不持有事务，提交后中断保守占用额度，缺少证据不自动重放。它不保存 Brief/阶段，不定义通用仓储框架或 event sourcing，也不承诺通用 exactly-once。未来领域 revision 与模型预算继续遵循同一权威所有权，而不是在宿主另存可编辑账本。
 
 若宿主选择 LangGraph，直接使用官方 checkpointer，不自行序列化 continuation，也不把 checkpoint 变成核心恢复格式。恢复应核对领域操作是否已提交，避免执行快照滞后导致重复计量或重复优化；UI 投影失败不成为重跑 solver 的理由。实现这种桥接须等兼容性路线成立后再做。[LangGraph 持久化边界](https://docs.langchain.com/oss/python/langgraph/persistence)
 
@@ -202,8 +214,8 @@ MaigoKite adapter 将项目显式绑定到当前工作区文件夹与对话；�
 | [Core 组合模型、工具与 Runtime](../../python/agent/core.py)；[API Execution 持有 HTTP 协程](../../python/agent/api/execution.py) | 组合根、HTTP/WS、退出时取消并等待的宿主机制 | Core、扩展重载和 task resume 当前认的是聊天 Runtime；新增 runner 必须纳入同一准入/退出边界，不能只启动无人管理的后台 Task |
 | [Runtime `_start_turn` / `recover`](../../python/agent/runtime/langgraph_runtime.py) | 官方 LangGraph/checkpointer 的使用经验 | 新回合只继承 messages；公开恢复只允许文件工具或已完成结构化结果的投影。不能通过增加 AgentState 字段得到跨回合项目，不能直接扩大成任意 MCP replay |
 | [ChatModelRuntime `get_langchain_model`](../../python/agent/models/runtime.py) | 配置、凭证、Provider 与 Core 持有的客户端 | adapter 借用模型调用，不复制 Provider 包装、不关闭共享客户端；模型请求仍需纳入领域预算，不能借用一整个聊天回合 |
-| [MCPClient](../../python/agent/mcp/client.py)、[MCPSettings](../../python/agent/extensions.py) | 官方 SDK、stdio 连接、环境与凭证管理；新增同连接有界 `resources/read` | 当前仅 stdio，默认请求 30 秒，没有任务协议封装；本地取消不证明远端已停止。资源 URI 不能被浏览器直接打开，读取上限不是传输层内存配额 |
-| [MCPToolWrapper](../../python/agent/tools/mcp_wrapper.py)、[结果适配](../../python/agent/integrations/antenna.py) | 工具发现、命名与 metadata；显式启用后，成功求解转为有界回执、校验的本地文件/图片引用 | 通用 MCP 仍保留原始 data；专用投影不把原始数组/日志写入上下文。字节上限不是整个工作流 token 预算，领域累计预算仍待实现 |
+| [MCPClient](../../python/agent/mcp/client.py)、[MCPSettings](../../python/agent/extensions.py) | 官方 SDK、stdio 连接、环境与凭证管理；同连接有界资源读取，天线适配使用公开 meta 与 cancel 操作取得停止回执 | 当前仅 stdio，默认请求 30 秒；通用 MCP 的本地取消仍不证明远端停止。天线停止未获确认时也必须提示未知。资源 URI 不能被浏览器直接打开，读取上限不是传输层内存配额 |
+| [MCPToolWrapper](../../python/agent/tools/mcp_wrapper.py)、[结果适配](../../python/agent/integrations/antenna.py) | 工具发现、命名与 metadata；显式启用后，成功求解转为有界回执、校验的本地文件/图片引用 | 通用 MCP 仍保留原始 data；专用投影不把原始数组/日志写入上下文。项目求解预算在服务端，不能当作整个工作流的 token 预算 |
 | [ProductToolMiddleware](../../python/agent/runtime/product_tools.py)、[PermissionManager](../../python/agent/tools/permission_mgr.py) | 实时权限决策与现有审批审计 | middleware 依赖产品 RunContext；直接调用 MCPClient 会跳过它。adapter 必须桥接政策和审计，不导入到领域包；不能信任 server 的只读标注自行降权 |
 | [ask_user_question](../../python/agent/tools/native/ask_user_question.py)、[Runtime `answer_question`](../../python/agent/runtime/langgraph_runtime.py) | 现有问题卡片、回答校验及版本语义 | 问题恢复绑定 tool_call_id 和聊天 checkpoint；领域问题须由宿主映射到对应执行器的等待/恢复入口，不能伪造聊天 ToolCall 来续接 |
 | [Repository `reserve_model_call`](../../python/agent/repository.py)、[SkillTool](../../python/agent/tools/native/skill.py) | 任务用量展示、Skill 发现与资源展示 | 预算以 task 为单位，Skill 只是指令读取；都不能替代跨轮预算和确定性阶段准入 |
@@ -211,7 +223,7 @@ MaigoKite adapter 将项目显式绑定到当前工作区文件夹与对话；�
 
 首版采用本地 stdio 与明确授权的项目目录，因此可以复用工作区文件预览；不为此新增云端 artifact 服务。文件不在该目录时拒绝引用或显式导入并校验，不让前端自动下载任意 MCP URL。领域包不解释 MaigoKite 的 folder ID，宿主不将本机绝对路径写成可移植 artifact 身份。
 
-资源与预览接线已编码：固定资源先核验再导入 `antenna-results/<调用标识>/`，每次读/写重新核对会话目录及权限，最后写导入回执。部分失败保留已核验文件并报告导入未完成，不把成功求解改成失败，不自动重算。现有 MCP 设置增加显式结果展示选择，未新增 Runtime、数据库表或 HTTP 资源代理。新链路只做静态检查，尚无端到端/Windows 验收回执。
+资源与预览接线已编码：固定资源先核验再导入 `antenna-results/<调用标识>/`，每次读/写重新核对会话目录及权限，最后写导入回执。部分失败保留已核验文件并报告导入未完成，不把成功求解改成失败，不自动重算。修改冲突提供稳定错误码和工作区相对文件位置；用户先保留并移走冲突文件，再 get_result 补齐。现有 MCP 设置增加显式结果展示选择，未新增 Runtime、数据库表或 HTTP 资源代理。Linux 已复跑结果导入与生产 Core 显式工具链，GUI/Windows 未验收。
 
 剩余领域步骤、问题映射和预算准入不应转成核心对宿主或 LangGraph 的依赖。不能在外层聊天 Loop 再执行一遍同一工程调用或另行扣除一份 workflow 预算；结果适配也不代表完整领域工作流已完成。
 
@@ -232,7 +244,7 @@ Core 创建 adapter 并提供借用的模型/MCP 能力；API Execution 持有�
 - 在同一版本及已支持的平台环境中，项目快照/artifact 可从宿主映射导出并由独立入口读取；已有预算不会重置。活跃模型连接不承诺跨进程接管；尚在运行的 MCP job 必须查询确认，未知状态不能自动重放。
 - 提取独立仓库时只调整发布位置、安装与宿主适配依赖，不修改领域 schema、阶段规则、MMANA 映射、预算语义或公共调用接口。可选适配依赖须明确声明，不能从包顶层导入，不能依靠主应用间接安装。
 
-独立工程包、CLI 与 MCP Server 已创建；它们不导入 `agent`、LangGraph、实验脚本或调整 `sys.path`。静态检查通过不等于独立安装、Windows/Linux 进程行为与数值复算已验收；领域阶段、恢复预算与执行适配仍须后续实现，宿主结果适配不代替它们。每次新计算只允许一个新目录、一次求解；完整数值留在 artifact，CLI stdout / MCP 工具结果只返回有限摘要与引用。MCP 同编号同输入的完成结果可复用，不新增求解。
+独立工程包、CLI 与 MCP Server 已创建；它们不导入 `agent`、LangGraph、实验脚本或调整 `sys.path`。静态检查不替代运行验收；领域阶段、模型预算与执行适配仍须后续实现，宿主结果适配不代替它们。每次新计算只允许一个新目录、一次求解，MCP 另检查持久求解准入额度；完整数值留在 artifact，CLI stdout / MCP 工具结果只返回有限摘要与引用。MCP 同编号同输入的完成结果可复用，不新增求解。
 
 ## 4. Design Brief 与阶段规则
 
@@ -338,6 +350,8 @@ Agent 以这些指标解释方向性、仰角和使用场景，不据天线增�
 MCP 2025-11-25 Tasks 仍标为 experimental，且其规范允许任务状态已 cancelled 时底层执行继续。因此优先调查官方 SDK 的任务支持，但不能把 `tasks/cancel` 的回执等同于 solver 进程已退出：工程回执还需明确 `execution_stopped` 及已产生的结果/消耗，未确认则保持未知，不自动重提交。MaigoKite 当前 client 尚未暴露这些操作；不能只改 server 就宣称宿主已支持。[MCP Tasks 与取消语义](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks)
 
 ## 9. Token 与计算预算
+
+**已实现的窄边界**：MCP 项目的求解准入次数存入专用根目录 `.antenna-project.sqlite3`；新目录默认 3 次，操作员通过 `--max-solver-runs` 调整总限额并留下记录，省略则保留已存限额。换 run_id、重启和删除产物不退额度；旧目录首次纳入时保守按每目录 1 次计入。`project_status` 返回预算与分页恢复记录，读取/补画不计求解次数。独立 CLI 的累计次数和下表的工作流级模型预算尚未实现；3 次不是未来优化器的频点预算默认值。
 
 ### 9.1 区分决策回合和实际请求
 
@@ -470,7 +484,7 @@ A01 先请求 θ=0…180°、φ=0…355°、步长 5° 的完整自由空间网�
 
 上述窄求解器评估没有实现领域工作流、LangGraph 适配、项目数据库、MCP server、优化器或 UI。A01/A02 证据保留；固定波长改频与参考辅助网格仅作诊断。HF 工程 75 次、原材料 2 次、多导线 9 次、网格诊断 6 次与材料五频点 5 次，累计 97 次候选工程计算；已与六例主频及新增 23 项 GAL 参考对照，不再写成“扫频/多导线待采”。没有扩展第二个 solver。本次入口编码没有增加求解次数，也没有把旧数值报告改记为新入口 PASS。
 
-技术选型可以收口：复电流在冻结接线及共同物理位置上的比较支持现成渐变分段方向，五点材料增量支持明确的历史集中损耗适配；现有证据不支持自研内核。首个后续实现已按独立输入子集、公开 solver API、原始 artifact 与紧凑摘要编码，随后加入可选官方 SDK MCP 入口和主应用结果适配。后者连接既有审批、SDK 资源读取、工作区落盘与图片预览，不把实验脚本注册为产品工具；这三条新接线的真实行为仍待获授权验收。下一步领域开发仍是紧凑 Brief、有限阶段推进与累计预算，不重开 solver 选型或通用 Runtime 重构。具体复用/拒绝边界见[工程评估的边界表](../../experiments/mmana_compatibility/ENGINEERING.md#选型结论与首个薄适配的边界)与[独立包说明](../../extensions/antenna_design/README.md)。这不是将未预定义阈值的样本追认 PASS，也不再无限扩张本批 GUI 采集。
+技术选型可以收口：复电流在冻结接线及共同物理位置上的比较支持现成渐变分段方向，五点材料增量支持明确的历史集中损耗适配；现有证据不支持自研内核。独立工程入口随后加入官方 SDK MCP、主应用结果适配、取消和结果恢复，Linux 已有定向复跑。新增持久求解额度与项目查询的行为验收仍待执行；后续领域工作是紧凑 Brief、有限阶段推进与模型预算，不重开 solver 选型或通用 Runtime 重构。具体复用/拒绝边界见[工程评估的边界表](../../experiments/mmana_compatibility/ENGINEERING.md#选型结论与首个薄适配的边界)与[独立包说明](../../extensions/antenna_design/README.md)。这不是将未预定义阈值的样本追认 PASS，也不再无限扩张本批 GUI 采集。
 
 本批确认材料表示必须显式区分：GAL 铜预设与候选分布式复阻抗模型的总场差异约 0.15 dB；由历史 MMANA 材料线索出发，复用公共集肤接口计算整线电阻、再使用公共中心集中负载接口，原主频总场差异降至约 0.003 dB。新增五点的电阻增量也在 GAL 显示相减的舍入范围内；电抗仍有约 1.3 Ω 的基础差异。这支持窄适配，不支持把集中损耗默认当作更真实的材料模型，也不证明当前 GAL 的全部实现。领域结果必须记录所用材料表示及其依据，物理模式与 MMANA 表示不能静默互换。
 

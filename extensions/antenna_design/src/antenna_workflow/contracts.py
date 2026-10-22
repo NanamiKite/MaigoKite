@@ -68,7 +68,7 @@ class Feed(Contract):
 
 class Mesh(Contract):
     mode: Literal["uniform", "both_end_taper"]
-    segments_per_wire: Annotated[StrictInt, Field(ge=4, le=256)]
+    segments_per_wire: Annotated[StrictInt, Field(ge=4, le=256, description="Even segment count per wire")]
 
     @model_validator(mode="after")
     def even_segments(self) -> Self:
@@ -96,7 +96,17 @@ class EngineeringRequest(Contract):
     schema_version: Literal[1] = 1
     name: Annotated[str, Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9 _.-]+$")]
     frequency_hz: Annotated[FiniteFloat, Field(ge=1e6, le=1e9)]
-    wires: Annotated[tuple[Wire, ...], Field(min_length=1, max_length=16)]
+    wires: Annotated[
+        tuple[Wire, ...],
+        Field(
+            min_length=1,
+            max_length=16,
+            description=(
+                "Equal-radius bare wires only. Shared endpoints must be directed end-to-start, without branches. "
+                "Ground contact, interior crossings and reactive loads are unsupported."
+            ),
+        ),
+    ]
     feed: Feed
     material: Material
     ground: Ground
@@ -206,3 +216,4 @@ class EngineeringSummary(Contract):
     solver_runs: Literal[1] = 1
     llm_calls: Literal[0] = 0
     artifacts: tuple[ArtifactRef, ...] = ()
+    render_status: Literal["complete", "incomplete"] = "complete"

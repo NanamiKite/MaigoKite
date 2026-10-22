@@ -5,6 +5,12 @@ import InkLoader from '@/components/common/InkLoader.vue'
 import SecretField from '@/components/common/SecretField.vue'
 import InkSelect from '@/components/common/InkSelect.vue'
 import { confirmAction } from '@/utils/confirm-action'
+import {
+  EXTENSION_BUNDLE_MAX_BYTES,
+  mergeExtensionBundle,
+  parseExtensionBundle,
+  type ExtensionBundle,
+} from '@/utils/extension-bundle'
 import { useDialog } from '@/composables/useDialog'
 import { api, type MCPConfiguration, type ManagedSkill } from '@/api/client'
 import { useExtensions } from '@/composables/useExtensions'
@@ -31,6 +37,95 @@ const skill = ref<ManagedSkill | null>(null)
 const editingSkill = ref(false)
 const directories = ref<string | null>(null)
 const removed = ref<{ kind: 'mcp' | 'skill'; name: string } | null>(null)
+const workflow = ref<ExtensionBundle | null>(null)
+const replaceWorkflow = ref(false)
+const changeWorkflowTools = ref(false)
+const workflowServers = computed(() =>
+  (workflow.value?.mcp_servers || []).map((incoming) => ({
+    incoming,
+    previous: snapshot.value?.config.mcp_servers.find(
+      (item) => item.namespace === incoming.namespace,
+    ),
+  })),
+)
+const replacedWorkflowSkills = computed(() =>
+  (workflow.value?.skills || []).filter((incoming) =>
+    snapshot.value?.config.skills.some((item) => item.name === incoming.name),
+  ),
+)
+const scannedWorkflowSkills = computed(() =>
+  (workflow.value?.skills || []).filter((incoming) =>
+    snapshot.value?.skills.some(
+      (item) => item.name === incoming.name && !item.source_path.startsWith('managed:'),
+    ),
+  ),
+)
+const replacingWorkflow = computed(
+  () =>
+    workflowServers.value.some((item) => item.previous) || !!replacedWorkflowSkills.value.length,
+)
+const changedWorkflowTools = computed(() =>
+  workflowServers.value.filter(
+    ({ previous, incoming }) =>
+      previous &&
+      (JSON.stringify(previous.enabled_tools) !== JSON.stringify(incoming.enabled_tools) ||
+        JSON.stringify(previous.disabled_tools) !== JSON.stringify(incoming.disabled_tools)),
+  ),
+)
+const canSaveWorkflow = computed(
+  () =>
+    editable.value &&
+    !!workflow.value &&
+    !scannedWorkflowSkills.value.length &&
+    (!replacingWorkflow.value || replaceWorkflow.value) &&
+    (!changedWorkflowTools.value.length || changeWorkflowTools.value),
+)
+function workflowTools(tools: string[] | null) {
+  return tools === null ? t('全部工具（包括今后新增）') : tools.join(', ') || t('无')
+}
+async function importWorkflow(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || !editable.value) return
+  feedbackTarget.value = 'workflow'
+  workflow.value = null
+  replaceWorkflow.value = changeWorkflowTools.value = false
+  await perform(async () => {
+    if (file.size > EXTENSION_BUNDLE_MAX_BYTES) throw new Error(t('工作流文件不能超过 1 MiB。'))
+    try {
+      workflow.value = parseExtensionBundle(await file.text())
+    } catch (reason) {
+      throw new Error(
+        t(reason instanceof Error ? reason.message : '工作流文件格式无效或包含不支持的字段。'),
+      )
+    }
+  })
+}
+async function saveWorkflow() {
+  const incoming = workflow.value
+  if (!incoming || !canSaveWorkflow.value) return
+  if (
+    await save((config) => {
+      try {
+        mergeExtensionBundle(config, incoming)
+      } catch (reason) {
+        throw new Error(
+          t(reason instanceof Error ? reason.message : '工作流文件格式无效或包含不支持的字段。'),
+        )
+      }
+    })
+  ) {
+    workflow.value = null
+    notice.value = t('工作流已保存；尚未启动，请点击“应用并检查连接”。')
+  }
+}
+watch(
+  () => snapshot.value?.config.revision,
+  () => {
+    replaceWorkflow.value = changeWorkflowTools.value = false
+  },
+)
 const splitLines = (value: string) =>
   value
     .split('\n')
@@ -55,7 +150,9 @@ function editServer(item?: MCPConfiguration) {
         enabled_tools: null,
         disabled_tools: [],
         result_adapter: 'none',
+        request_timeout_seconds: 30,
       }
+  if (server.value) server.value.request_timeout_seconds ??= 30
   editingServer.value = !!item
   argumentsText.value = item?.args.join('\n') || ''
   inheritedEnv.value = item?.env_allowlist.join('\n') || ''
@@ -373,6 +470,195 @@ watch([server, skill, credentialServer], async () => {
       >
         {{ error }}
       </p>
+      <section aria-labelledby="workflow-import-title">
+        <h2 id="workflow-import-title">
+          {{ $t('导入工作流') }}
+        </h2>
+        <p class="page-copy">
+          {{
+            $t(
+              '选择可信来源的工作流 JSON，同时导入 MCP 配置与 Skill。只保存配置，不安装依赖或启动程序。',
+            )
+          }}
+        </p>
+        <label>
+          {{ $t('工作流 JSON（最多 1 MiB）') }}
+          <input
+            type="file"
+            accept=".json,application/json"
+            :disabled="!editable"
+            @change="importWorkflow"
+          />
+        </label>
+        <form
+          v-if="workflow"
+          class="extension-editor"
+          @submit.prevent="scoped('workflow', saveWorkflow)"
+        >
+          <fieldset :disabled="!editable">
+            <h3>{{ $t('工作流预览：{0}', [workflow.name]) }}</h3>
+            <p class="page-copy">
+              {{
+                $t(
+                  '请核对命令、路径和技能全文。应用后程序可在本机运行；不相关配置、扫描目录和全局工具开关保持不变。',
+                )
+              }}
+            </p>
+            <article
+              v-for="{ incoming, previous } in workflowServers"
+              :key="incoming.namespace"
+              class="extension-item"
+            >
+              <h3>MCP · {{ incoming.namespace }}</h3>
+              <p>{{ previous ? $t('将替换同名服务') : $t('将添加服务') }}</p>
+              <p>{{ incoming.enabled ? $t('配置：启用') : $t('配置：停用') }}</p>
+              <label>
+                {{ $t('可执行程序') }}
+                <input
+                  :value="incoming.command"
+                  readonly
+                />
+              </label>
+              <label>
+                {{ $t('启动参数（JSON 数组，逐项传入，不经 shell）') }}
+                <textarea
+                  :value="JSON.stringify(incoming.args, null, 2)"
+                  rows="5"
+                  readonly
+                />
+              </label>
+              <p>
+                {{ $t('工作目录（留空使用默认工作区）') }}: {{ incoming.cwd || $t('默认工作区') }}
+              </p>
+              <p>{{ $t('工具请求超时（秒）') }}: {{ incoming.request_timeout_seconds }}</p>
+              <p>
+                {{ $t('结果展示') }}:
+                {{
+                  incoming.result_adapter === 'antenna_design'
+                    ? $t('天线结果与方向图')
+                    : $t('标准工具结果')
+                }}
+              </p>
+              <p>{{ $t('继承环境变量名') }}: {{ workflowTools(incoming.env_allowlist) }}</p>
+              <p>{{ $t('凭证环境变量名') }}: {{ workflowTools(incoming.secret_env) }}</p>
+              <p class="extension-tools">
+                {{ $t('导入后允许工具') }}: {{ workflowTools(incoming.enabled_tools) }}
+              </p>
+              <p class="extension-tools">
+                {{ $t('导入后禁用工具') }}: {{ workflowTools(incoming.disabled_tools) }}
+              </p>
+              <template v-if="previous">
+                <p class="extension-tools">
+                  {{ $t('当前允许工具') }}: {{ workflowTools(previous.enabled_tools) }}
+                </p>
+                <p class="extension-tools">
+                  {{ $t('当前禁用工具') }}: {{ workflowTools(previous.disabled_tools) }}
+                </p>
+              </template>
+            </article>
+            <article
+              v-for="incoming in workflow.skills"
+              :key="incoming.name"
+              class="extension-item"
+            >
+              <h3>Skill · {{ incoming.name }}</h3>
+              <p>
+                {{
+                  replacedWorkflowSkills.some((item) => item.name === incoming.name)
+                    ? $t('将替换已导入的同名技能副本')
+                    : $t('将添加技能')
+                }}
+              </p>
+              <p>{{ incoming.enabled ? $t('配置：启用') : $t('配置：停用') }}</p>
+              <details>
+                <summary>{{ $t('查看技能全文') }}</summary>
+                <textarea
+                  :value="incoming.content"
+                  :aria-label="$t('技能全文：{0}', [incoming.name])"
+                  rows="10"
+                  readonly
+                />
+              </details>
+            </article>
+            <p
+              v-if="scannedWorkflowSkills.length"
+              class="extension-error"
+              role="alert"
+            >
+              {{
+                $t(
+                  '扫描目录中已有同名技能：{0}。不能覆盖；请先移除目录中的重复项或调整扫描目录，应用后重新导入。',
+                  [scannedWorkflowSkills.map((item) => item.name).join(', ')],
+                )
+              }}
+            </p>
+            <label
+              v-if="replacingWorkflow"
+              class="check"
+            >
+              <input
+                v-model="replaceWorkflow"
+                type="checkbox"
+              />
+              {{ $t('我确认替换上述同名服务配置和技能副本。') }}
+            </label>
+            <template v-if="changedWorkflowTools.length">
+              <p class="extension-wait">
+                {{
+                  $t(
+                    '这些服务的工具范围将改变：{0}。新增工具需在允许列表中，且不在禁用列表中；全局停用的工具仍需手动启用。',
+                    [changedWorkflowTools.map((item) => item.incoming.namespace).join(', ')],
+                  )
+                }}
+              </p>
+              <label class="check">
+                <input
+                  v-model="changeWorkflowTools"
+                  type="checkbox"
+                />
+                {{ $t('我已核对前后差异，同意更新这些服务的允许/禁用工具列表。') }}
+              </label>
+            </template>
+            <p class="page-copy">
+              {{
+                $t(
+                  '若更新了正在运行的服务源码，请先完成任务并重启应用后端，再应用配置；仅重新发现工具不会重启健康进程。',
+                )
+              }}
+            </p>
+            <div class="page-actions">
+              <button
+                class="secondary-button"
+                type="button"
+                @click="workflow = null"
+              >
+                {{ $t('取消') }}
+              </button>
+              <button
+                class="primary-button"
+                type="submit"
+                :disabled="!canSaveWorkflow"
+              >
+                {{ $t('确认导入并保存') }}
+              </button>
+            </div>
+          </fieldset>
+        </form>
+        <p
+          v-if="error && feedbackTarget === 'workflow'"
+          class="extension-error"
+          role="alert"
+        >
+          {{ error }}
+        </p>
+        <p
+          v-if="notice && feedbackTarget === 'workflow'"
+          class="extension-result"
+          role="status"
+        >
+          {{ notice }}
+        </p>
+      </section>
       <nav
         class="extension-tabs"
         :aria-label="$t('扩展分类')"
@@ -438,6 +724,17 @@ watch([server, skill, credentialServer], async () => {
             <label>
               {{ $t('工作目录（留空使用默认工作区）') }}
               <input v-model="server.cwd" />
+            </label>
+            <label>
+              {{ $t('工具请求超时（秒）') }}
+              <input
+                v-model.number="server.request_timeout_seconds"
+                type="number"
+                min="1"
+                max="660"
+                step="1"
+                required
+              />
             </label>
             <label>
               {{ $t('结果展示') }}

@@ -19,6 +19,7 @@ from anyio.streams.memory import MemoryObjectReceiveStream
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.shared.message import SessionMessage
+from mcp.shared.session import ProgressFnT
 from mcp.types import BlobResourceContents, Implementation, PaginatedRequestParams, TextResourceContents
 from pydantic import AnyUrl
 
@@ -176,6 +177,7 @@ class MCPClient:
     async def call_tool(
         self, name: str, arguments: dict[str, Any], *,
         meta: dict[str, Any] | None = None, timeout: float | None = None,
+        progress_callback: ProgressFnT | None = None,
     ) -> dict[str, Any]:
         session = self._get_session()
         deadline = self.request_timeout if timeout is None else timeout
@@ -185,6 +187,7 @@ class MCPClient:
             async with asyncio.timeout(deadline):
                 result = await session.call_tool(
                     name, arguments, meta=meta, read_timeout_seconds=timedelta(seconds=deadline),
+                    progress_callback=progress_callback,
                 )
             return result.model_dump(mode="json", by_alias=True, exclude_none=True)
         except Exception as exc:

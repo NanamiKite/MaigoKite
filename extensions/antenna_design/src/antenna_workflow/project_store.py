@@ -160,6 +160,17 @@ class ProjectStore:
         # Commit precedes directory creation and process launch. A crash at either
         # boundary keeps the charge, even if a solver never actually ran.
 
+    def charged_search_attempts(self, search_id: str) -> int:
+        """Read committed admissions even if a worker died before saving its progress receipt."""
+        run_path(self.root, search_id)
+        pattern = f"{search_id}-c[0-9][0-9][0-9][0-9]-f[1-6]"
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT COALESCE(SUM(charged_attempts), 0) FROM reservations WHERE run_id GLOB ?",
+                (pattern,),
+            ).fetchone()
+        return int(row[0])
+
     def snapshot(self, query: StatusInput) -> ProjectSnapshot:
         with closing(self._connect()) as connection, connection:
             connection.execute("BEGIN")

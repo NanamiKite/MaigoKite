@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import platform
-import shutil
 import sys
 import time
 from contextlib import suppress
@@ -92,8 +91,11 @@ def prepare_bundle(root: Path, request: EngineeringRequest, *, timeout: int, inp
         raise
 
 
-def worker_command(root: Path, *, render_only: bool = False) -> list[str]:
-    return [sys.executable, "-m", "antenna_workflow.cli", "_render" if render_only else "_worker", str(root)]
+def worker_command(root: Path, *, render_only: bool = False, numerical_only: bool = False) -> list[str]:
+    command = [sys.executable, "-m", "antenna_workflow.cli", "_render" if render_only else "_worker", str(root)]
+    if numerical_only and not render_only:
+        command.append("--numerical-only")
+    return command
 
 
 def worker_environment(plot_cache: str) -> dict[str, str]:
@@ -182,32 +184,73 @@ def prepare_render(source: Path, destination: Path, *, timeout: int) -> None:
         raise
 
 
-def _record_render_environment(root: Path) -> None:
-    """Keep this renderer's provenance separate from the immutable numerical environment."""
-    source_root = Path(__file__).parent
-    snapshot = root / "render-source" / "antenna_workflow"
+def _snapshot_sources(root: Path, relative: str, names: tuple[str, ...]) -> dict[str, JsonValue]:
+    """Share identical source bytes within a ledger-owned project, preserving run paths.
+
+    Hard links keep existing manifests and portable exports unchanged. Filesystems
+    without hard-link support fall back to exclusive copies. Standalone CLI runs
+    write only inside their selected output directory.
+    """
+    sources = {name: (Path(__file__).parent / name).read_bytes() for name in names}
+    hashes: dict[str, JsonValue] = {name: hashlib.sha256(data).hexdigest() for name, data in sources.items()}
+    snapshot = root / relative
     snapshot.mkdir(parents=True)
-    source_hashes: dict[str, JsonValue] = {}
-    for name in (
-        "__init__.py",
-        "artifacts.py",
-        "cli.py",
-        "contracts.py",
-        "mcp_resources.py",
-        "mmana.py",
-        "patterns.py",
-    ):
-        data = (source_root / name).read_bytes()
+    shared: Path | None = None
+    ledger = root.parent / ".antenna-project.sqlite3"
+    if ledger.is_file() and not ledger.is_symlink():
+        identity = hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()
+        parent = root.parent / ".source-snapshots"
+        if parent.is_symlink() or parent.is_junction() or parent.resolve().parent != root.parent.resolve():
+            raise ArtifactUnavailableError("Source snapshots must remain inside the project")
+        parent.mkdir(exist_ok=True)
+        shared = parent / identity
+        if shared.is_symlink() or shared.is_junction():
+            raise ArtifactUnavailableError("Source snapshot cannot be a link")
+        shared.mkdir(exist_ok=True)
+    for name, data in sources.items():
+        if shared is not None:
+            source = shared / name
+            try:
+                with source.open("xb") as stream:
+                    stream.write(data)
+            except FileExistsError:
+                if read_bounded(shared, name, MAX_RESOURCE_BYTES) != data:
+                    raise ArtifactUnavailableError("Shared source snapshot was modified") from None
+            try:
+                os.link(source, snapshot / name, follow_symlinks=False)
+                continue
+            except FileExistsError:
+                raise
+            except OSError:
+                pass  # FAT/network volumes may not support hard links; retain a full copy.
         with (snapshot / name).open("xb") as stream:
             stream.write(data)
-        source_hashes[name] = hashlib.sha256(data).hexdigest()
+    return hashes
+
+
+def _record_render_environment(root: Path) -> None:
+    """Keep this renderer's provenance separate from the immutable numerical environment."""
+    relative = "render-source/antenna_workflow"
+    source_hashes = _snapshot_sources(
+        root,
+        relative,
+        (
+            "__init__.py",
+            "artifacts.py",
+            "cli.py",
+            "contracts.py",
+            "mcp_resources.py",
+            "mmana.py",
+            "patterns.py",
+        ),
+    )
     write_json(
         root / "render-environment.json",
         {
             "python": platform.python_version(),
             "platform": platform.platform(),
             "dependencies": {name: metadata.version(name) for name in ("matplotlib", "numpy")},
-            "source_directory": snapshot.relative_to(root).as_posix(),
+            "source_directory": relative,
             "render_sources_sha256": source_hashes,
         },
     )
@@ -236,7 +279,7 @@ def fail_bundle(root: Path, error: BaseException) -> None:
             write_json(root / "failure.json", {"error_type": type(error).__name__, "completed": False})
 
 
-def compute_bundle(root: Path) -> None:
+def compute_bundle(root: Path, *, with_plots: bool = True) -> None:
     """Save a verified numerical phase before export/render; the parent publishes after cleanup."""
     from mininec import mininec
 
@@ -270,10 +313,11 @@ def compute_bundle(root: Path) -> None:
         },
     )
     source_root = Path(mininec.__file__).parent
-    adapter_snapshot = root / "source" / "antenna_workflow"
-    adapter_snapshot.mkdir(parents=True)
-    for source in Path(__file__).parent.glob("*.py"):
-        shutil.copyfile(source, adapter_snapshot / source.name)
+    source_hashes = _snapshot_sources(
+        root,
+        "source/antenna_workflow",
+        tuple(path.name for path in sorted(Path(__file__).parent.glob("*.py"))),
+    )
     write_json(
         root / "environment.json",
         {
@@ -281,7 +325,7 @@ def compute_bundle(root: Path) -> None:
             "platform": platform.platform(),
             "dependencies": {item.metadata["Name"]: item.version for item in metadata.distributions()},
             "solver_sources_sha256": {path.name: digest(path) for path in sorted(source_root.glob("*.py"))},
-            "adapter_sources_sha256": {path.name: digest(path) for path in sorted(Path(__file__).parent.glob("*.py"))},
+            "adapter_sources_sha256": source_hashes,
             "elapsed_seconds": time.monotonic() - started,
             "limits": {"solver_runs": 1, "llm_calls": 0, "max_pulses": request.max_pulses},
         },
@@ -290,4 +334,5 @@ def compute_bundle(root: Path) -> None:
     # This marker is written before plotting so cancellation/renderer failure
     # cannot discard a complete numerical result. Parent publishes after cleanup.
     _mark_files(root, "numerical.json", NUMERICAL_FILES)
-    render_bundle(root)
+    if with_plots:
+        render_bundle(root)

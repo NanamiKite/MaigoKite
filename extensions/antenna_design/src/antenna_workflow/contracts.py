@@ -19,6 +19,10 @@ class Contract(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
 
+class InvalidCandidateError(ValueError):
+    """Geometry or numerical evidence is unusable; storage/SDK failures are not candidate rejections."""
+
+
 class Wire(Contract):
     start_m: Point
     end_m: Point

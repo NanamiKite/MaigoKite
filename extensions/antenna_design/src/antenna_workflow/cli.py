@@ -44,14 +44,14 @@ def _request(path: Path, mesh_name: str | None, encoding: str) -> tuple[Engineer
     return EngineeringRequest.model_validate_json(original), original
 
 
-def _worker(root: Path, *, render_only: bool = False) -> int:
+def _worker(root: Path, *, render_only: bool = False, numerical_only: bool = False) -> int:
     from .artifacts import compute_bundle, render_bundle
 
     try:
         if render_only:
             render_bundle(root)
         else:
-            compute_bundle(root)
+            compute_bundle(root, with_plots=not numerical_only)
     except Exception:
         traceback.print_exc()  # Worker output is a local diagnostic artifact, never a model tool response.
         return 1
@@ -131,14 +131,31 @@ def main() -> int:
     )
     worker = commands.add_parser("_worker", help=argparse.SUPPRESS)
     worker.add_argument("output", type=Path)
+    worker.add_argument("--numerical-only", action="store_true")
     render_worker = commands.add_parser("_render", help=argparse.SUPPRESS)
     render_worker.add_argument("output", type=Path)
+    optimize_worker = commands.add_parser("_optimize", help=argparse.SUPPRESS)
+    optimize_worker.add_argument("output", type=Path)
+    optimize_worker.add_argument("--timeout", type=int, required=True)
     args = parser.parse_args()
     if args.command == "schema":
         print(json.dumps(EngineeringRequest.model_json_schema(), indent=2))
         return 0
     if args.command in {"_worker", "_render"}:
-        return _worker(args.output, render_only=args.command == "_render")
+        return _worker(
+            args.output,
+            render_only=args.command == "_render",
+            numerical_only=args.command == "_worker" and args.numerical_only,
+        )
+    if args.command == "_optimize":
+        from .optimization import optimize
+
+        try:
+            optimize(args.output, timeout=args.timeout)
+        except Exception:
+            traceback.print_exc()
+            return 1
+        return 0
     if args.command == "connect":
         from .artifacts import write_json
         from .connection import connection_bundle

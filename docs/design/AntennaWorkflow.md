@@ -11,7 +11,7 @@
 
 2026-10-19 的求解器评估已完成 A01/A02、六例主频和 23 项多导线/扫频参考的对照，也检查了冻结接线的复电流幅相及五点材料表示。这些结果支持继续采用 pymininec，但正式工程验收 profile、方环缺失接点和更广的材料/结构覆盖尚未完成，不能称为全面兼容认证。详情见[工程评估](../../experiments/mmana_compatibility/ENGINEERING.md)及[实验范围](../../experiments/mmana_compatibility/README.md)。
 
-自动需求访谈、工作流级 LLM/token 预算、优化器和完整设计工作流尚未交付。当前恢复验收包括两个独立 Core 进程的审批续接、MCP 重启取回、补画/取消恢复、冲突文件保护、图片 API 与历史工具事件；不等于模型自主编排、GUI、Windows 或强杀恢复验收，也不能用旧数值实验代替工程收敛与制作验证。
+有界尺寸优化和“搜索→网格复核→补画→候选包”已由独立 MCP 实现；自动需求访谈、工作流级 LLM/token 预算和完整制造验收仍未交付。当前恢复验收包括两个独立 Core 进程的审批续接、MCP 重启取回、补画/取消恢复、冲突文件保护、图片 API 与历史工具事件；不等于模型自主编排、GUI、Windows 或强杀恢复验收，也不能用旧数值实验代替工程收敛与制作验证。
 
 绘图证据与计算证据分别记录：原 `environment.json` 随数值保留；`render-environment.json` 与 `render-source/antenna_workflow/` 记录当前绘图实现和依赖。补画准备失败在已创建的新目录内尽力保存安全失败回执，不覆盖源文件、不退还预留或自动重放。
 
@@ -19,7 +19,11 @@
 
 配套 Skill 将“性能目标原创设计”与“已有实物复算”分开：初始设计不再被原厂尺寸阻塞；每次计算后保存指标差额、证据和下一步。预算用尽不阻止评价、候选文件导出/取回或准备下一批，但不自动加额度；三频中心点仍不能代表全带性能。
 
-同日补齐产品交付入口：CLI `connect` 生成本机 MCP + Skill 联合配置，宿主复用原设置 API 保存/应用；同名覆盖和工具范围变化显式确认，不创建插件生命周期框架。`antenna.export / antenna.get_delivery` 在独立领域包内把已有同设计数值投影成固定设计文件及 ZIP，服务存于 `.deliveries`，不计求解次数；宿主只校验传输回执和固定资源，再投影文件引用。文件查看增加鉴权下载，ZIP 不被宿主解压。原 Runtime、Repository 和审批不变。交付状态固定为候选未验证，未建自动优化器或制造认证流程。
+同日补齐产品交付入口：CLI `connect` 生成本机 MCP + Skill 联合配置，宿主复用原设置 API 保存/应用；同名覆盖和工具范围变化显式确认，不创建插件生命周期框架。`antenna.export / antenna.get_delivery` 在独立领域包内把已有同设计数值投影成固定设计文件及 ZIP，服务存于 `.deliveries`，不计求解次数；宿主只校验传输回执和固定资源，再投影文件引用。文件查看增加鉴权下载，ZIP 不被宿主解压。原 Runtime、Repository 和审批不变。交付状态固定为候选未验证，优化复用 SciPy，不建立制造认证流程。
+
+用户可微调频点并提供架设条件：`prepare_revision` 读取旧模型，显式更新 targets、刚体旋转、馈点高度、地面和材料；旧 run_id 不可继续充当新结果。建筑/屋顶/桅杆文字只保留为未模拟条件，不以自然语言注释替代物理模型。逐频匹配使用独立 `matching` 电路入口，复用 scikit-rf Circuit 与 SciPy least_squares；输入为已核验的原生 R+jX，输出拓扑和理想 L/C，并通过 design/export 进入报告及 ZIP。各频点须切换或调谐，不是固定多波段网络，不改变原辐射评价或制作状态。[成熟组件依据](https://scikit-rf-official.readthedocs.io/en/latest/examples/matching/Impedance%20Matching.html)
+
+固定元件复核使用 `evaluate_matching`：相同 L/C 应用于各个已保存的负载阻抗，不逐频重调、不猜测点间阻抗。可选 SWR 门槛来自调用方，缺省只报告数值。export.matching_checks 归档每组输入、逐点结果、辐射对照和原始证据，且要求与交付模型的物理 hash/系统阻抗一致。它验证的是理想电路的离散样本，不改变 radiation_status，也不证明连续带宽、元件损耗、公差、巴伦或功率。
 
 补充判断：四变体总场 RMS 主要受 CSV 的 0.01 dB 导出步长影响；候选同样保留两位小数后有 98.5%～100% 的有效样本与参考相同。该量级不构成继续修改内核或自研求解器的依据。保留电流/电抗差异和未覆盖语义，不把当前模型的方向图接近等同于全面 MMANA 兼容。
 
@@ -336,11 +340,13 @@ Agent 以这些指标解释方向性、仰角和使用场景，不据天线增�
 
 ## 8. MCP 接口与计算生命周期
 
-保留高层 `antenna.model_create / model_validate / solve / sweep / pattern / optimize / export`，实际注册名遵从既有 MCP 名称规范化。`model_create` 可接规范模型或 `.maa` 导入；`export` 负责 `.maa` 与报告包，避免另外生成几十个 CRUD 工具。
+当前 MCP 提供 `project_status / model_validate / solve / evaluate / plan_design / design / optimize / get_optimization / get_result / render / cancel / export / get_delivery`，实际注册名遵从既有 MCP 名称规范化。`model_create / sweep / pattern` 是后续接口候选，不宣称已注册；`.maa` 导入仍走明确的 CLI 子集。
+
+`plan_design` 只读规划最低/推荐次数并留两轮网格复核额度；`design` 在同一 MCP 工具调用及取消作用域内顺序组合已有 optimize、solve、render、export。不新建通用工作流状态机，不移动天线业务到 AgentCore。工作流总时限内搜索占 65%，余下时间用于复核与交付；这不是完成时间保证。搜索与两层网格证据绑定并进入 ZIP；容差缺失只记录敏感性，容差通过也不认证制作。宿主复用结果导入和 tool.started 活动更新，模型只接收紧凑摘要。
 
 - `model_validate` 返回结构/语义/适用性检查，不等同于用户需求验收。
-- `optimize` 一次接收 variables、bounds、objectives、constraints、seed 与计算预算。数值搜索复用成熟算法（实施时评估 SciPy 或候选后端优化能力），内部绝不调用 LLM，不使用可执行表达式或任意 shell 目标函数。
-- 长计算必须有 job_id、输入 hash、进度、结果引用与明确取消语义。优先核实所用 SDK 的稳定任务能力；若不适合，只为计算增加一个 `antenna.job(action=status|cancel)` 入口，原生 Task/子进程机制承担生命周期，不扩展成另一套工作流平台。
+- `optimize` 已接入 SciPy differential_evolution，接收 seed model、dimensions 及 bounds、明确的 targets、random_seed、population_size 与 max_solver_runs；每个候选同一几何复核全部目标频点。首版只搜索孤立导线的长度/中心坐标，不能优化拓扑和匹配网络；内部零 LLM 调用，不使用可执行表达式或任意 shell 目标函数。细节与复用依据见[独立包说明](../../extensions/antenna_design/README.md#有界尺寸优化)，静态检查不等于新路径运行验收。
+- 长计算沿用 run_id、输入证据、进度、结果引用与 cancel；参数搜索以 get_optimization 只读取回完整最佳候选。原生 AnyIO/子进程机制承担生命周期，不恢复 SciPy 种群，不再为此新增 job API 或执行框架。单个频点仍用原 manifest/hash 校验与项目账本。
 - 提交身份由可信宿主生成并绑定项目/版本，不以模型编出的 ID 授权。重复提交先核对身份与参数；超时/重启查询结果，不盲目重复优化。
 - Server 持有并回收 solver 进程；请求取消只表示本地已停止等待，直到服务器确认计算已结束才标记 job cancelled。不承诺 SDK 当前没有的远端取消保证。
 - CPU/内存/时间/输出文件量与 solver_runs 分别设限，Windows/Linux 的实际限制能力单列；独立 MCP 进程不等于 OS 沙箱。
@@ -352,6 +358,8 @@ MCP 2025-11-25 Tasks 仍标为 experimental，且其规范允许任务状态已 
 ## 9. Token 与计算预算
 
 **已实现的窄边界**：MCP 项目的求解准入次数存入专用根目录 `.antenna-project.sqlite3`；新目录默认 3 次，操作员通过 `--max-solver-runs` 调整总限额并留下记录，省略则保留已存限额。换 run_id、重启和删除产物不退额度；旧目录首次纳入时保守按每目录 1 次计入。`project_status` 返回预算与分页恢复记录，读取/补画不计求解次数。独立 CLI 的累计次数和下表的工作流级模型预算尚未实现；3 次不是未来优化器的频点预算默认值。
+
+`optimize` 在硬边界内动态分批，种群/资源批次默认 max(8, 2×自由参数数)，留最多两轮全频复核余量。资源批次不再决定停滞：SciPy 的公开 callback 在每代完成后比较改善，初始化不算一代；默认至少 5 代、连续 5 代无有效改善才因停滞停止，有效改善需超过 0.1% 和 1e-8。次数/时限不足可以更早停止，但不能声称探索充分。实测完整候选耗时乘 1.25 的高水位限制后续准入，worker 时限预留 max(5 秒, 10%) 收尾。分配回执不是第二份项目账本，也不锁定其他客户端额度。plan_design 按参数数、全频成本、暖机代数与复核计划给出资源依据；调整项目总限额仍经现有操作员配置留痕，不由模型工具自行扩权。
 
 ### 9.1 区分决策回合和实际请求
 

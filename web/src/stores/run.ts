@@ -380,9 +380,9 @@ export const useRunStore = defineStore('run', () => {
             Object.assign(ordered, { seq: event.seq, time: event.time })
           let step = turn.steps.find((s) => s.id === event.stepId)
           if (step) {
-            // Delegation progress updates the same activity, not the main reply.
+            // Tool progress updates the same activity, not the main reply.
             // Do not restart its clock on every read/progress receipt.
-            if (event.tool === 'delegate') step.title = event.title
+            if (event.title) step.title = event.title
             if (step.status === 'pending' && !event.pending) step.status = 'running'
             if (!event.pending && !step.startedAt)
               step.startedAt = event.time ? Date.parse(event.time) : Date.now()

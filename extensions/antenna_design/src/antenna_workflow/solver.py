@@ -20,6 +20,7 @@ from .contracts import (
     FarField,
     FieldSample,
     Impedance,
+    InvalidCandidateError,
     Point,
     Segment,
 )
@@ -51,7 +52,7 @@ def _check_intersections(request: EngineeringRequest) -> None:
             rv = (np.asarray(right.end_m) if right.start_m in shared else b) - origin
             cosine = float(np.dot(lu, rv) / (np.linalg.norm(lu) * np.linalg.norm(rv)))
             if cosine > 1 - 1e-10:
-                raise ValueError("Overlapping wires at a shared endpoint are unsupported")
+                raise InvalidCandidateError("Overlapping wires at a shared endpoint are unsupported")
             continue
         radius = left.radius_m + right.radius_m
         matrix = np.column_stack((u, -v))
@@ -63,7 +64,9 @@ def _check_intersections(request: EngineeringRequest) -> None:
         if rank == 2 and np.all((parameters >= 0) & (parameters <= 1)):
             distances.append(float(np.linalg.norm(a + parameters[0] * u - b - parameters[1] * v)))
         if min(distances) <= radius:
-            raise ValueError("Conductors intersect/touch without an explicit shared endpoint; split the geometry first")
+            raise InvalidCandidateError(
+                "Conductors intersect/touch without an explicit shared endpoint; split the geometry first"
+            )
 
 
 def solve(request: EngineeringRequest) -> Solution:
@@ -104,7 +107,7 @@ def solve(request: EngineeringRequest) -> Solution:
         if len({int(wire.n) for wire in pulse.geo}) > 1
     }
     if expected_junctions != actual_junctions or any(any(wire.is_ground) for wire in wires):
-        raise ValueError("Solver connectivity differs from the explicit physical topology")
+        raise InvalidCandidateError("Solver connectivity differs from the explicit physical topology")
     matches = [
         i
         for i, pulse in enumerate(model.pulses)
@@ -112,22 +115,29 @@ def solve(request: EngineeringRequest) -> Solution:
         and request.feed.wire in {int(wire.n) + 1 for wire in pulse.geo}
     ]
     if len(matches) != 1:
-        raise ValueError("Requested physical feed must map to exactly one pulse; no nearest-pulse approximation")
+        raise InvalidCandidateError(
+            "Requested physical feed must map to exactly one pulse; no nearest-pulse approximation"
+        )
     feed_index = matches[0]
     source = mininec.Excitation(request.feed.voltage_v, request.feed.phase_deg)
     model.register_source(source, feed_index)
     if request.material.conductivity_s_per_m is not None:
         for wire in wires:
-            model.register_load(mininec.Skin_Effect_Load(wire, conductivity=request.material.conductivity_s_per_m))
+            # A distributed load belongs to one conductor. Omitting geo_tag
+            # attaches it to every wire, which pymininec rejects for multiwire models.
+            model.register_load(
+                mininec.Skin_Effect_Load(wire, conductivity=request.material.conductivity_s_per_m),
+                geo_tag=wire.tag,
+            )
     if request.feed.resistance_ohm:
         model.register_load(mininec.Impedance_Load(complex(request.feed.resistance_ohm)), feed_index)
     model.compute()
     z = complex(source.impedance)
     if not (math.isfinite(z.real) and math.isfinite(z.imag) and z.real > 0):
-        raise ValueError("Non-finite/non-passive source impedance; result cannot be accepted")
+        raise InvalidCandidateError("Non-finite/non-passive source impedance; result cannot be accepted")
     reflection = abs((z - request.reference_impedance_ohm) / (z + request.reference_impedance_ohm))
     if not 0 <= reflection < 1:
-        raise ValueError("SWR cannot be represented as a finite passive result")
+        raise InvalidCandidateError("SWR cannot be represented as a finite passive result")
     step = request.pattern.step_deg
     theta = mininec.Angle(0, step, (180 if media is None else 90) // step + 1)
     phi = mininec.Angle(0, step, 360 // step)
@@ -136,7 +146,7 @@ def solve(request: EngineeringRequest) -> Solution:
     vertical, horizontal, total = raw.gain.T
     peak = float(np.max(total))
     if not math.isfinite(peak) or peak <= -999:
-        raise ValueError("No finite above-floor far-field samples")
+        raise InvalidCandidateError("No finite above-floor far-field samples")
     field = FarField(
         frequency_hz=request.frequency_hz,
         normalized_reference_peak_dbi=peak,

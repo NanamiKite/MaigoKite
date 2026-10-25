@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -67,12 +67,25 @@ class BaseTool(ABC):
         validator = ToolValidator(lambda _name: schema)
 
         async def invoke(runtime: ToolRuntime[object], **arguments: Any) -> ToolMessage:
+            from agent.runtime.run_context import ChildContext
+
             run = cast("RunContext | ChildContext", runtime.context)
+
+            async def report_progress(progress: float, total: float | None, message: str | None) -> None:
+                if isinstance(run, ChildContext):
+                    return
+                await run.projection.emit("tool.started", {
+                    "tool_call_id": str(runtime.tool_call_id), "tool_name": self.name,
+                    "arguments": arguments, "title": (message or self.name)[:240],
+                    "progress": progress, "total": total,
+                })
+
             context = ExecutionContext(
                 run.request.trace_id,
                 run.request.task_id,
                 str(runtime.tool_call_id),
                 metadata=run.execution_metadata,
+                progress_callback=report_progress,
             )
             try:
                 result = await self.execute(context, validator.sanitize(self.name, arguments))
@@ -200,6 +213,7 @@ class ExecutionContext:
         deadline: datetime | None = None,
         cancellation_token: bool = False,
         metadata: ExecutionMetadata | None = None,
+        progress_callback: Callable[[float, float | None, str | None], Awaitable[None]] | None = None,
     ) -> None:
         self.deadline = deadline or datetime.max
         self.cancellation_token = cancellation_token
@@ -207,6 +221,7 @@ class ExecutionContext:
         self.task_id = task_id
         self.step_id = step_id
         self.metadata = metadata or {}
+        self.progress_callback = progress_callback
 
 
 class LangChainStructuredToolBridge(BaseTool):

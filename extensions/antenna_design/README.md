@@ -2,7 +2,7 @@
 
 这是天线工作流的第一条工程链路：**明确输入 → pymininec → 原始数值、方向图、复算文件与有界摘要**。可将此目录整体移到独立仓库；不导入 MaigoKite、LangGraph、聊天记录或实验脚本，不启动 MMANA-GAL。
 
-可通过 MCP + Skill 联合导入接入主应用，从已有数值导出候选设计包；不默认注册工具，不包含自动优化或制作验收。计算结果标记 `COMPUTED_NOT_VALIDATED`，交付包标记 `CANDIDATE_NOT_VALIDATED`：算出数值不等于已收敛、MMANA 兼容验收通过或可直接制作。
+可通过 MCP + Skill 联合导入接入主应用，执行有界尺寸优化、从已有数值导出候选设计包；不默认注册工具，不包含任意拓扑自动设计或制作验收。计算结果标记 `COMPUTED_NOT_VALIDATED`，交付包标记 `CANDIDATE_NOT_VALIDATED`：算出数值不等于已收敛、MMANA 兼容验收通过或可直接制作。
 
 ## 接入 MaigoKite 并交付文件
 
@@ -20,8 +20,8 @@ Windows PowerShell 同样使用上述 uv 命令，把路径改为 `D:/antenna-pr
 交付调用链：
 
 ```text
-聊天选择 antenna-design Skill → 项目查询 → 输入/求解 → evaluate
-→ antenna.export → 宿主校验资源并导入当前工作区 → 报告预览 / ZIP 下载
+聊天选择 antenna-design Skill → project_status → plan_design → design
+→ MCP 内部搜索 / 网格复核 / 补画 / export → 宿主导入工作区 → 报告预览 / ZIP 下载
 ```
 
 `antenna.export` 输入 delivery_id、title、purpose、assumptions、sources 和 evaluation；目标点必须都有同一设计的已完成 run_id。它只读取已有结果，不进行求解、模型调用或预留。输出固定十个资源：报告、几何、尺寸、模型、材料、评价、验证、施工调试、复算和 ZIP。ZIP 内含 design_brief 与逐 run_id 数值/图表/可用 MAA，以及已校验的环境证据；不复制任意私有文件或日志。
@@ -29,6 +29,19 @@ Windows PowerShell 同样使用上述 uv 命令，把路径改为 `D:/antenna-pr
 交付包保存在服务根目录 `.deliveries/<delivery_id>`，不被历史求解目录扫描计数。末尾原子发布 completed 标记；未完成目录保留、不覆盖。同编号同输入同源证据复用；更改输入需新编号。丢失回执用 `antenna.get_delivery`，不重新计算。只公开固定 `antenna://deliveries/{delivery_id}/{artifact_id}` 资源，单文件 ≤16 MiB、合计 ≤48 MiB；压缩包展开后同样有界，宿主不自动解压。
 
 这是**候选方案文件交付**，不是“可以直接制作”的认证。export 不生成未计算的匹配网络，不把 PEC 当真实合金，不虚构公差、功率和机械验收。未达参考指标可交付带差额的当前候选；正式完成仍需扫频、收敛、匹配及实物验证。导出/下载新增路径尚不代表自然语言自主设计或 Windows GUI 已验收。
+
+## 修改频点、架设与匹配参数
+
+用户通过对话提出调整，由 Skill 整理明确输入，不需要改求解器或 Agent Runtime：
+
+- `antenna.prepare_revision` 从已有 `source_run_id` 读取核验过的模型，接收新的 `targets`、可选 `installation` 与 `material`。新 targets 的 run_id 必须为空，不能把旧频率/旧安装结果用于新方案。它只准备输入，后续沿用 solve 或 plan_design/design。
+- `installation.feed_height_m` 是馈点离地高度（米）；`rotation_xyz_deg` 是绕原馈点的外禀 XYZ 角（度）。地面使用 targets.ground；前向方向和仰角由 targets 指定。支持刚体旋转/抬高及当前地面模型，不模拟屋顶、建筑、桅杆、支架；notes 保留这些未模拟条件，不把文字当作计算输入。
+- `antenna.matching` 接收已完成的 `evaluation` 和 `options={"mode":"per_frequency_l_network","reference_plane":"antenna_feed"}`；评价必须显式选择 separate_network。复用 scikit-rf 2.2.0 的 Circuit 与 SciPy least_squares，计算每频点理想 L 型网络，不消耗电磁求解次数。不同点的元件需要切换/调谐，不是固定多波段匹配、巴伦或功率设计。
+- design/export 可带 `matching_options`，报告输出拓扑及 L/C，ZIP 保存 `matching/l-networks.json` 的全精度参数、原始阻抗和限制；不修改裸天线增益/F/B，也不把高直连 SWR 隐藏成已达标。元件损耗、Q、公差、馈线与实际环境仍未验收。
+- `antenna.evaluate_matching` 接收同一物理模型的已保存 `evaluation`、固定 `network={topology,components,reference_plane}` 和可选 `max_swr`。components 按 series、shunt 排列，使用 H/F 的正数或零值 omit；工具逐点复用同一组元件，不重新调谐、不插值缺失频点。未指定 max_swr 只报告 SWR，不默认添加验收指标。
+- export 可带最多六组 `matching_checks`（各为 evaluate_matching 的完整输入），保存每组元件、原始负载、匹配后 SWR 与邻频辐射比较。ZIP 的 `matching/check-N/` 保留输入、结果及对应数值证据；不同材料、几何或网格不能混入同一个匹配复核。多个独立网络并不构成已实现的多波段切换器，理想匹配也不补偿裸天线的增益/F/B 缺口。
+
+接入升级后重新生成联合配置，预览新增工具再应用；不自动修改已有用户设置。旧包没有 matching_options 仍可取回，原文件/hash 不改变。
 
 ## 安装与运行
 
@@ -97,9 +110,13 @@ C:\absolute\antenna_design\.venv\Scripts\python.exe
 
 | 工具 | 参数 | 返回与边界 |
 | --- | --- | --- |
+| `antenna.plan_design` | OptimizeInput + title/purpose；可选 assumptions/sources、verification_segments、mesh_tolerances | 只读计划：初始化加完整一代的最低次数、达到暖机代数的推荐次数、验证预留与额度缺口；不改变项目限额 |
+| `antenna.design` | 与 plan_design 相同；run_id 同时作为交付编号 | 一次调用完成搜索、两个更细网格、敏感性比较、补画和交付；原始证据保留，失败不自动重试，不等于制作验收 |
 | `antenna.project_status` | 可选 `limit`（1～20，默认 10）和 `before_sequence` | 持久项目 ID、剩余求解额度、最近运行编号和恢复建议；按返回的 `next_before_sequence` 查询更早记录，不启动 worker |
 | `antenna.model_validate` | `model`：现有 `EngineeringRequest` JSON 对象 | `INPUT_ACCEPTED_NOT_SIMULATED`；校验单位、输入范围、支持字段与基本连接，不启动 solver，不称为物理验证 |
 | `antenna.evaluate` | 最多 12 个频点目标/已有 run_id、地面和前向切面、系统阻抗；可选下一批次数 | 校验已发布证据，比较同一设计的采样点指标与预算缺口；只读、零求解，不预留次数，不宣称全带/工程验证 |
+| `antenna.optimize` | 新 run_id、model、dimensions、targets；可选 max_solver_runs、random_seed、population_size、评分尺度 | SciPy 参数搜索，按改善/停滞/耗时动态领取额度，pymininec 复核每个候选的全部频点；不调用模型，不自动改变项目总限额 |
+| `antenna.get_optimization` | 优化的 run_id | 取回最佳候选与停止原因、重新核验数值证据；不恢复种群，不重新求解 |
 | `antenna.solve` | 同一 `model`，加 `run_id` | 一次 solver，绘图状态单列；`COMPUTED_NOT_VALIDATED` 摘要、资源引用与标准 MCP ResourceLink，不内联原始数组/日志 |
 | `antenna.get_result` | 已有 `run_id` | 不需要原始输入，取回已发布结果；不启动 worker，不重新求解 |
 | `antenna.render` | 源 `run_id`、新 `output_run_id` | 核验并复制数值证据到新目录，只补画；本次求解次数为零 |
@@ -122,6 +139,33 @@ C:\absolute\antenna_design\.venv\Scripts\python.exe
 - 结果不超过 16 KiB；超过时提示减少每批频点，不截断证据或警告。读取的原始数组不进入回复。预算快照只用于计划，不保证并发调用后仍有相同剩余额度。
 
 匹配后性能、连续带宽、网格收敛、材料安装与实测始终单列未验证。此工具是已有证据的确定性比较，不是优化器、工作流状态机或完整制作包生成器。
+
+### 有界尺寸优化
+
+完整 MCP 参数示例见 [examples/yagi-optimize.json](examples/yagi-optimize.json)，工具接收该 JSON 对象而非文件路径。示例目标只是演示搜索输入，不是已达标参数或 OB11 用户目标；省略次数与种群时使用自动分批策略，不会自动提升项目总限额。
+
+端到端输入见 [examples/yagi-design.json](examples/yagi-design.json)：同一对象先传给 plan_design，再传给 design。示例未声明工程容差，不会输出收敛通过；它也不是 OB11 的尺寸或验收目标。
+
+`antenna.optimize` 复用已安装的 [SciPy differential_evolution](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.differential_evolution.html) 与 [LatinHypercube](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.qmc.LatinHypercube.html) 生成初始种群，不维护自研遗传算法。已比较 [antenna-optimizer](https://github.com/schlatterbeck/antenna-optimizer)：其 PGApack/PGApy + PyNEC 路线需要另引优化器原生依赖和 NEC2++ 求解器；本批保留已有 pymininec 证据链、直接使用已有 SciPy，避免同时迁移求解器与文件契约。
+
+- 完整 model 作为种子，dimensions 指定 wire（1-based）、parameter（length_m / center_x_m / center_y_m / center_z_m）及米制 lower/upper。修改长度保留中点与方向，修改中心使用绝对坐标；方向、半径、材料、网格、馈电和未列尺寸不变。最多 24 个变量，只支持孤立单元与中心馈电，不自动改拓扑或匹配网络。
+- targets 复用 EvaluationInput，要求 design_objective、最多 6 个频点，不接受 planned_new_solves。全套旧 run_id 必须与种子物理模型完全一致，否则拒绝；可复用旧基线而不消耗次数。没有旧结果则全部省略，基线计算也计入本批预算。
+- 目标值为各频点未达增益、F/B 及显式直连 SWR 门槛的归一化平方和。gain_scale_db / front_back_scale_db / swr_scale 默认 1，均可显式选择；已超额的某项不抵扣其他项缺口。方向取原始角度采样，不用峰值代替前向增益。缺失或无效数值不能成为最佳候选。
+- random_seed 默认 0，population_size 为**总种群数**，省略时取 max(8, 2×自由参数数)，也可显式设为 5～256。这是低成本探索的启发式，不是最优种群或收敛保证；通过 SciPy 公开 init 接口传入。单 worker、polish=False；相同参数在本次搜索内复用，不跨请求仅凭几何套用缓存。
+- max_solver_runs 可省略。默认从剩余次数中留出最多两个全频点扫算的验证余量，搜索上限取其余次数与 4096 的较小值；余量不是独占预留，后续仍须查项目账本。显式上限必须在 1～4096 且不超过剩余次数，验证余量此时由调用者另留。候选机会最多 floor(搜索上限/频点数)，无效几何也占机会，实际频点准入才扣项目次数，旧基线复用不扣。
+- 资源批次与 SciPy 代数分开：公开 callback 每完成一整代比较最佳缺口评分，初始化不算一代。默认至少完成 minimum_generations=5 代，且连续 stagnation_generations=5 代没有超过 0.1% 和 1e-8 的改善才因停滞停止。每个完整候选实测耗时乘 1.25 的高水位限制后续准入；预算/时限仍可提前停止，不表示充分探索。
+- 参数搜索、所有频点与保存共享 worker 时限（最多 600 秒），预留 max(5 秒, 10%) 收尾余量；不够一个候选时主动结束。冷启动尚无估计的第一个候选及异常变慢的求解仍受父进程硬超时限制。预算回执公开硬上限、已领取次数、批次、停滞和实际耗时；一次 MCP 调用完成迭代，内部模型调用为零，不自行扩大项目限额/时限。
+- `.optimizations/<run_id>/request.json` 保存输入，progress.json 原子更新最佳完整候选与分配回执，batch-NNNN.json 记录续批时的改善依据；每个频点落在普通 `<run_id>-cNNNN-fN` 数值目录并有原证据清单。查询重验最佳输入、指标与 hash，用量从 SQLite 读取，避免中断漏计。不保存/恢复 SciPy 种群。
+- 搜索不为每个候选绘图；最佳 run_ids 可以 get_result/evaluate，随后用 render 在新编号补画，再 export。未完成候选留作诊断，不把不同候选的频点混合。best 与 baseline_score 表示是否改进，stop_reason 区分采样目标满足、停滞、时间/次数不足、优化器结束、失败和中断。
+- 使用同一 AnyIO 根作用域管理优化子进程；宿主取消会停止并等待它退出，不新增 cancellation tree。断线/重启先 get_optimization，绝不重放同一优化编号；继续只能在明确的新预算下建立新搜索，原始输入和结果不覆盖。强杀服务仍可能留存 worker，interrupted 不等于已确认停止。
+
+完整交付使用同一输入加 title/purpose 调用 plan_design/design。服务自动留出两层全频网格复核次数；默认按原网格增加约 10%/20%，在 pulse 上限内选择两个更细偶数网格，也可显式指定。容差必须同时给 gain_db/front_back_db/impedance_ohm；省略只记录敏感性，不宣称收敛。整个工作流共享配置时限，搜索分配 65%，其余用于复核/绘图/交付；同步导出清理需等待线程退出，不杀线程。
+
+export 可附 optimization_run_id 和 verification；ZIP 增加 optimization/、verification/ 与对应原始证据，旧交付保持不变。新计算的相同源码快照在项目内通过硬链接复用，不支持硬链接时独立复制；既有证据不删除。MCP 官方 progress 通知更新同一工具活动，不插入聊天正文；优化/评价只给模型有界摘要，完整回执仍供 UI 查看。
+
+更新代码后，重新生成接入配置并在扩展页面确认 plan_design/design 等白名单和 Skill 副本，保存并应用；不会静默修改现有配置。当前新项目默认 3 次只适合单次试算；plan_design 会报告完整工作流的额度缺口，而不是先耗尽次数。
+
+2026-10-23 的 OB11 r04 实际验收已通过真实 MCP 的规划、搜索、两档网格复核、补图、交付及宿主导入：399 次新增求解、131 个完整候选、5 代搜索，零模型调用。另经生产 LangGraph `/tool` 入口验证审批、最终回复、进度事件和真实绘图 worker 取消；完成结果可在 MCP 重启后零求解取回。验收不覆盖自然语言模型决策、HTTP/WebSocket 与 GUI 渲染、Windows 或运行中断电恢复；指标未全达标，交付仍是未验证候选。范围和记录见 [更新日志](../../docs/project/Changelog.md#2026-10-23-ob11-工作流实际验收)。
 
 三个结果工具共用 `schema_version=1` 的回执，包含 `run_id / reused / solver_runs_this_call / summary / resources`。`get_result` 和 `render` 的 `solver_runs_this_call` 均为零；`render` 回执中的 `run_id` 是新的输出编号。宿主按这一传输契约适配，不需要安装或导入本包的 Python 类型。`summary.render_status` 为 `complete` 或 `incomplete`；旧版没有该字段的已完成包按 complete 读取。
 
@@ -149,7 +193,7 @@ C:\absolute\antenna_design\.venv\Scripts\python.exe
 
 ### 预算、取消与关闭
 
-- 一个服务实例最多一个活跃 solve 或 render；并发调用返回 `BUSY`，不排队、不重试。新计算最多一次 solver，内部 LLM 调用为零；取回、补画或复用时本次 solver 次数为零。
+- 一个服务实例最多一个活跃 solve、optimize 或 render；并发调用返回 `BUSY`，不排队、不重试。solve 一次求解；optimize 按本批预算进行多频参数搜索，两者内部 LLM 调用为零；取回、补画或复用时本次 solver 次数为零。
 - 一个专用 `--root` 对应一个项目；`.antenna-project.sqlite3` 保存稳定项目 ID、求解尝试预留、输入 hash、补画来源和额度调整记录。新目录默认最多 **3 次求解尝试**，是单方案路径的保守防循环限制，不是工程最优次数。`--max-solver-runs N` 可由操作员显式调整总限额；省略时保留数据库中的值，重启、换 run_id 或聊天回合不会清零。降低到已用次数以下会禁止新求解，不删除历史；模型工具不能修改额度。
 - `solve` 在创建目录/启动 worker **之前**用 SQLite 事务预留 1 次；失败、超时、取消及崩溃都不自动退回。因此 `reserved_attempts` 是保守准入次数，不是假称精确 solver 调用次数。已登记但缺少文件的编号返回 `RUN_RESERVED`，不自动重放；额度用完返回 `SOLVE_BUDGET_EXHAUSTED`，仍可查询、取回和补画。补画登记来源，但不扣求解额度。
 - 初次接管旧结果根目录时，每个符合 run_id 的已有目录保守计 1 次，包括旧补画和未完成目录；不猜测过去是否实际执行。重启发现新增旧目录也会纳入，已登记目录不重复计数。已用额度不会因删除结果目录而释放。专用目录只供这一个服务管理；不要并行使用 CLI 或其他进程写入。
@@ -177,7 +221,7 @@ C:\absolute\antenna_design\.venv\Scripts\python.exe
 
 宿主每次导入最多 10 个文件、单文件 16 MiB、合计 48 MiB，整个读取/写入阶段限时 30 秒（不可中断的本地写入清理另计）。模型只收到有界摘要、资源与本地文件引用，不收到这些数组或图片字节。部分导入失败时保留已核验文件和警告，`import_complete=false`，不把成功计算改记为失败，也不自动重算；取消同样不自动重放远端副作用。
 
-这是现有聊天链路的结果适配；配合下述 Skill 推进输入整理、计算和取回/补画，不是确定性阶段引擎、自动优化或制作验收。已在 Linux 通过真实 MCP/solver 与生产 Core 的显式工具路径复跑，未调用模型；不代表自然语言自主规划、GUI 或 Windows 实机验收通过。
+这是现有聊天链路的结果适配；配合下述 Skill 推进输入整理、计算和取回/补画，数值优化属于独立 MCP 算法包而非宿主适配，不是确定性阶段引擎或制作验收。既有单次求解路径曾在 Linux 通过真实 MCP/solver 与生产 Core 的显式工具路径复跑，不能将旧记录算作新优化路径验收；也不代表自然语言自主规划、GUI 或 Windows 实机验收通过。
 
 ### 安装工作流 Skill
 

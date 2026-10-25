@@ -20,7 +20,7 @@ def connection_bundle(root: Path, *, namespace: str, timeout: int, solve_limit: 
         raise ValueError("Worker timeout must be between 1 and 600 seconds")
     if solve_limit is not None and not 1 <= solve_limit <= MAX_SOLVE_LIMIT:
         raise ValueError(f"Total solve limit must be between 1 and {MAX_SOLVE_LIMIT}")
-    for package in ("antenna-design", "mcp", "pymininec", "matplotlib"):
+    for package in ("antenna-design", "mcp", "pymininec", "matplotlib", "scikit-rf"):
         try:
             metadata.version(package)
         except metadata.PackageNotFoundError:
@@ -57,6 +57,13 @@ def connection_bundle(root: Path, *, namespace: str, timeout: int, solve_limit: 
                     "antenna.model_validate",
                     "antenna.solve",
                     "antenna.evaluate",
+                    "antenna.prepare_revision",
+                    "antenna.matching",
+                    "antenna.evaluate_matching",
+                    "antenna.optimize",
+                    "antenna.plan_design",
+                    "antenna.design",
+                    "antenna.get_optimization",
                     "antenna.get_result",
                     "antenna.render",
                     "antenna.cancel",

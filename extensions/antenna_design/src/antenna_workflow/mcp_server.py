@@ -8,10 +8,15 @@ import os
 import re
 import signal
 import subprocess
+import sys
+from contextlib import suppress
 from dataclasses import dataclass, field
+from functools import partial
 from importlib.metadata import PackageNotFoundError, version
+from math import ceil
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from time import monotonic
 from typing import Annotated, Any, Literal
 
 import anyio
@@ -29,6 +34,7 @@ from .artifacts import (
     preserve_numerical_result,
     worker_command,
     worker_environment,
+    write_json,
 )
 from .contracts import ArtifactRef, Contract, EngineeringRequest, EngineeringSummary
 from .delivery import (
@@ -40,7 +46,16 @@ from .delivery import (
     get_delivery,
     read_delivery_resource,
 )
+from .design import DesignInput, DesignPlan, plan_design
 from .evaluation import EvaluationError, EvaluationInput, EvaluationResult, evaluate
+from .matching import (
+    FixedMatchingInput,
+    FixedMatchingResult,
+    MatchingInput,
+    MatchingResult,
+    evaluate_fixed_matching,
+    synthesize_matching,
+)
 from .mcp_resources import (
     MAX_METADATA_BYTES,
     PUBLIC_ARTIFACTS,
@@ -48,9 +63,18 @@ from .mcp_resources import (
     ArtifactUnavailableError,
     parse_uri,
     read_artifact,
+    read_bounded,
     read_manifest,
     resource_uri,
     run_path,
+)
+from .optimization import (
+    OptimizationResult,
+    OptimizeInput,
+    candidate_model,
+    get_optimization,
+    optimization_path,
+    prepare_optimization,
 )
 from .project_store import (
     MAX_SOLVE_LIMIT,
@@ -60,6 +84,8 @@ from .project_store import (
     RunReservation,
     StatusInput,
 )
+from .revision import PreparedRevision, RevisionInput, prepare_revision
+from .verification import VerificationInput, verify_mesh
 
 logger = logging.getLogger(__name__)
 type AntennaServer = Server[dict[str, JsonValue], object]
@@ -101,6 +127,7 @@ class _ActiveWorker:
     """Only live worker ownership; completed results remain authoritative on disk."""
 
     operation_id: str | None
+    phase: str = "calculating"
     scope: anyio.CancelScope = field(default_factory=anyio.CancelScope)
     done: anyio.Event = field(default_factory=anyio.Event)
 
@@ -160,7 +187,17 @@ def _project_status(snapshot: ProjectSnapshot, store: Path, active: set[str]) ->
             "wait_or_cancel"
         )
         render_status: Literal["complete", "incomplete"] | None = None
-        if reservation.run_id not in active:
+        search_owned = any(
+            re.fullmatch(rf"{re.escape(owner)}-(?:c[0-9]{{4}}|mesh[0-9]{{1,3}}|plot)-f[1-6]", reservation.run_id)
+            is not None
+            for owner in active
+        )
+        unpublished_search_run = False
+        if search_owned:
+            with suppress(ArtifactUnavailableError, OSError):
+                root = run_path(store, reservation.run_id)
+                unpublished_search_run = not any((root / name).exists() for name in ("completed.json", "failure.json"))
+        if reservation.run_id not in active and not unpublished_search_run:
             try:
                 result = _result(run_path(store, reservation.run_id), reservation.run_id, reused=True)
                 evidence, render_status = "complete", result.summary.render_status
@@ -236,23 +273,25 @@ def _result(root: Path, run_id: str, expected: EngineeringRequest | None = None,
     return result
 
 
-async def _solve(store: Path, request: SolveInput, timeout: int, project: ProjectStore) -> SolveResult:
+async def _solve(
+    store: Path, request: SolveInput, timeout: int, project: ProjectStore, *, numerical_only: bool = False
+) -> SolveResult:
     root = run_path(store, request.run_id)
     if root.exists():
         # A completed, matching request can be read again; incomplete runs are never replayed.
         return _result(root, request.run_id, request.model, reused=True)
     project.reserve_solve(request.run_id, request.model)
     prepare_bundle(root, request.model, timeout=timeout)
-    await _run_worker(root, timeout)
+    await _run_worker(root, timeout, numerical_only=numerical_only)
     return _result(root, request.run_id, request.model, reused=False)
 
 
-async def _run_worker(root: Path, timeout: int, *, render_only: bool = False) -> None:
+async def _run_worker(root: Path, timeout: int, *, render_only: bool = False, numerical_only: bool = False) -> None:
     try:
         with TemporaryDirectory(prefix="antenna-mcp-plot-") as plot_cache, (root / "diagnostics.log").open("xb") as log:
             with anyio.fail_after(timeout):
                 await anyio.run_process(
-                    worker_command(root, render_only=render_only),
+                    worker_command(root, render_only=render_only, numerical_only=numerical_only),
                     stdin=subprocess.DEVNULL,
                     stdout=log,
                     stderr=subprocess.STDOUT,
@@ -269,6 +308,154 @@ async def _run_worker(root: Path, timeout: int, *, render_only: bool = False) ->
         raise
 
 
+async def _optimize(
+    store: Path,
+    request: OptimizeInput,
+    timeout: int,
+    project: ProjectStore,
+    *,
+    design: DesignInput | None = None,
+    plan: DesignPlan | None = None,
+) -> OptimizationResult:
+    root = optimization_path(store, request.run_id)
+    if root.exists():
+        raise FileExistsError("Optimization identifier already exists; retrieve it without restarting")
+    root = await anyio.to_thread.run_sync(prepare_optimization, store, request, project)
+    if design is not None and plan is not None:
+        write_json(root / "design-plan.json", plan)
+        write_json(root / "design-request.json", design)
+    try:
+        with TemporaryDirectory(prefix="antenna-optimize-") as cache, (root / "diagnostics.log").open("xb") as log:
+            with anyio.fail_after(timeout):
+                await anyio.run_process(
+                    [sys.executable, "-m", "antenna_workflow.cli", "_optimize", str(root), "--timeout", str(timeout)],
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    env=worker_environment(cache),
+                )
+    finally:
+        # Only the parent can acknowledge process exit. The child's final score
+        # can be on disk while it is still alive or its parent was forcibly killed.
+        with suppress(OSError):
+            write_json(
+                root / "worker-exited.json", CancelResult(run_id=request.run_id, worker_stopped=True, status="stopped")
+            )
+    result = await anyio.to_thread.run_sync(partial(get_optimization, store, request.run_id, project, active=False))
+    await anyio.lowlevel.checkpoint()
+    return result
+
+
+async def _render(store: Path, request: RenderInput, timeout: int, project: ProjectStore) -> SolveResult:
+    source = run_path(store, request.run_id)
+    _result(source, request.run_id, reused=True)
+    target = run_path(store, request.output_run_id)
+    if target.exists():
+        raise FileExistsError("Render output already exists")
+    project.reserve_render(request.output_run_id, request.run_id)
+    prepare_render(source, target, timeout=timeout)
+    await _run_worker(target, timeout, render_only=True)
+    return _result(target, request.output_run_id, reused=True)
+
+
+async def _design(
+    store: Path, query: DesignInput, timeout: int, project: ProjectStore, activity: _ActiveWorker
+) -> DeliveryResult:
+    plan = plan_design(query, project.snapshot(StatusInput(limit=1)), timeout)
+    if plan.status != "ready":
+        raise AdmissionError(
+            "DESIGN_BUDGET_INSUFFICIENT", "Use plan_design for the required allowance; no solve started."
+        )
+    # One deadline covers search, both refinement sweeps, plotting and export.
+    # Every solve still obtains its own non-refundable admission from ProjectStore.
+    deadline = monotonic() + timeout
+
+    def remaining() -> int:
+        seconds = deadline - monotonic()
+        if seconds <= 0:
+            raise TimeoutError
+        return max(1, ceil(seconds))
+
+    root = optimization_path(store, query.run_id)
+    with anyio.fail_after(timeout):
+        activity.phase = "searching"
+        search = await _optimize(
+            store,
+            query.search_input(plan.search_attempts),
+            plan.search_timeout_seconds,
+            project,
+            design=query,
+            plan=plan,
+        )
+        if search.best is None:
+            raise RunUnavailableError("NO_VALID_CANDIDATE", "Search retained no evaluable design; inspect its receipt.")
+        if search.stop_reason in {"failed", "interrupted", "in_progress"}:
+            raise RunUnavailableError("RUN_INCOMPLETE", "Search has not ended cleanly; no automatic replay.")
+        model = candidate_model(query, search.best.parameters)
+        baseline = query.targets.model_copy(
+            update={
+                "points": tuple(
+                    point.model_copy(update={"run_id": run_id})
+                    for point, run_id in zip(query.targets.points, search.best.run_ids, strict=True)
+                )
+            }
+        )
+        refinements = []
+        for level in plan.verification_segments:
+            activity.phase = f"checking mesh {level}"
+            refined = EngineeringRequest.model_validate(
+                {
+                    **model.model_dump(),
+                    "mesh": {**model.mesh.model_dump(), "segments_per_wire": level},
+                }
+            )
+            points = []
+            for number, point in enumerate(query.targets.points, 1):
+                run_id = f"{query.run_id}-mesh{level}-f{number}"
+                await _solve(
+                    store,
+                    SolveInput(
+                        run_id=run_id,
+                        model=refined.model_copy(update={"frequency_hz": point.frequency_hz}),
+                    ),
+                    remaining(),
+                    project,
+                    numerical_only=True,
+                )
+                points.append(point.model_copy(update={"run_id": run_id}))
+            refinements.append(query.targets.model_copy(update={"points": tuple(points)}))
+        verification = VerificationInput(refinements=tuple(refinements), tolerances=query.mesh_tolerances)
+        checked = await anyio.to_thread.run_sync(
+            verify_mesh, store, baseline, verification, project.snapshot(StatusInput(limit=1))
+        )
+        write_json(root / "verification.json", checked)
+        activity.phase = "rendering selected candidate"
+        points = []
+        for number, point in enumerate(baseline.points, 1):
+            assert point.run_id is not None
+            run_id = f"{query.run_id}-plot-f{number}"
+            await _render(store, RenderInput(run_id=point.run_id, output_run_id=run_id), remaining(), project)
+            points.append(point.model_copy(update={"run_id": run_id}))
+        delivery = DeliveryInput(
+            delivery_id=query.run_id,
+            title=query.title,
+            purpose=query.purpose,
+            assumptions=query.assumptions,
+            sources=query.sources,
+            evaluation=baseline.model_copy(update={"points": tuple(points)}),
+            optimization_run_id=query.run_id,
+            verification=verification,
+            matching_options=query.matching_options,
+        )
+        remaining()
+        activity.phase = "exporting candidate evidence"
+        result = await anyio.to_thread.run_sync(
+            export_delivery, store, delivery, project.snapshot(StatusInput(limit=1))
+        )
+        await anyio.lowlevel.checkpoint()
+        return result
+
+
 def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> AntennaServer:
     project = ProjectStore(store, solve_limit)
     server: AntennaServer = Server(
@@ -282,6 +469,8 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
             "Read referenced resources only when needed; never copy raw arrays into chat history. "
             "Results remain COMPUTED_NOT_VALIDATED. Use get_result to retrieve an existing run; "
             "use render with a new output_run_id to repair plots without recalculation."
+            " Use plan_design then design for search, mesh checks and delivery in one owned call. "
+            "Use optimize alone only when deliberately stopping before verification/delivery."
         ),
     )
     solver_slot = anyio.Lock()
@@ -292,6 +481,15 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
         if worker is None:
             root = run_path(store, request.run_id)
             finished = (root / "completed.json").is_file()
+            optimization = optimization_path(store, request.run_id)
+            if optimization.exists():
+                finished = False
+                exit_name = (
+                    "design-exited.json" if (optimization / "design-request.json").exists() else "worker-exited.json"
+                )
+                if (optimization / exit_name).exists():
+                    exit_receipt = CancelResult.model_validate_json(read_bounded(optimization, exit_name, 1024))
+                    finished = exit_receipt.run_id == request.run_id and exit_receipt.worker_stopped
             return CancelResult(
                 run_id=request.run_id, worker_stopped=finished, status="finished" if finished else "unconfirmed"
             )
@@ -303,8 +501,10 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
         await worker.done.wait()
         return CancelResult(run_id=request.run_id, worker_stopped=True, status="stopped")
 
-    async def run(request: SolveInput | RenderInput) -> SolveResult | types.CallToolResult:
-        run_id = request.run_id if isinstance(request, SolveInput) else request.output_run_id
+    async def run(
+        request: SolveInput | RenderInput | OptimizeInput | DesignInput,
+    ) -> SolveResult | OptimizationResult | DeliveryResult | types.CallToolResult:
+        run_id = request.output_run_id if isinstance(request, RenderInput) else request.run_id
         if run_id in active:
             return _error("RUN_ACTIVE", "This run is still executing. Wait, query later, or explicitly cancel it.")
         meta = server.request_context.meta
@@ -319,22 +519,71 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
             return _error("BUSY", "Another calculation or render is active; wait or cancel it.")
         worker = _ActiveWorker(operation_id)
         active[run_id] = worker
-        result: SolveResult | None = None
+        result: SolveResult | OptimizationResult | DeliveryResult | None = None
+        new_design = isinstance(request, DesignInput) and not optimization_path(store, run_id).exists()
+
+        async def progress() -> None:
+            context = server.request_context
+            token = context.meta.progressToken if context.meta is not None else None
+            if token is None:
+                return
+            tick = 0
+            while True:
+                tick += 1
+                # Observation failures (including a busy ledger) must not cancel
+                # an otherwise healthy numerical worker through the task group.
+                with suppress(Exception):
+                    snapshot = project.snapshot(StatusInput(limit=1))
+                    message = (
+                        f"{run_id}: {worker.phase}; admitted {snapshot.reserved_attempts}, "
+                        f"remaining {snapshot.remaining_attempts}"
+                    )
+                    search_root = optimization_path(store, run_id)
+                    if (search_root / "progress.json").is_file():
+                        saved = OptimizationResult.model_validate_json(
+                            read_bounded(search_root, "progress.json", MAX_METADATA_BYTES)
+                        )
+                        message += f"; candidates {saved.candidate_attempts}, search {saved.stop_reason}"
+                    # The counter is activity, not an estimated completion percentage.
+                    with anyio.move_on_after(1):
+                        await context.session.send_progress_notification(token, tick, message=message)
+                await anyio.sleep(2)
+
         try:
             with worker.scope:
-                if isinstance(request, SolveInput):
-                    result = await _solve(store, request, timeout, project)
-                else:
-                    source = run_path(store, request.run_id)
-                    _result(source, request.run_id, reused=True)
-                    target = run_path(store, run_id)
-                    if target.exists():
-                        raise FileExistsError("Render output already exists")
-                    project.reserve_render(run_id, request.run_id)
-                    prepare_render(source, target, timeout=timeout)
-                    await _run_worker(target, timeout, render_only=True)
-                    result = _result(target, run_id, reused=True)
+                failure: BaseException | None = None
+                async with anyio.create_task_group() as notifications:
+                    notifications.start_soon(progress)
+                    try:
+                        if isinstance(request, DesignInput):
+                            result = await _design(store, request, timeout, project, worker)
+                        elif isinstance(request, SolveInput):
+                            result = await _solve(store, request, timeout, project)
+                        elif isinstance(request, OptimizeInput):
+                            result = await _optimize(store, request, timeout, project)
+                        else:
+                            result = await _render(store, request, timeout, project)
+                    except BaseException as error:
+                        # Preserve domain errors instead of turning a failed admission
+                        # into an opaque ExceptionGroup from the notification task group.
+                        failure = error
+                    finally:
+                        notifications.cancel_scope.cancel()
+                if failure is not None:
+                    raise failure
         finally:
+            if new_design:
+                root = optimization_path(store, run_id)
+                if (root / "design-request.json").is_file():
+                    with suppress(OSError):
+                        write_json(
+                            root / "design-exited.json",
+                            CancelResult(
+                                run_id=run_id,
+                                worker_stopped=True,
+                                status="stopped",
+                            ),
+                        )
             active.pop(run_id)
             solver_slot.release()
             worker.done.set()
@@ -344,6 +593,51 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
 
     async def list_tools() -> list[types.Tool]:
         return [
+            types.Tool(
+                name="antenna.plan_design",
+                description="Plan search and two mesh sweeps against the current project cap, without solves. "
+                "Reports minimum/recommended allowance and missing budget. Does not change the operator cap.",
+                inputSchema=DesignInput.model_json_schema(),
+                outputSchema=DesignPlan.model_json_schema(),
+                annotations=types.ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+            ),
+            types.Tool(
+                name="antenna.design",
+                description="Run a complete bounded candidate workflow: numerical search, two mesh sweeps, plots "
+                "and evidence ZIP. Call plan_design first. run_id also identifies the delivery. "
+                "No model calls; no automatic replay. Optional tolerances assess mesh sensitivity, not fabrication. "
+                "After interruption use get_optimization/project_status; after delivery use get_delivery.",
+                inputSchema=DesignInput.model_json_schema(),
+                outputSchema=DeliveryResult.model_json_schema(),
+                annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
+            ),
+            types.Tool(
+                name="antenna.optimize",
+                description=(
+                    "Search explicit wire length/center bounds with SciPy differential evolution and pymininec, "
+                    "without model calls. Every candidate uses one geometry/feed across all target frequencies. "
+                    "Supply design_objective targets and a new run_id. By default, allocate batches adaptively "
+                    "within the project budget, leaving verification headroom; max_solver_runs is an optional cap. "
+                    "Existing target run_ids may seed the exact baseline without recalculation. "
+                    "Counts include failed admissions; stop on sample targets, declared stagnant full generations, "
+                    "insufficient time or budget. Inspect the budget receipt for allocation and actual usage. "
+                    "Search does not certify bandwidth, convergence or fabrication. Query get_optimization after "
+                    "interruption; render/get_result/export the returned best run_ids without repeating solves."
+                ),
+                inputSchema=OptimizeInput.model_json_schema(),
+                outputSchema=OptimizationResult.model_json_schema(),
+                annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
+            ),
+            types.Tool(
+                name="antenna.get_optimization",
+                description=(
+                    "Read saved search progress and best complete candidate by run_id, including after restart. "
+                    "Does not resume search, reset budget or recalculate. Interrupted is not target satisfaction."
+                ),
+                inputSchema=ResultInput.model_json_schema(),
+                outputSchema=OptimizationResult.model_json_schema(),
+                annotations=types.ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+            ),
             types.Tool(
                 name="antenna.export",
                 description=(
@@ -394,9 +688,46 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
                 annotations=types.ToolAnnotations(readOnlyHint=True, openWorldHint=False),
             ),
             types.Tool(
+                name="antenna.prepare_revision",
+                description=(
+                    "Prepare new frequency targets and explicit installation/material changes from a saved model. "
+                    "Does not solve or reuse old performance claims. Feed height is in metres; rotations are "
+                    "extrinsic XYZ degrees about the original feed. Buildings/mast/roof notes are not simulated. "
+                    "Use the returned model and targets for new admitted solves or plan_design."
+                ),
+                inputSchema=RevisionInput.model_json_schema(),
+                outputSchema=PreparedRevision.model_json_schema(),
+                annotations=types.ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+            ),
+            types.Tool(
+                name="antenna.matching",
+                description=(
+                    "Calculate ideal per-frequency L-network component candidates from verified saved R+jX. "
+                    "Requires explicit separate_network choice. Uses SciPy/scikit-rf; zero EM solves. "
+                    "Each frequency needs retuning or switching: not one fixed multiband network, "
+                    "not a balun, power rating or fabrication approval. Export with matching_options to retain files."
+                ),
+                inputSchema=MatchingInput.model_json_schema(),
+                outputSchema=MatchingResult.model_json_schema(),
+                annotations=types.ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+            ),
+            types.Tool(
+                name="antenna.evaluate_matching",
+                description=(
+                    "Check one fixed ideal L network against saved same-design frequency samples. "
+                    "Supply unchanged series/shunt H/F values, topology and separate_network evaluation. "
+                    "No retuning, interpolation or new EM solve. Optional max_swr is a caller-selected target; "
+                    "absence reports numbers only. Export matching_checks to retain source evidence and results."
+                ),
+                inputSchema=FixedMatchingInput.model_json_schema(),
+                outputSchema=FixedMatchingResult.model_json_schema(),
+                annotations=types.ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+            ),
+            types.Tool(
                 name="antenna.cancel",
                 description=(
-                    "Stop an active run and wait for its worker to exit; run_id is the output run for rendering. "
+                    "Stop an active solve/search/render and wait for its worker to exit; "
+                    "run_id is the output run for rendering, or the search ID for optimization. "
                     "Only use on explicit user cancellation. Saved numerical results are retained. "
                     "operation_id is optional for manual cancellation; hosts supply it to cancel only their own call."
                 ),
@@ -450,6 +781,70 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
     async def call_tool(name: str, arguments: dict[str, Any]) -> ToolReply:
         # The SDK owns JSON-RPC. Pydantic owns input validation, avoiding SDK error messages that echo raw inputs.
         try:
+            if name == "antenna.prepare_revision":
+                revision_query = RevisionInput.model_validate(arguments)
+                try:
+                    revision = await anyio.to_thread.run_sync(prepare_revision, store, revision_query)
+                except ArtifactUnavailableError:
+                    raise
+                except ValueError:
+                    return _error(
+                        "REVISION_INVALID", "Check explicit feed height, ground clearance, material and angular grid."
+                    )
+                return revision.model_dump(mode="json")
+            if name == "antenna.matching":
+                matching_query = MatchingInput.model_validate(arguments)
+                evaluated = await anyio.to_thread.run_sync(
+                    evaluate, store, matching_query.evaluation, project.snapshot(StatusInput(limit=1))
+                )
+                try:
+                    matched = await anyio.to_thread.run_sync(synthesize_matching, evaluated, matching_query.options)
+                except ValueError:
+                    return _error("MATCHING_INVALID", "Use completed same-design samples and separate_network mode.")
+                return matched.model_dump(mode="json")
+            if name == "antenna.evaluate_matching":
+                fixed_query = FixedMatchingInput.model_validate(arguments)
+                evaluated = await anyio.to_thread.run_sync(
+                    evaluate, store, fixed_query.evaluation, project.snapshot(StatusInput(limit=1))
+                )
+                try:
+                    fixed = await anyio.to_thread.run_sync(evaluate_fixed_matching, evaluated, fixed_query)
+                except ValueError, ArithmeticError:
+                    return _error(
+                        "MATCHING_INVALID", "Check saved samples, separate_network mode and finite H/F values."
+                    )
+                return fixed.model_dump(mode="json")
+            if name in {"antenna.plan_design", "antenna.design"}:
+                design = DesignInput.model_validate(arguments)
+                if len(design.model_dump_json().encode()) > MAX_METADATA_BYTES:
+                    return _error("INPUT_TOO_LARGE", "Design request exceeds 64 KiB.")
+                if name == "antenna.plan_design":
+                    return plan_design(design, project.snapshot(StatusInput(limit=1)), timeout).model_dump(mode="json")
+                designed = await run(design)
+                return designed if isinstance(designed, types.CallToolResult) else designed.model_dump(mode="json")
+            if name == "antenna.get_optimization":
+                query = ResultInput.model_validate(arguments)
+                search_root = optimization_path(store, query.run_id)
+                if not search_root.exists():
+                    return _error("RUN_NOT_FOUND", "No search exists for this run_id; no calculation was started.")
+                if not (search_root / "progress.json").exists():
+                    return _error("RUN_INCOMPLETE", "Search has no complete progress receipt; preserve evidence.")
+                saved_search = await anyio.to_thread.run_sync(
+                    partial(get_optimization, store, query.run_id, project, active=query.run_id in active)
+                )
+                if len(saved_search.model_dump_json().encode()) > 16384:
+                    return _error("RESULT_TOO_LARGE", "Search receipt exceeds 16 KiB; evidence remains on disk.")
+                return saved_search.model_dump(mode="json")
+            if name == "antenna.optimize":
+                search = OptimizeInput.model_validate(arguments)
+                if len(search.model_dump_json().encode()) > MAX_METADATA_BYTES:
+                    return _error("INPUT_TOO_LARGE", "Search request exceeds 64 KiB.")
+                searched = await run(search)
+                if isinstance(searched, types.CallToolResult):
+                    return searched
+                if len(searched.model_dump_json().encode()) > 16384:
+                    return _error("RESULT_TOO_LARGE", "Search receipt exceeds 16 KiB; evidence remains on disk.")
+                return searched.model_dump(mode="json")
             if name == "antenna.project_status":
                 snapshot = project.snapshot(StatusInput.model_validate(arguments))
                 return _project_status(snapshot, store, set(active)).model_dump(mode="json")
@@ -502,7 +897,7 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
             if name == "antenna.render":
                 render = RenderInput.model_validate(arguments)
                 rendered = await run(render)
-                return rendered.model_dump(mode="json") if isinstance(rendered, SolveResult) else rendered
+                return rendered if isinstance(rendered, types.CallToolResult) else rendered.model_dump(mode="json")
             if name not in {"antenna.model_validate", "antenna.solve"}:
                 return _error("UNKNOWN_TOOL", "Unknown antenna operation.")
             request = (
@@ -516,6 +911,8 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
                 result = await run(request)
                 if isinstance(result, types.CallToolResult):
                     return result
+                if not isinstance(result, SolveResult):
+                    raise TypeError("Solve did not return a solve receipt")
                 content: list[types.ContentBlock] = [types.TextContent(type="text", text=result.model_dump_json())]
                 content.extend(
                     types.ResourceLink(
@@ -536,7 +933,7 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
         except (EvaluationError, DeliveryError) as error:
             return _error(error.code, str(error))
         except TimeoutError:
-            return _error("DEADLINE_EXCEEDED", "Worker has exited; no complete numerical result was published.")
+            return _error("DEADLINE_EXCEEDED", "Worker has exited; query get_result or get_optimization for evidence.")
         except subprocess.CalledProcessError:
             return _error("SOLVER_FAILED", "Worker has exited; operator diagnostics are in the run directory.")
         except RunUnavailableError as error:

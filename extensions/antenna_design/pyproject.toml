@@ -19,8 +19,9 @@ engineering = [
     "numpy==2.5.4",
     "scipy==1.18.1",
     "matplotlib==3.11.2",
+    "scikit-rf==2.2.0",
 ]
-dev = ["ruff>=0.17,<0.18", "mypy>=1.19,<3"]
+dev = ["ruff>=0.17,<0.18", "mypy>=1.19,<3", "scipy-stubs>=1.18.1,<1.19"]
 mcp = ["mcp==1.30.0", "anyio>=4.14.2,<5"]
 
 [project.scripts]
@@ -43,4 +44,8 @@ strict = true
 
 [[tool.mypy.overrides]]
 module = ["mininec.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["skrf.*"]
 ignore_missing_imports = true

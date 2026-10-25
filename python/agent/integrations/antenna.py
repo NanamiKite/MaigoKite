@@ -19,6 +19,7 @@ from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from anyio import to_thread
+from mcp.shared.session import ProgressFnT
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent.data_contracts import JSONObject
@@ -34,7 +35,13 @@ MAX_RESOURCE_BYTES = 16 * 1024 * 1024
 MAX_BUNDLE_BYTES = 48 * 1024 * 1024
 _RUN_ID = r"^[a-z0-9][a-z0-9_-]{0,63}$"
 _FAILURE_HINTS = {
-    "RUN_ACTIVE": ("该计算仍在运行。", "稍后用 antenna.get_result 查询原 run_id；不要再次求解。"),
+    "DESIGN_BUDGET_INSUFFICIENT": (
+        "当前额度不足以完成一次搜索和网格复核。", "请先调用 plan_design 查看最低次数和缺口；本次未开始求解。",
+    ),
+    "NO_VALID_CANDIDATE": (
+        "搜索未留下可评价的完整候选。", "请查询原 run_id 的优化回执和输入限制，不要自动重新求解。",
+    ),
+    "RUN_ACTIVE": ("该计算仍在运行。", "单次计算用 get_result、参数搜索用 get_optimization 查询；不要再次求解。"),
     "BUSY": ("天线服务正在处理另一项计算。", "等待当前操作结束；只有用户要求时才取消它。"),
     "RUN_NOT_FOUND": ("没有找到这个计算编号。", "核对服务和 run_id；不要自动换编号重新求解。"),
     "RUN_INCOMPLETE": ("这次运行没有形成完整结果。", "保留原始记录，核实中断原因后再决定是否重新计算。"),
@@ -46,8 +53,8 @@ _FAILURE_HINTS = {
         "用 antenna.project_status 查看记录，再取回原结果；证据缺失时不要自动重算。",
     ),
     "SOLVE_BUDGET_EXHAUSTED": (
-        "这个天线项目的求解尝试额度已用完。",
-        "仍可查询结果或补画；需要继续计算时，由用户调整服务启动额度，不能更换编号绕过。",
+        "这个天线项目的剩余求解次数不足以执行本次请求。",
+        "仍可查询结果或补画；需要继续计算时，由用户确认本批次数或调整总限额，不能更换编号绕过。",
     ),
     "RUN_CANCELLED": ("计算进程已停止。", "可查询原 run_id，取回停止前已经保存的数值结果。"),
     "REQUEST_INTERRUPTED": (
@@ -85,19 +92,24 @@ async def _stop_owned_run(client: MCPClient, run_id: str, operation_id: str) -> 
         return False
 
 
-async def call_antenna_tool(client: MCPClient, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Bridge cancellation only for this integration's owned solve/render invocation.
+async def call_antenna_tool(
+    client: MCPClient, name: str, arguments: dict[str, Any], *, progress_callback: ProgressFnT | None = None,
+) -> dict[str, Any]:
+    """Bridge cancellation for this integration's owned solve/search/render invocation.
 
     MCP 1.30 call_tool does not send cancellation on local task cancellation.
     Use a public domain operation with an acknowledgement instead of borrowing
     SDK request IDs or closing a session used by other calls.
     """
     run_id = arguments.get("output_run_id" if name == "antenna.render" else "run_id")
-    if name not in {"antenna.solve", "antenna.render"} or not isinstance(run_id, str):
-        return await client.call_tool(name, arguments)
+    owned_operations = {"antenna.solve", "antenna.render", "antenna.optimize", "antenna.design"}
+    if name not in owned_operations or not isinstance(run_id, str):
+        return await client.call_tool(name, arguments, progress_callback=progress_callback)
     operation_id = uuid4().hex
     try:
-        return await client.call_tool(name, arguments, meta={"antenna/operation_id": operation_id})
+        return await client.call_tool(
+            name, arguments, meta={"antenna/operation_id": operation_id}, progress_callback=progress_callback,
+        )
     except (asyncio.CancelledError, MCPError) as error:
         cleanup = asyncio.create_task(_stop_owned_run(client, run_id, operation_id))
         cancelled = isinstance(error, asyncio.CancelledError)
@@ -234,8 +246,9 @@ def _receipt(
     value = response.get("structuredContent")
     if not isinstance(value, dict) or len(json.dumps(value, ensure_ascii=False).encode()) > 16384:
         raise ValueError("Missing or oversized antenna receipt")
-    if source_tool in {"antenna.export", "antenna.get_delivery"}:
-        return _delivery_receipt(value, arguments)
+    if source_tool in {"antenna.export", "antenna.get_delivery", "antenna.design"}:
+        delivery_arguments = {"delivery_id": arguments.get("run_id")} if source_tool == "antenna.design" else arguments
+        return _delivery_receipt(value, delivery_arguments)
     receipt = SolveReceipt.model_validate(value)
     expected = arguments.get("output_run_id" if source_tool == "antenna.render" else "run_id")
     if receipt.run_id != expected or receipt.summary.get("status") != "COMPUTED_NOT_VALIDATED":

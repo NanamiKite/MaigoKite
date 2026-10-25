@@ -23,6 +23,14 @@ from pydantic import Field, JsonValue, model_validator
 from .artifacts import digest
 from .contracts import ArtifactRef, Contract, EngineeringRequest, EngineeringSummary, Point
 from .evaluation import EvaluationError, EvaluationInput, EvaluationResult, evaluate
+from .matching import (
+    FixedMatchingInput,
+    FixedMatchingResult,
+    MatchingOptions,
+    MatchingResult,
+    evaluate_fixed_matching,
+    synthesize_matching,
+)
 from .mcp_resources import (
     MAX_METADATA_BYTES,
     MAX_RESOURCE_BYTES,
@@ -35,7 +43,9 @@ from .mcp_resources import (
     read_manifest,
     run_path,
 )
+from .optimization import OptimizationResult, OptimizeInput, candidate_model, objective, optimization_path
 from .project_store import ProjectSnapshot
+from .verification import VerificationInput, VerificationResult, verify_mesh
 
 MAX_DELIVERY_BYTES = 48 * 1024 * 1024
 DELIVERY_ARTIFACTS: dict[str, tuple[str, str]] = {
@@ -74,11 +84,19 @@ class DeliveryInput(Contract):
     assumptions: Annotated[tuple[Annotated[str, Field(max_length=500)], ...], Field(max_length=20)] = ()
     sources: Annotated[tuple[Annotated[str, Field(max_length=500)], ...], Field(max_length=20)] = ()
     evaluation: EvaluationInput
+    optimization_run_id: Annotated[str | None, Field(pattern=f"^{RUN_ID_PATTERN}$")] = None
+    verification: VerificationInput | None = None
+    matching_options: MatchingOptions | None = None
+    matching_checks: Annotated[tuple[FixedMatchingInput, ...], Field(max_length=6)] = ()
 
     @model_validator(mode="after")
     def saved_points_only(self) -> Self:
         if any(point.run_id is None for point in self.evaluation.points):
             raise ValueError("A delivery requires a saved run identifier for every frequency point")
+        if (
+            self.matching_options is not None or self.matching_checks
+        ) and self.evaluation.matching != "separate_network":
+            raise ValueError("Matching parameters require an explicit separate_network choice")
         return self
 
 
@@ -123,6 +141,10 @@ class _Evidence:
     summaries: dict[str, EngineeringSummary] = field(default_factory=dict)
     missing: dict[str, list[str]] = field(default_factory=dict)
     remaining_read_bytes: int = MAX_DELIVERY_BYTES
+    optimization: OptimizationResult | None = None
+    verification: VerificationResult | None = None
+    matching: MatchingResult | None = None
+    matching_checks: list[tuple[FixedMatchingResult, EvaluationResult]] = field(default_factory=list)
 
     def charge(self, size: int) -> None:
         if size < 0 or size > self.remaining_read_bytes:
@@ -248,8 +270,8 @@ def read_delivery_resource(store: Path, delivery_id: str, artifact_id: str) -> t
         ) from error
 
 
-def _collect(store: Path, request: DeliveryInput) -> _Evidence:
-    evidence = _Evidence()
+def _collect(store: Path, request: DeliveryInput, *, read_limit: int = MAX_DELIVERY_BYTES) -> _Evidence:
+    evidence = _Evidence(remaining_read_bytes=read_limit)
     for point in request.evaluation.points:
         run_id = point.run_id
         assert run_id is not None
@@ -313,6 +335,91 @@ def _check_evaluation(store: Path, evidence: _Evidence, evaluation: EvaluationRe
         current = read_manifest(run_path(store, point.run_id))
         if actual != expected or _manifest_hash(current) != evidence.manifests[point.run_id]:
             raise ArtifactUnavailableError("Evidence changed while preparing delivery")
+
+
+def _collect_workflow(store: Path, request: DeliveryInput, evidence: _Evidence, snapshot: ProjectSnapshot) -> None:
+    """Archive search decisions and refinement evidence alongside the selected design."""
+    sweeps: list[EvaluationInput] = []
+    if request.optimization_run_id is not None:
+        root = optimization_path(store, request.optimization_run_id)
+        query_data = read_bounded(root, "request.json", MAX_METADATA_BYTES)
+        result_data = read_bounded(root, "progress.json", MAX_METADATA_BYTES)
+        query = OptimizeInput.model_validate_json(query_data)
+        result = OptimizationResult.model_validate_json(result_data)
+        if query.run_id != request.optimization_run_id or result.run_id != query.run_id or result.best is None:
+            raise ArtifactUnavailableError("Search identity or best candidate is missing")
+        if result.stop_reason == "in_progress":
+            raise ArtifactUnavailableError("Cannot export an active search")
+        selected = next(iter(evidence.models.values()))
+        expected = candidate_model(query, result.best.parameters)
+        if selected.model_dump(exclude={"name", "frequency_hz"}) != expected.model_dump(
+            exclude={"name", "frequency_hz"}
+        ):
+            raise ArtifactUnavailableError("Exported geometry differs from the selected optimization candidate")
+        targets = query.targets.model_copy(
+            update={
+                "points": tuple(
+                    point.model_copy(update={"run_id": run_id})
+                    for point, run_id in zip(query.targets.points, result.best.run_ids, strict=True)
+                )
+            }
+        )
+        if request.evaluation.model_dump(exclude={"points", "planned_new_solves"}) != targets.model_dump(
+            exclude={"points", "planned_new_solves"}
+        ) or tuple(p.model_dump(exclude={"run_id"}) for p in request.evaluation.points) != tuple(
+            p.model_dump(exclude={"run_id"}) for p in targets.points
+        ):
+            raise ArtifactUnavailableError("Export targets differ from the search objective")
+        verified = evaluate(store, targets, snapshot)
+        score = objective(query, verified)
+        if score is None or not math.isclose(score, result.best.score, rel_tol=1e-10, abs_tol=1e-10):
+            raise ArtifactUnavailableError("Search score differs from its numerical evidence")
+        if verified.design_sha256 != evaluate(store, request.evaluation, snapshot).design_sha256:
+            raise ArtifactUnavailableError("Best-run evidence does not match the exported design")
+        evidence.optimization = result
+        for name, data in (("request.json", query_data), ("result.json", result_data)):
+            evidence.charge(len(data))
+            evidence.files[f"optimization/{name}"] = data
+        for name in ("design-plan.json", "design-request.json"):
+            if (root / name).exists():
+                data = read_bounded(root, name, MAX_METADATA_BYTES)
+                evidence.charge(len(data))
+                evidence.files[f"optimization/{name}"] = data
+        for path in sorted(root.iterdir()):
+            if re.fullmatch(r"(?:batch|generation)-[0-9]{4}\.json", path.name):
+                data = read_bounded(root, path.name, min(MAX_METADATA_BYTES, evidence.remaining_read_bytes))
+                evidence.charge(len(data))
+                evidence.files[f"optimization/{path.name}"] = data
+        sweeps.append(targets)
+    if request.verification is not None:
+        verification = verify_mesh(store, request.evaluation, request.verification, snapshot)
+        data = _json(verification)
+        evidence.charge(len(data))
+        evidence.files["verification/mesh.json"] = data
+        evidence.verification = verification
+        sweeps.extend(request.verification.refinements)
+    for number, check in enumerate(request.matching_checks, 1):
+        evaluated = evaluate(store, check.evaluation, snapshot)
+        fixed = evaluate_fixed_matching(evaluated, check)
+        if fixed.design_sha256 != evaluate(store, request.evaluation, snapshot).design_sha256:
+            raise ArtifactUnavailableError("Fixed matching samples differ from the exported physical design")
+        if fixed.system_impedance_ohm != request.evaluation.system_impedance_ohm:
+            raise ArtifactUnavailableError("Fixed matching uses a different system reference impedance")
+        evidence.matching_checks.append((fixed, evaluated))
+        for name, value in (("request", check), ("result", fixed), ("radiation", evaluated)):
+            data = _json(value)
+            evidence.charge(len(data))
+            evidence.files[f"matching/check-{number}/{name}.json"] = data
+        sweeps.append(check.evaluation)
+    for sweep in sweeps:
+        allowance = evidence.remaining_read_bytes
+        extra = _collect(store, request.model_copy(update={"evaluation": sweep}), read_limit=allowance)
+        evaluated = evaluate(store, sweep, snapshot)
+        _check_evaluation(store, extra, evaluated)
+        evidence.charge(allowance - extra.remaining_read_bytes)
+        for name, data in extra.files.items():
+            if name not in evidence.files:
+                evidence.files[name] = data
 
 
 def _dimensions(model: EngineeringRequest) -> bytes:
@@ -416,6 +523,31 @@ def _quoted(value: str) -> str:
     return "\n".join("> " + html.escape(line).replace("`", "&#96;") for line in value.splitlines())
 
 
+def _radiation_status(
+    evaluation: EvaluationResult, evidence: _Evidence
+) -> Literal["reference_only", "sampled_targets_met", "needs_optimization", "incomplete_evidence"]:
+    if evidence.verification is not None:
+        statuses = {item.radiation_status for item in evidence.verification.evaluations}
+        # A coarse-grid search success cannot hide a supplied refinement failure.
+        # This is target comparison across the provided meshes, not convergence certification.
+        if "incomplete_evidence" in statuses:
+            return "incomplete_evidence"
+        if "needs_optimization" in statuses:
+            return "needs_optimization"
+    return evaluation.radiation_status
+
+
+def _next_actions(evaluation: EvaluationResult, evidence: _Evidence) -> tuple[str, ...]:
+    actions = evaluation.next_actions
+    if _radiation_status(evaluation, evidence) != evaluation.radiation_status:
+        actions += ("resolve_refinement_target_failures_before_claiming_sampled_targets_met",)
+    if evidence.matching is not None:
+        actions += ("review_ideal_per_frequency_matching_components_and_unverified_losses",)
+    if any(check.target_status == "sampled_target_missed" for check, _ in evidence.matching_checks):
+        actions += ("resolve_fixed_matching_sample_target_failures",)
+    return actions
+
+
 def _report(request: DeliveryInput, evaluation: EvaluationResult, evidence: _Evidence) -> bytes:
     lines = [
         "# Candidate antenna design report",
@@ -429,7 +561,9 @@ def _report(request: DeliveryInput, evaluation: EvaluationResult, evidence: _Evi
         _quoted(request.purpose),
         "",
         f"Design identity (frequency/name excluded): `{evaluation.design_sha256}`.",
-        f"Radiation comparison: `{evaluation.radiation_status}`; target role: `{request.evaluation.comparison_role}`.",
+        f"Base-grid radiation comparison: `{evaluation.radiation_status}`; "
+        f"target role: `{request.evaluation.comparison_role}`.",
+        f"Radiation including any supplied mesh checks: `{_radiation_status(evaluation, evidence)}`.",
         f"Matching evaluation: `{evaluation.matching_status}`; feed strategy: `{request.evaluation.matching}`.",
         "",
         f"Forward direction: phi={request.evaluation.front_phi_deg}°, elevation={request.evaluation.elevation_deg}°; "
@@ -465,7 +599,7 @@ def _report(request: DeliveryInput, evaluation: EvaluationResult, evidence: _Evi
             "",
             "## Next actions",
             "",
-            *(f"- {action}" for action in evaluation.next_actions),
+            *(f"- {action}" for action in _next_actions(evaluation, evidence)),
             "- Resolve the engineering gaps in validation.json before treating model dimensions as fabrication data.",
             "",
             "## Budget snapshot and proposal",
@@ -484,6 +618,111 @@ def _report(request: DeliveryInput, evaluation: EvaluationResult, evidence: _Evi
     for run_id, missing in evidence.missing.items():
         availability = "missing " + ", ".join(missing) if missing else "all public artifacts and environment saved"
         lines.append(f"- {run_id}: {availability}")
+    if evidence.optimization is not None:
+        search = evidence.optimization
+        lines.extend(
+            (
+                "",
+                "## Numerical search",
+                "",
+                f"Stop reason: `{search.stop_reason}`.",
+                f"Candidates: {search.candidate_attempts}; solve admissions: {search.solver_admissions}.",
+                "Search stopping is not engineering acceptance. Full bounds, budget and seed: optimization/.",
+            )
+        )
+    if evidence.verification is not None:
+        lines.extend(
+            (
+                "",
+                "## Mesh sensitivity",
+                "",
+                f"Status: `{evidence.verification.status}`.",
+                "Declared tolerances, all comparisons and source runs are in verification/mesh.json.",
+                "This covers sampled mesh sensitivity only, not bandwidth or fabrication certification.",
+            )
+        )
+        levels = [evidence.verification.deltas[0].from_segments]
+        levels.extend(delta.to_segments for delta in evidence.verification.deltas)
+        lines.extend(("", "| Segments/wire | Sampled radiation targets |", "| --- | --- |"))
+        for level, checked in zip(levels, evidence.verification.evaluations, strict=True):
+            lines.append(f"| {level} | {checked.radiation_status} |")
+    if evidence.matching is not None:
+        lines.extend(
+            (
+                "",
+                "## Ideal per-frequency matching candidates",
+                "",
+                "Computed with SciPy/scikit-rf from the native impedance at the antenna feed reference plane.",
+                "Each row is a separate candidate. Different frequencies require switching or retuning; "
+                "these are not one fixed multiband circuit. Components are ideal and unrounded.",
+                "Source-shunt: source → (shunt to return) → series → antenna. "
+                "Load-shunt: source → series → (shunt across antenna). Return is the circuit reference, "
+                "not an instruction to ground a balanced antenna element.",
+                "A balun/common-mode solution, component Q/loss/tolerances and power ratings remain unverified.",
+                "",
+                "| MHz | Topology (source to antenna) | Series | Shunt | Ideal matched SWR |",
+                "| --- | --- | --- | --- | --- |",
+            )
+        )
+        for sample in evidence.matching.points:
+            if not sample.solutions:
+                lines.append(f"| {sample.frequency_hz / 1e6:.9g} | no_solution_found | — | — | — |")
+            for solution in sample.solutions:
+                series, shunt = solution.components
+                lines.append(
+                    f"| {sample.frequency_hz / 1e6:.9g} | {solution.topology} | "
+                    f"{series.kind} {series.value_si:.9g} {series.unit} | "
+                    f"{shunt.kind} {shunt.value_si:.9g} {shunt.unit} | {solution.swr:.9g} |"
+                )
+        lines.extend(("", "Full precision parameters and source run IDs: matching/l-networks.json in the ZIP."))
+    if evidence.matching_checks:
+        lines.extend(
+            (
+                "",
+                "## Fixed-component sampled matching checks",
+                "",
+                "Within each check, the same ideal components are used at every saved frequency without retuning. "
+                "Separate checks are alternative networks, not a single automatically switched multiband circuit.",
+                "No SWR target is inferred. These samples do not certify the gaps between frequencies or "
+                "component losses, Q, tolerances, power ratings, balun or feedline behavior.",
+                "Neighbor radiation comparisons remain in matching/check-N/radiation.json; "
+                "a good input SWR does not change the bare-antenna gain or F/B result.",
+                "",
+                "| Check | Topology | Series | Shunt | MHz | Fixed-network SWR | Sample target status |",
+                "| --- | --- | --- | --- | --- | --- | --- |",
+            )
+        )
+        for number, (check, _) in enumerate(evidence.matching_checks, 1):
+            series, shunt = check.network.components
+            for matched_point in check.points:
+                lines.append(
+                    f"| {number} | {check.network.topology} | "
+                    f"{series.kind} {series.value_si:.9g} {series.unit} | "
+                    f"{shunt.kind} {shunt.value_si:.9g} {shunt.unit} | "
+                    f"{matched_point.frequency_hz / 1e6:.9g} | {matched_point.swr:.9g} | {check.target_status} |"
+                )
+        lines.extend(("", "Exact input, circuit results and numerical source evidence are retained in the ZIP."))
+        lines.extend(
+            (
+                "",
+                "### Radiation at the matching-check frequencies",
+                "",
+                "These comparisons use each check's stated reference/target role; they do not create new "
+                "operating band requirements. A below-reference value must not be hidden by a good SWR.",
+                "",
+                "| Check | Role | MHz | Gain dBi | Gain margin dB | F/B dB | F/B margin dB |",
+                "| --- | --- | --- | --- | --- | --- | --- |",
+            )
+        )
+        for number, (_, radiation) in enumerate(evidence.matching_checks, 1):
+            for radiation_point in radiation.points:
+                lines.append(
+                    f"| {number} | {radiation.targets.comparison_role} | {radiation_point.frequency_hz / 1e6:.9g} | "
+                    f"{_number(radiation_point.forward_gain_dbi.actual)} | "
+                    f"{_number(radiation_point.forward_gain_dbi.margin)} | "
+                    f"{_number(radiation_point.front_to_back_db.actual)} | "
+                    f"{_number(radiation_point.front_to_back_db.margin)} |"
+                )
     lines.extend(("", "## Caller-supplied assumptions (not verified)", ""))
     lines.extend(_quoted(item) for item in request.assumptions)
     lines.extend(("", "## Caller-supplied source notes (not fetched or verified)", ""))
@@ -630,6 +869,14 @@ def _documents(request: DeliveryInput, evaluation: EvaluationResult, evidence: _
                 "measurements_performed_by_export": False,
                 "solver_runs_this_call": 0,
                 "admissions_reserved": 0,
+                "mesh_sensitivity_status": evidence.verification.status if evidence.verification else "not_run",
+                "radiation_status_including_mesh_checks": _radiation_status(evaluation, evidence),
+                "search_stop_reason": evidence.optimization.stop_reason if evidence.optimization else None,
+                "matching_parameters_status": evidence.matching.status if evidence.matching else "not_computed",
+                "fixed_matching_checks": [
+                    {"status": check.status, "target_status": check.target_status}
+                    for check, _ in evidence.matching_checks
+                ],
             }
         ),
         "construction.md": _construction(model, request),
@@ -640,6 +887,16 @@ def _documents(request: DeliveryInput, evaluation: EvaluationResult, evidence: _
                 "coordinate_unit": "m",
                 "frequency_unit": "Hz",
                 "runs": reproduction,
+                "optimization": "optimization/request.json" if evidence.optimization else None,
+                "optimization_result": "optimization/result.json" if evidence.optimization else None,
+                "mesh_verification": "verification/mesh.json" if evidence.verification else None,
+                "matching_parameters": "matching/l-networks.json" if evidence.matching else None,
+                "fixed_matching_checks": [
+                    f"matching/check-{number}/request.json" for number in range(1, len(evidence.matching_checks) + 1)
+                ],
+                "matching_options": request.matching_options.model_dump(mode="json")
+                if request.matching_options is not None
+                else None,
                 "instructions": [
                     "Install an approved antenna-design environment; historical metadata is evidence, not a lock.",
                     "Create the recomputed parent directory and use new outputs; original evidence is immutable.",
@@ -762,14 +1019,20 @@ def export_delivery(store: Path, request: DeliveryInput, snapshot: ProjectSnapsh
         _check_evaluation(store, evidence, evaluation)
         if evaluation.design_sha256 is None:
             raise ArtifactUnavailableError("A delivery requires a consistent saved design")
+        _collect_workflow(store, request, evidence, snapshot)
+        if request.matching_options is not None:
+            evidence.matching = synthesize_matching(evaluation, request.matching_options)
+            matching_data = _json(evidence.matching)
+            evidence.charge(len(matching_data))
+            evidence.files["matching/l-networks.json"] = matching_data
         documents = _documents(request, evaluation, evidence)
         documents["design.zip"] = _archive(documents, evidence)
         record = _DeliveryRecord(
             request=request,
             source_manifests=evidence.manifests,
             design_sha256=evaluation.design_sha256,
-            radiation_status=evaluation.radiation_status,
-            next_actions=evaluation.next_actions,
+            radiation_status=_radiation_status(evaluation, evidence),
+            next_actions=_next_actions(evaluation, evidence),
         )
         root = _location(store, request.delivery_id, create=True)
         return _publish(root, record, documents)

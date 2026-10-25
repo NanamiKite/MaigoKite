@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import math
 import re
+from contextlib import suppress
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 from agent.integrations.antenna import antenna_failure, call_antenna_tool
+from agent.integrations.antenna_receipts import compact_receipt
 from agent.mcp.client import MCPClient, MCPError
 from agent.tools.base import BaseTool, ExecutionContext, ToolResult
 
@@ -15,6 +20,7 @@ if TYPE_CHECKING:
 
 _ANTENNA_RESULTS = {
     "antenna.solve", "antenna.get_result", "antenna.render", "antenna.export", "antenna.get_delivery",
+    "antenna.design",
 }
 
 
@@ -91,11 +97,28 @@ class MCPToolWrapper(BaseTool):
                 user_hint="请在扩展页面恢复连接，再重新发起需要此工具的操作。",
                 action={"label": "查看扩展", "to": "/integrations"},
             )
+        accepting_progress = True
+        progress_lock = asyncio.Lock()
+        last_progress = 0.0
+
+        async def progress(progress: float, total: float | None, message: str | None) -> None:
+            nonlocal last_progress
+            if not math.isfinite(progress) or (total is not None and not math.isfinite(total)):
+                return
+            async with progress_lock:
+                now = monotonic()
+                if accepting_progress and context.progress_callback is not None and now - last_progress >= 1:
+                    last_progress = now
+                    # Progress is best effort; it must not stall the shared MCP reader.
+                    with suppress(Exception):
+                        async with asyncio.timeout(1):
+                            await context.progress_callback(progress, total, message)
+
         try:
             response = (
-                await call_antenna_tool(self._client, self._source_name, arguments)
+                await call_antenna_tool(self._client, self._source_name, arguments, progress_callback=progress)
                 if self._antenna_results is not None
-                else await self._client.call_tool(self._source_name, arguments)
+                else await self._client.call_tool(self._source_name, arguments, progress_callback=progress)
             )
         except MCPError:
             # An SDK timeout/disconnect is not evidence that the remote action
@@ -105,6 +128,9 @@ class MCPToolWrapper(BaseTool):
                 user_hint="先核实目标服务中的实际结果，不要自动重试；可继续处理不依赖此操作的任务。",
                 action={"label": "查看扩展", "to": "/integrations"},
             )
+        finally:
+            async with progress_lock:
+                accepting_progress = False
         if (self._antenna_results is not None and self._source_name in _ANTENNA_RESULTS
                 and isinstance(response, dict) and response.get("isError") is not True):
             return await self._antenna_results.project(
@@ -134,6 +160,10 @@ class MCPToolWrapper(BaseTool):
                 raw=text,
                 metadata=metadata,
             )
+        if self._antenna_results is not None:
+            compact = compact_receipt(self._source_name, arguments, response)
+            if compact is not None:
+                return compact
         return ToolResult(
             data={"result": response},
             summary=text[:500],

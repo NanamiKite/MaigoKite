@@ -3,17 +3,18 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field, StrictBool
 
 from agent.api import contracts as dto
 from agent.api.sessions import owner
-from agent.errors import public_error
+from agent.errors import error_location, public_error
 from agent.models.discovery import discover_models
 from agent.models.image_generation import IMAGE_SETTING_KEY, ImageSettings
 from agent.models.native_model import normalize_base_url
@@ -23,6 +24,8 @@ if TYPE_CHECKING:
     from agent.api.credentials import Credentials
     from agent.core import AgentCore
     from agent.models.runtime import ChatModelSettings
+
+logger = logging.getLogger(__name__)
 
 
 class ImageSettingsUpdate(dto.Input):
@@ -140,13 +143,11 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
                 previous = await core.models.get_profile(workspace_id, settings.id)
         else:
             settings = replace(settings, id="model_" + uuid.uuid4().hex)
-        changed_endpoint = previous is not None and (previous.provider, normalize_base_url(previous.base_url)) != (
-            settings.provider,
-            settings.base_url,
-        )
         # Revoke before changing the host; OS cleanup can fail without enabling reuse.
-        if changed_endpoint:
-            await credentials.revoke_model(workspace_id, cast(ChatModelSettings, previous))
+        if previous is not None and (previous.provider, normalize_base_url(previous.base_url)) != (
+            settings.provider, settings.base_url,
+        ):
+            await credentials.revoke_model(workspace_id, previous)
         item = await core.models.upsert_settings(workspace_id, settings)
         if secret:
             await credentials.save(workspace_id, "model-profile." + item.id, secret)
@@ -202,6 +203,7 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
             key = body.api_key or await credentials.profile_key(workspace_id, body.id, body.provider, body.base_url)
             result = await discover_models(body.provider, body.base_url, key)
         except Exception as exc:
+            logger.warning("Model discovery failed: %s", error_location(exc))
             raise dto.APIError(502, "MODEL_DISCOVERY_FAILED", public_error(exc)) from exc
         await audit(workspace_id, "model.catalog.discovered", body.provider)
         return {"models": result}

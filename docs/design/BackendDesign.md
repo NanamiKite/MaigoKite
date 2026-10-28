@@ -47,7 +47,7 @@ API 调用的业务对象分工如下。它们共享同一个 Repository，不�
 
 扩展更新先准备候选目录与连接，成功后再切换。失败时只清理候选新建的连接，不关闭复用的健康连接。聊天、审批恢复、中断恢复和回答提问共用 `_wait_for_run`，消费事件、等待根任务，并传播调用方取消；接口和 Core 的关闭顺序见第 4 节。
 
-可选领域集成位于 `integrations/`。当前 `antenna.py` 只解释版本化 MCP 结果、校验资源并按权限导入工作区，不导入天线求解包。求解器和数值依赖在独立的 `extensions/antenna_design/` 中安装，不进入普通聊天依赖。协议见 [MCP 结果资源适配](../agent-capabilities/mcp/mcp-integration.md#31-天线结果资源适配)。
+可选领域集成位于 `integrations/`。`antenna.py` 校验计算/候选包回执，按权限导入资源，并在取消或超时时确认本次计算已停止；`antenna_receipts.py` 为模型保留紧凑的搜索/评价/规划结果。它们不导入天线包、不执行求解或数值搜索。工程依赖在独立的 `extensions/antenna_design/` 安装，不进入普通聊天依赖。协议见 [MCP 结果适配](../agent-capabilities/mcp/mcp-integration.md#31-天线结果资源适配)。
 
 ## 3. 凭证与访问边界
 
@@ -87,7 +87,7 @@ API/ASGI 复用 FastAPI、Uvicorn 和 AnyIO，系统凭证复用 keyring；MCP�
 
 Web 与 Electron 继续共用相对路径构建产物。HTTP 返回的入口 HTML 补充 `<base href="/">`，让直接打开 `/chat/<id>` 时资源仍从站点根目录加载；磁盘文件不改写，Electron `file://` 保持相对路径。不存在的资源与 API（含 HEAD 请求）不回退为 SPA 页面。Windows 构建参数与共享脚本一致，不再接受 `go` 目标。
 
-Python HTTP/WS、Core 恢复与 Web 主路径已有定向验收，后续模块调整和天线集成尚未完成行为回归。完整范围见 [当前验收状态](../project/Roadmap.md#当前验收状态)。独立桌面运行资源打包、手机远程认证和平台凭证迁移仍未完成；旧 Go 链路的测试不能作为现有接口的验证结果。
+Python HTTP/WS、Core 恢复与 Web 主路径已有定向验收，天线集成另有 Linux 的审批/取消、重启取回和导入记录；两者都不能覆盖后续所有模块调整。完整范围见 [当前验收状态](../project/Roadmap.md#当前验收状态)。独立桌面运行资源打包、手机远程认证和平台凭证迁移仍未完成；旧 Go 链路的测试不能作为现有接口的验证结果。
 
 ## 6. 保留但未接入的基础设施
 

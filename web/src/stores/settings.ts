@@ -227,11 +227,9 @@ export const useSettingsStore = defineStore('settings', () => {
       for (const item of profiles) {
         // Grouping is presentation, not proof of shared credentials. Only copy to a
         // new/unconfigured model, or when the user explicitly replaces the service key.
-        const existing = modelProfiles.value.find(profile => profile.id === item.id)
-        const endpointEdited = existing && (existing.provider !== item.provider || existing.baseUrl !== item.baseUrl)
-        const copyFrom = !apiKey && item.credentialConfigured && endpointEdited
-          ? item.id
-          : item.id !== sourceId && (Boolean(apiKey) || !item.credentialConfigured) ? sourceId : ''
+        // The server revokes the old key on an endpoint change. No replacement
+        // is needed for a no-auth service, and the old profile is not a key source.
+        const copyFrom = item.id !== sourceId && (Boolean(apiKey) || !item.credentialConfigured) ? sourceId : ''
         const result = await api.saveChatModel(item, key, copyFrom)
         projectModelProfile(result)
         saved.push(result)

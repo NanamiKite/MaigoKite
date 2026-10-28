@@ -20,9 +20,9 @@ class Receipt(BaseModel):
 
 class Metric(Receipt):
     actual: FiniteFloat | None
-    minimum: FiniteFloat
+    minimum: FiniteFloat | None
     margin: FiniteFloat | None
-    status: Literal["at_or_above", "below", "unavailable"]
+    status: Literal["at_or_above", "below", "unavailable", "not_requested"]
 
 
 class Impedance(Receipt):

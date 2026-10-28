@@ -25,7 +25,7 @@ from agent.api import sessions, settings, statistics, workspace
 from agent.api.contracts import APIError, ErrorDetail, ErrorResponse
 from agent.api.credentials import Credentials
 from agent.api.execution import Execution
-from agent.errors import UserFacingError, public_error
+from agent.errors import UserFacingError, error_location, public_error
 from agent.repository import ConversationBusyError, MessageConflictError
 from agent.tools.native.file_search import file_search_status
 from agent.utils.sandbox import process_sandbox_status
@@ -127,8 +127,8 @@ class LocalBoundary:
         try:
             await self.app(scope, buffered, reply)
         except Exception as exc:
-            # SDK exception strings can include credentials. Keep unexpected failures out of server tracebacks.
-            logger.error("Unhandled API failure: %s", type(exc).__name__)
+            # Record the failing code location, not SDK exception text or request data.
+            logger.error("Unhandled API failure: %s", error_location(exc))
             if not started:
                 await JSONResponse({"error": {"code": "INTERNAL", "message": public_error(exc)}},
                                    status_code=500)(scope, buffered, reply)

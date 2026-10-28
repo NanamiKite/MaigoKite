@@ -6,31 +6,22 @@ executes reproduction commands, or changes project admission accounting.
 
 from __future__ import annotations
 
-import csv
 import hashlib
-import html
 import io
 import json
-import math
 import re
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal
 
-from pydantic import Field, JsonValue, model_validator
+from pydantic import Field, JsonValue
 
 from .artifacts import digest
-from .contracts import ArtifactRef, Contract, EngineeringRequest, EngineeringSummary, Point
-from .evaluation import EvaluationError, EvaluationInput, EvaluationResult, evaluate
-from .matching import (
-    FixedMatchingInput,
-    FixedMatchingResult,
-    MatchingOptions,
-    MatchingResult,
-    evaluate_fixed_matching,
-    synthesize_matching,
-)
+from .assessment import AssessmentInput, DesignAssessment, assess_design
+from .contracts import ArtifactRef, Contract, EngineeringRequest, EngineeringSummary
+from .delivery_render import PresentationError, render_documents
+from .evaluation import EvaluationError, EvaluationResult, MatchingStatus, RadiationStatus, evaluate
 from .mcp_resources import (
     MAX_METADATA_BYTES,
     MAX_RESOURCE_BYTES,
@@ -43,9 +34,8 @@ from .mcp_resources import (
     read_manifest,
     run_path,
 )
-from .optimization import OptimizationResult, OptimizeInput, candidate_model, objective, optimization_path
+from .optimization import optimization_path
 from .project_store import ProjectSnapshot
-from .verification import VerificationInput, VerificationResult, verify_mesh
 
 MAX_DELIVERY_BYTES = 48 * 1024 * 1024
 DELIVERY_ARTIFACTS: dict[str, tuple[str, str]] = {
@@ -64,40 +54,14 @@ _RECORD = "delivery-record.json"
 _BRIEF = "design_brief.json"
 _PROOF_IDS = ("request", "summary", "far-field")
 _REQUIRED_IDS = (*_PROOF_IDS, "compatibility", "currents")
-_UNVERIFIED = (
-    "bandwidth_and_between_sample_performance",
-    "mesh_convergence",
-    "matching_network_and_feedline",
-    "actual_material_alloy_wall_thickness_and_joints",
-    "boom_mast_insulators_fasteners_and_wind_load",
-    "power_rating_and_electrical_clearances",
-    "manufacturing_tolerances_and_cut_allowances",
-    "installation_ground_and_measurements",
-    "independent_mmana_import_and_validation",
-)
 
 
-class DeliveryInput(Contract):
+class DeliveryInput(AssessmentInput):
     delivery_id: Annotated[str, Field(pattern=f"^{RUN_ID_PATTERN}$")]
     title: Annotated[str, Field(min_length=1, max_length=120)]
     purpose: Annotated[str, Field(min_length=1, max_length=1000)]
     assumptions: Annotated[tuple[Annotated[str, Field(max_length=500)], ...], Field(max_length=20)] = ()
     sources: Annotated[tuple[Annotated[str, Field(max_length=500)], ...], Field(max_length=20)] = ()
-    evaluation: EvaluationInput
-    optimization_run_id: Annotated[str | None, Field(pattern=f"^{RUN_ID_PATTERN}$")] = None
-    verification: VerificationInput | None = None
-    matching_options: MatchingOptions | None = None
-    matching_checks: Annotated[tuple[FixedMatchingInput, ...], Field(max_length=6)] = ()
-
-    @model_validator(mode="after")
-    def saved_points_only(self) -> Self:
-        if any(point.run_id is None for point in self.evaluation.points):
-            raise ValueError("A delivery requires a saved run identifier for every frequency point")
-        if (
-            self.matching_options is not None or self.matching_checks
-        ) and self.evaluation.matching != "separate_network":
-            raise ValueError("Matching parameters require an explicit separate_network choice")
-        return self
 
 
 class ResourceReference(ArtifactRef):
@@ -105,14 +69,17 @@ class ResourceReference(ArtifactRef):
 
 
 class DeliveryResult(Contract):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 2
     kind: Literal["antenna_design_delivery"] = "antenna_design_delivery"
     delivery_id: Annotated[str, Field(pattern=f"^{RUN_ID_PATTERN}$")]
     reused: bool
     status: Literal["CANDIDATE_NOT_VALIDATED"] = "CANDIDATE_NOT_VALIDATED"
-    design_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    design_sha256: Annotated[str | None, Field(pattern=r"^[0-9a-f]{64}$")]
+    physical_design_sha256: Annotated[str | None, Field(pattern=r"^[0-9a-f]{64}$")] = None
+    simulation_configurations: dict[str, str] = Field(default_factory=dict)
     resources: Annotated[tuple[ResourceReference, ...], Field(min_length=10, max_length=10)]
-    radiation_status: Literal["reference_only", "sampled_targets_met", "needs_optimization", "incomplete_evidence"]
+    radiation_status: RadiationStatus
+    matching_status: MatchingStatus | None = None
     next_actions: Annotated[tuple[str, ...], Field(max_length=20)] = ()
 
 
@@ -124,11 +91,14 @@ class DeliveryError(ValueError):
 
 
 class _DeliveryRecord(Contract):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 2
     request: DeliveryInput
     source_manifests: dict[str, str]
-    design_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
-    radiation_status: Literal["reference_only", "sampled_targets_met", "needs_optimization", "incomplete_evidence"]
+    design_sha256: Annotated[str | None, Field(pattern=r"^[0-9a-f]{64}$")]
+    physical_design_sha256: Annotated[str | None, Field(pattern=r"^[0-9a-f]{64}$")] = None
+    simulation_configurations: dict[str, str] = Field(default_factory=dict)
+    radiation_status: RadiationStatus
+    matching_status: MatchingStatus | None = None
     next_actions: Annotated[tuple[str, ...], Field(max_length=20)]
 
 
@@ -141,10 +111,6 @@ class _Evidence:
     summaries: dict[str, EngineeringSummary] = field(default_factory=dict)
     missing: dict[str, list[str]] = field(default_factory=dict)
     remaining_read_bytes: int = MAX_DELIVERY_BYTES
-    optimization: OptimizationResult | None = None
-    verification: VerificationResult | None = None
-    matching: MatchingResult | None = None
-    matching_checks: list[tuple[FixedMatchingResult, EvaluationResult]] = field(default_factory=list)
 
     def charge(self, size: int) -> None:
         if size < 0 or size > self.remaining_read_bytes:
@@ -221,9 +187,12 @@ def _load_delivery(root: Path) -> tuple[_DeliveryRecord, dict[str, ArtifactRef]]
 def _result(record: _DeliveryRecord, manifest: dict[str, ArtifactRef], *, reused: bool) -> DeliveryResult:
     delivery_id = record.request.delivery_id
     return DeliveryResult(
+        schema_version=record.schema_version,
         delivery_id=delivery_id,
         reused=reused,
         design_sha256=record.design_sha256,
+        physical_design_sha256=record.physical_design_sha256,
+        simulation_configurations=record.simulation_configurations,
         resources=tuple(
             ResourceReference(
                 **manifest[name].model_dump(),
@@ -232,6 +201,7 @@ def _result(record: _DeliveryRecord, manifest: dict[str, ArtifactRef], *, reused
             for artifact_id, (name, _) in DELIVERY_ARTIFACTS.items()
         ),
         radiation_status=record.radiation_status,
+        matching_status=record.matching_status,
         next_actions=record.next_actions,
     )
 
@@ -251,6 +221,12 @@ def get_delivery(store: Path, delivery_id: str) -> DeliveryResult:
         raise DeliveryError(
             "DELIVERY_UNAVAILABLE", "Delivery evidence is unavailable or failed integrity checks."
         ) from error
+
+
+def get_delivery_input(store: Path, delivery_id: str) -> DeliveryInput:
+    """Read the manifest-bound input for workflow reconciliation, without reevaluating a design."""
+    record, _ = _load_delivery(_location(store, delivery_id))
+    return record.request
 
 
 def read_delivery_resource(store: Path, delivery_id: str, artifact_id: str) -> tuple[bytes, str]:
@@ -337,47 +313,12 @@ def _check_evaluation(store: Path, evidence: _Evidence, evaluation: EvaluationRe
             raise ArtifactUnavailableError("Evidence changed while preparing delivery")
 
 
-def _collect_workflow(store: Path, request: DeliveryInput, evidence: _Evidence, snapshot: ProjectSnapshot) -> None:
-    """Archive search decisions and refinement evidence alongside the selected design."""
-    sweeps: list[EvaluationInput] = []
+def _collect_workflow(store: Path, request: DeliveryInput, evidence: _Evidence, assessment: DesignAssessment) -> None:
+    """Archive exactly the assessed evidence and recheck source digests before publication."""
     if request.optimization_run_id is not None:
         root = optimization_path(store, request.optimization_run_id)
-        query_data = read_bounded(root, "request.json", MAX_METADATA_BYTES)
-        result_data = read_bounded(root, "progress.json", MAX_METADATA_BYTES)
-        query = OptimizeInput.model_validate_json(query_data)
-        result = OptimizationResult.model_validate_json(result_data)
-        if query.run_id != request.optimization_run_id or result.run_id != query.run_id or result.best is None:
-            raise ArtifactUnavailableError("Search identity or best candidate is missing")
-        if result.stop_reason == "in_progress":
-            raise ArtifactUnavailableError("Cannot export an active search")
-        selected = next(iter(evidence.models.values()))
-        expected = candidate_model(query, result.best.parameters)
-        if selected.model_dump(exclude={"name", "frequency_hz"}) != expected.model_dump(
-            exclude={"name", "frequency_hz"}
-        ):
-            raise ArtifactUnavailableError("Exported geometry differs from the selected optimization candidate")
-        targets = query.targets.model_copy(
-            update={
-                "points": tuple(
-                    point.model_copy(update={"run_id": run_id})
-                    for point, run_id in zip(query.targets.points, result.best.run_ids, strict=True)
-                )
-            }
-        )
-        if request.evaluation.model_dump(exclude={"points", "planned_new_solves"}) != targets.model_dump(
-            exclude={"points", "planned_new_solves"}
-        ) or tuple(p.model_dump(exclude={"run_id"}) for p in request.evaluation.points) != tuple(
-            p.model_dump(exclude={"run_id"}) for p in targets.points
-        ):
-            raise ArtifactUnavailableError("Export targets differ from the search objective")
-        verified = evaluate(store, targets, snapshot)
-        score = objective(query, verified)
-        if score is None or not math.isclose(score, result.best.score, rel_tol=1e-10, abs_tol=1e-10):
-            raise ArtifactUnavailableError("Search score differs from its numerical evidence")
-        if verified.design_sha256 != evaluate(store, request.evaluation, snapshot).design_sha256:
-            raise ArtifactUnavailableError("Best-run evidence does not match the exported design")
-        evidence.optimization = result
-        for name, data in (("request.json", query_data), ("result.json", result_data)):
+        assert assessment.optimization_evidence is not None
+        for name, data in zip(("request.json", "result.json"), assessment.optimization_evidence, strict=True):
             evidence.charge(len(data))
             evidence.files[f"optimization/{name}"] = data
         for name in ("design-plan.json", "design-request.json"):
@@ -390,539 +331,29 @@ def _collect_workflow(store: Path, request: DeliveryInput, evidence: _Evidence, 
                 data = read_bounded(root, path.name, min(MAX_METADATA_BYTES, evidence.remaining_read_bytes))
                 evidence.charge(len(data))
                 evidence.files[f"optimization/{path.name}"] = data
-        sweeps.append(targets)
-    if request.verification is not None:
-        verification = verify_mesh(store, request.evaluation, request.verification, snapshot)
-        data = _json(verification)
+    if assessment.verification is not None:
+        data = _json(assessment.verification)
         evidence.charge(len(data))
         evidence.files["verification/mesh.json"] = data
-        evidence.verification = verification
-        sweeps.extend(request.verification.refinements)
-    for number, check in enumerate(request.matching_checks, 1):
-        evaluated = evaluate(store, check.evaluation, snapshot)
-        fixed = evaluate_fixed_matching(evaluated, check)
-        if fixed.design_sha256 != evaluate(store, request.evaluation, snapshot).design_sha256:
-            raise ArtifactUnavailableError("Fixed matching samples differ from the exported physical design")
-        if fixed.system_impedance_ohm != request.evaluation.system_impedance_ohm:
-            raise ArtifactUnavailableError("Fixed matching uses a different system reference impedance")
-        evidence.matching_checks.append((fixed, evaluated))
+    if assessment.matching is not None:
+        data = _json(assessment.matching)
+        evidence.charge(len(data))
+        evidence.files["matching/l-networks.json"] = data
+    for number, (check, (fixed, evaluated)) in enumerate(
+        zip(request.matching_checks, assessment.matching_checks, strict=True), 1
+    ):
         for name, value in (("request", check), ("result", fixed), ("radiation", evaluated)):
             data = _json(value)
             evidence.charge(len(data))
             evidence.files[f"matching/check-{number}/{name}.json"] = data
-        sweeps.append(check.evaluation)
-    for sweep in sweeps:
+    for evaluated in assessment.additional_evaluations:
         allowance = evidence.remaining_read_bytes
-        extra = _collect(store, request.model_copy(update={"evaluation": sweep}), read_limit=allowance)
-        evaluated = evaluate(store, sweep, snapshot)
+        extra = _collect(store, request.model_copy(update={"evaluation": evaluated.targets}), read_limit=allowance)
         _check_evaluation(store, extra, evaluated)
         evidence.charge(allowance - extra.remaining_read_bytes)
         for name, data in extra.files.items():
             if name not in evidence.files:
                 evidence.files[name] = data
-
-
-def _dimensions(model: EngineeringRequest) -> bytes:
-    text = io.StringIO(newline="")
-    writer = csv.writer(text, lineterminator="\n")
-    writer.writerow(
-        ("wire_index", "start_x_m", "start_y_m", "start_z_m", "end_x_m", "end_y_m", "end_z_m", "length_m", "diameter_m")
-    )
-    for index, wire in enumerate(model.wires, 1):
-        values = (*wire.start_m, *wire.end_m, math.dist(wire.start_m, wire.end_m), 2 * wire.radius_m)
-        if not all(math.isfinite(value) for value in values):
-            raise DeliveryError("DELIVERY_GEOMETRY_UNAVAILABLE", "Model dimensions exceed finite drawing limits.")
-        writer.writerow((index, *(format(value, ".17g") for value in values)))
-    return text.getvalue().encode()
-
-
-def _geometry(model: EngineeringRequest) -> bytes:
-    points = [point for wire in model.wires for point in (wire.start_m, wire.end_m)]
-    feed = model.feed_position()
-    if not all(math.isfinite(value) for value in feed):
-        raise DeliveryError("DELIVERY_GEOMETRY_UNAVAILABLE", "Model feed exceeds finite drawing limits.")
-    rows = [
-        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="860" viewBox="0 0 1200 860">',
-        '<rect width="1200" height="860" fill="white"/>',
-        '<g font-family="sans-serif" fill="#172638">',
-        '<text x="32" y="32" font-size="20">Candidate numerical geometry — NOT fabrication approval</text>',
-        '<text x="32" y="58" font-size="14">Coordinates, lengths and diameters: metres (m). '
-        "Exact endpoints: dimensions.csv.</text>",
-        '<text x="32" y="80" font-size="14">Wire numbering follows model.json; '
-        "a projection may overlap distinct wires.</text>",
-    ]
-    for second_axis, offset_y in ((1, 110), (2, 440)):
-        mins = (min(point[0] for point in points), min(point[second_axis] for point in points))
-        spans = (
-            max(point[0] for point in points) - mins[0],
-            max(point[second_axis] for point in points) - mins[1],
-        )
-        if not all(math.isfinite(value) for value in spans):
-            raise DeliveryError("DELIVERY_GEOMETRY_UNAVAILABLE", "Model extents exceed finite drawing limits.")
-        scale = min(1000 / max(spans[0], 1e-9), 240 / max(spans[1], 1e-9))
-        xpad, ypad = (1000 - spans[0] * scale) / 2, (240 - spans[1] * scale) / 2
-
-        def project(
-            point: Point,
-            origin: tuple[float, float] = mins,
-            factor: float = scale,
-            axis: int = second_axis,
-            x_padding: float = xpad,
-            y_padding: float = ypad,
-            y_offset: int = offset_y,
-        ) -> tuple[float, float]:
-            return (
-                100 + x_padding + (point[0] - origin[0]) * factor,
-                y_offset + 270 - y_padding - (point[axis] - origin[1]) * factor,
-            )
-
-        label = "Y" if second_axis == 1 else "Z"
-        rows.append(f'<text x="32" y="{offset_y + 15}" font-size="18">X{label} projection</text>')
-        rows.append(f'<rect x="80" y="{offset_y + 25}" width="1040" height="260" fill="none" stroke="#b9c4cf"/>')
-        rows.append(f'<text x="1050" y="{offset_y + 309}" font-size="14">+X (m) →</text>')
-        rows.append(f'<text x="8" y="{offset_y + 150}" font-size="14">+{label} ↑</text>')
-        for index, wire in enumerate(model.wires, 1):
-            x1, y1 = project(wire.start_m)
-            x2, y2 = project(wire.end_m)
-            length = math.dist(wire.start_m, wire.end_m)
-            detail = html.escape(
-                f"W{index}: start={wire.start_m} m; end={wire.end_m} m; length={length:.9g} m; "
-                f"diameter={2 * wire.radius_m:.9g} m"
-            )
-            rows.append(
-                f'<g><title>{detail}</title><line x1="{x1:.3f}" y1="{y1:.3f}" '
-                f'x2="{x2:.3f}" y2="{y2:.3f}" stroke="#165d9c" stroke-width="3"/>'
-                f'<text x="{x2 + 5:.3f}" y="{y2 - 5:.3f}" font-size="12">W{index}, L={length:.6g} m</text></g>'
-            )
-        fx, fy = project(feed)
-        rows.append(f'<circle cx="{fx:.3f}" cy="{fy:.3f}" r="6" fill="#b32932"/>')
-        rows.append(f'<text x="{fx + 9:.3f}" y="{fy + 18:.3f}" font-size="13">Feed W{model.feed.wire}</text>')
-        rows.append(
-            f'<text x="100" y="{offset_y + 309}" font-size="12">'
-            f"X [{mins[0]:.9g}, {mins[0] + spans[0]:.9g}] m; "
-            f"{label} [{mins[1]:.9g}, {mins[1] + spans[1]:.9g}] m</text>"
-        )
-    rows.extend(
-        (
-            '<text x="32" y="805" font-size="14">Numerical centre lines only; '
-            "boom, feed gap, joints and supports are unspecified.</text>",
-            '<text x="32" y="830" font-size="14">No cut allowance, mechanical tolerance '
-            "or load/power rating is implied.</text>",
-            "</g></svg>\n",
-        )
-    )
-    return "\n".join(rows).encode()
-
-
-def _number(value: float | None) -> str:
-    return "unknown" if value is None else f"{value:.9g}"
-
-
-def _quoted(value: str) -> str:
-    # Markdown quotation escapes HTML; caller notes remain unverified input.
-    return "\n".join("> " + html.escape(line).replace("`", "&#96;") for line in value.splitlines())
-
-
-def _radiation_status(
-    evaluation: EvaluationResult, evidence: _Evidence
-) -> Literal["reference_only", "sampled_targets_met", "needs_optimization", "incomplete_evidence"]:
-    if evidence.verification is not None:
-        statuses = {item.radiation_status for item in evidence.verification.evaluations}
-        # A coarse-grid search success cannot hide a supplied refinement failure.
-        # This is target comparison across the provided meshes, not convergence certification.
-        if "incomplete_evidence" in statuses:
-            return "incomplete_evidence"
-        if "needs_optimization" in statuses:
-            return "needs_optimization"
-    return evaluation.radiation_status
-
-
-def _next_actions(evaluation: EvaluationResult, evidence: _Evidence) -> tuple[str, ...]:
-    actions = evaluation.next_actions
-    if _radiation_status(evaluation, evidence) != evaluation.radiation_status:
-        actions += ("resolve_refinement_target_failures_before_claiming_sampled_targets_met",)
-    if evidence.matching is not None:
-        actions += ("review_ideal_per_frequency_matching_components_and_unverified_losses",)
-    if any(check.target_status == "sampled_target_missed" for check, _ in evidence.matching_checks):
-        actions += ("resolve_fixed_matching_sample_target_failures",)
-    return actions
-
-
-def _report(request: DeliveryInput, evaluation: EvaluationResult, evidence: _Evidence) -> bytes:
-    lines = [
-        "# Candidate antenna design report",
-        "",
-        _quoted(request.title),
-        "",
-        "Status: CANDIDATE_NOT_VALIDATED. This is an inspectable design candidate, not fabrication acceptance.",
-        "",
-        "## Stated purpose",
-        "",
-        _quoted(request.purpose),
-        "",
-        f"Design identity (frequency/name excluded): `{evaluation.design_sha256}`.",
-        f"Base-grid radiation comparison: `{evaluation.radiation_status}`; "
-        f"target role: `{request.evaluation.comparison_role}`.",
-        f"Radiation including any supplied mesh checks: `{_radiation_status(evaluation, evidence)}`.",
-        f"Matching evaluation: `{evaluation.matching_status}`; feed strategy: `{request.evaluation.matching}`.",
-        "",
-        f"Forward direction: phi={request.evaluation.front_phi_deg}°, elevation={request.evaluation.elevation_deg}°; "
-        "F/B uses the same elevation and the opposite azimuth. Gain is dBi; F/B and margins are dB.",
-        "The peak column is the sampled global peak, not the directional gain used to compare the objective.",
-        "",
-        "| MHz | Native R + jX (ohm) | Forward / target / margin | F/B / target / margin | Peak dBi | Direct SWR |",
-        "| --- | --- | --- | --- | --- | --- |",
-    ]
-    for point in evaluation.points:
-        assert point.run_id is not None and point.model_input_impedance_ohm is not None
-        impedance = point.model_input_impedance_ohm
-        gain, fb = point.forward_gain_dbi, point.front_to_back_db
-        peak = evidence.summaries[point.run_id].sampled_peak_gain_dbi
-        lines.append(
-            f"| {point.frequency_hz / 1e6:.9g} | {impedance.r:.9g} + j({impedance.x:.9g}) | "
-            f"{_number(gain.actual)} / {_number(gain.minimum)} / {_number(gain.margin)} | "
-            f"{_number(fb.actual)} / {_number(fb.minimum)} / {_number(fb.margin)} | {peak:.9g} | "
-            f"{_number(point.direct_swr_at_system_impedance)} ({point.direct_swr_status}) |"
-        )
-    lines.extend(
-        (
-            "",
-            "Direct SWR is recalculated from native model impedance at "
-            f"{request.evaluation.system_impedance_ohm:.9g} ohm.",
-            "It is not SWR after an unspecified transformer, matching network, balun or feedline.",
-            "A centre-frequency sample does not establish a usable band or band-edge compliance.",
-            "Reference targets are comparisons only; a negative margin is not a software defect.",
-            "",
-            "## Validation gaps",
-            "",
-            *(f"- {item}" for item in _UNVERIFIED),
-            "",
-            "## Next actions",
-            "",
-            *(f"- {action}" for action in _next_actions(evaluation, evidence)),
-            "- Resolve the engineering gaps in validation.json before treating model dimensions as fabrication data.",
-            "",
-            "## Budget snapshot and proposal",
-            "",
-            f"Recorded limit {evaluation.budget.solve_limit}; admitted attempts {evaluation.budget.reserved_attempts}; "
-            f"remaining {evaluation.budget.remaining_attempts}.",
-            f"Proposed new solves {evaluation.budget.proposed_new_solves}; "
-            f"additional total-limit allowance needed {evaluation.budget.additional_attempts_needed}.",
-            "This is a saved, non-binding snapshot: export executed zero solves and reserved zero admissions.",
-            "Reproduction commands are not permission to bypass the existing project budget.",
-            "",
-            "## Source availability",
-            "",
-        )
-    )
-    for run_id, missing in evidence.missing.items():
-        availability = "missing " + ", ".join(missing) if missing else "all public artifacts and environment saved"
-        lines.append(f"- {run_id}: {availability}")
-    if evidence.optimization is not None:
-        search = evidence.optimization
-        lines.extend(
-            (
-                "",
-                "## Numerical search",
-                "",
-                f"Stop reason: `{search.stop_reason}`.",
-                f"Candidates: {search.candidate_attempts}; solve admissions: {search.solver_admissions}.",
-                "Search stopping is not engineering acceptance. Full bounds, budget and seed: optimization/.",
-            )
-        )
-    if evidence.verification is not None:
-        lines.extend(
-            (
-                "",
-                "## Mesh sensitivity",
-                "",
-                f"Status: `{evidence.verification.status}`.",
-                "Declared tolerances, all comparisons and source runs are in verification/mesh.json.",
-                "This covers sampled mesh sensitivity only, not bandwidth or fabrication certification.",
-            )
-        )
-        levels = [evidence.verification.deltas[0].from_segments]
-        levels.extend(delta.to_segments for delta in evidence.verification.deltas)
-        lines.extend(("", "| Segments/wire | Sampled radiation targets |", "| --- | --- |"))
-        for level, checked in zip(levels, evidence.verification.evaluations, strict=True):
-            lines.append(f"| {level} | {checked.radiation_status} |")
-    if evidence.matching is not None:
-        lines.extend(
-            (
-                "",
-                "## Ideal per-frequency matching candidates",
-                "",
-                "Computed with SciPy/scikit-rf from the native impedance at the antenna feed reference plane.",
-                "Each row is a separate candidate. Different frequencies require switching or retuning; "
-                "these are not one fixed multiband circuit. Components are ideal and unrounded.",
-                "Source-shunt: source → (shunt to return) → series → antenna. "
-                "Load-shunt: source → series → (shunt across antenna). Return is the circuit reference, "
-                "not an instruction to ground a balanced antenna element.",
-                "A balun/common-mode solution, component Q/loss/tolerances and power ratings remain unverified.",
-                "",
-                "| MHz | Topology (source to antenna) | Series | Shunt | Ideal matched SWR |",
-                "| --- | --- | --- | --- | --- |",
-            )
-        )
-        for sample in evidence.matching.points:
-            if not sample.solutions:
-                lines.append(f"| {sample.frequency_hz / 1e6:.9g} | no_solution_found | — | — | — |")
-            for solution in sample.solutions:
-                series, shunt = solution.components
-                lines.append(
-                    f"| {sample.frequency_hz / 1e6:.9g} | {solution.topology} | "
-                    f"{series.kind} {series.value_si:.9g} {series.unit} | "
-                    f"{shunt.kind} {shunt.value_si:.9g} {shunt.unit} | {solution.swr:.9g} |"
-                )
-        lines.extend(("", "Full precision parameters and source run IDs: matching/l-networks.json in the ZIP."))
-    if evidence.matching_checks:
-        lines.extend(
-            (
-                "",
-                "## Fixed-component sampled matching checks",
-                "",
-                "Within each check, the same ideal components are used at every saved frequency without retuning. "
-                "Separate checks are alternative networks, not a single automatically switched multiband circuit.",
-                "No SWR target is inferred. These samples do not certify the gaps between frequencies or "
-                "component losses, Q, tolerances, power ratings, balun or feedline behavior.",
-                "Neighbor radiation comparisons remain in matching/check-N/radiation.json; "
-                "a good input SWR does not change the bare-antenna gain or F/B result.",
-                "",
-                "| Check | Topology | Series | Shunt | MHz | Fixed-network SWR | Sample target status |",
-                "| --- | --- | --- | --- | --- | --- | --- |",
-            )
-        )
-        for number, (check, _) in enumerate(evidence.matching_checks, 1):
-            series, shunt = check.network.components
-            for matched_point in check.points:
-                lines.append(
-                    f"| {number} | {check.network.topology} | "
-                    f"{series.kind} {series.value_si:.9g} {series.unit} | "
-                    f"{shunt.kind} {shunt.value_si:.9g} {shunt.unit} | "
-                    f"{matched_point.frequency_hz / 1e6:.9g} | {matched_point.swr:.9g} | {check.target_status} |"
-                )
-        lines.extend(("", "Exact input, circuit results and numerical source evidence are retained in the ZIP."))
-        lines.extend(
-            (
-                "",
-                "### Radiation at the matching-check frequencies",
-                "",
-                "These comparisons use each check's stated reference/target role; they do not create new "
-                "operating band requirements. A below-reference value must not be hidden by a good SWR.",
-                "",
-                "| Check | Role | MHz | Gain dBi | Gain margin dB | F/B dB | F/B margin dB |",
-                "| --- | --- | --- | --- | --- | --- | --- |",
-            )
-        )
-        for number, (_, radiation) in enumerate(evidence.matching_checks, 1):
-            for radiation_point in radiation.points:
-                lines.append(
-                    f"| {number} | {radiation.targets.comparison_role} | {radiation_point.frequency_hz / 1e6:.9g} | "
-                    f"{_number(radiation_point.forward_gain_dbi.actual)} | "
-                    f"{_number(radiation_point.forward_gain_dbi.margin)} | "
-                    f"{_number(radiation_point.front_to_back_db.actual)} | "
-                    f"{_number(radiation_point.front_to_back_db.margin)} |"
-                )
-    lines.extend(("", "## Caller-supplied assumptions (not verified)", ""))
-    lines.extend(_quoted(item) for item in request.assumptions)
-    lines.extend(("", "## Caller-supplied source notes (not fetched or verified)", ""))
-    lines.extend(_quoted(item) for item in request.sources)
-    return ("\n".join(lines) + "\n").encode()
-
-
-def _construction(model: EngineeringRequest, request: DeliveryInput) -> bytes:
-    endpoints: dict[Point, list[str]] = {}
-    for index, wire in enumerate(model.wires, 1):
-        endpoints.setdefault(wire.start_m, []).append(f"W{index}.start")
-        endpoints.setdefault(wire.end_m, []).append(f"W{index}.end")
-    junctions = [f"- {', '.join(labels)} at {point} m" for point, labels in endpoints.items() if len(labels) > 1]
-    frequencies = ", ".join(f"{point.frequency_hz / 1e6:.9g} MHz" for point in request.evaluation.points)
-    lines = [
-        "# Candidate construction and adjustment notes",
-        "",
-        "CANDIDATE_NOT_VALIDATED. These are model-specific planning notes, not a released build procedure.",
-        "",
-        "## Geometry and connections actually modeled",
-        "",
-        f"The model contains {len(model.wires)} numbered thin wires. "
-        "Use dimensions.csv for every start/end coordinate, "
-        "centre-line length and diameter in metres; do not reinterpret a wire index as a proven element function.",
-        "Use one right-handed XYZ datum for both projections. Phi runs from +X toward +Y; theta is measured from +Z.",
-        "Lengths are numerical centre-line dimensions, not tube blank lengths, feed-gap lengths or cutting allowances.",
-        "Shared endpoints represent the following numerical electrical connections:",
-        "",
-        *(junctions or ["- No endpoints are shared; each modeled wire is electrically separate from the other wires."]),
-        "",
-        f"The source is W{model.feed.wire}, position={model.feed.position}, coordinate={model.feed_position()} m; "
-        f"voltage={model.feed.voltage_v:.9g} V, phase={model.feed.phase_deg:.9g}°, "
-        f"source resistance={model.feed.resistance_ohm:.9g} ohm in the numerical model.",
-        "These source parameters do not specify a connector, physical feed gap, "
-        "balun, matching circuit or power rating.",
-        f"Material model: {model.material.mode}. Ground model: {model.ground.mode}.",
-        "",
-        "## Decisions needed before fabrication",
-        "",
-        "Select and document actual alloy/conductivity, tube wall thickness, joints, "
-        "insulating supports and corrosion control.",
-        "Design the boom/mast/clamps, tolerances, electrical clearances and wind/power ratings independently; "
-        "none are modeled.",
-        "Do not connect numerically separate wires through a conductive support "
-        "without revising and re-evaluating the model.",
-        "An ideal-material simulation does not specify an actual metal or certify conductor losses.",
-        "Resolve direct-feed versus a separate matching network using native R+jX; "
-        "do not infer a transformer ratio from SWR.",
-        "",
-        "## Proposed adjustment and measurement sequence (not performed)",
-        "",
-        "1. Freeze the coordinate datum, exact dimensions and physical material/support/feed decisions "
-        "in a new revision.",
-        "2. Re-evaluate that revision at every objective frequency and both band edges; "
-        "check mesh convergence separately.",
-        "3. If a matching network is selected, document its circuit, losses and reference planes "
-        "and evaluate it explicitly.",
-        f"4. With a calibrated analyser at a documented feed reference plane, record R+jX and SWR at {frequencies} "
-        "and across the intended bands; document feedline/common-mode control and the actual installed environment.",
-        "5. Compare measured values with the complete modeled feed chain. "
-        "Change one documented geometric parameter at a time; any changed wire length or position "
-        "creates a new revision requiring all target frequencies to be checked again.",
-        "6. Verify radiation, F/B, mechanical safety and operating-power suitability independently before release.",
-        "",
-        "No verified trimming increments, physical matching parts, acceptable fabrication tolerances "
-        "or acceptance test results "
-        "exist in this candidate package. Unknown values must be supplied and validated, not inferred from the plots.",
-    ]
-    return ("\n".join(lines) + "\n").encode()
-
-
-def _documents(request: DeliveryInput, evaluation: EvaluationResult, evidence: _Evidence) -> dict[str, bytes]:
-    model = next(iter(evidence.models.values()))
-    material_rows: list[JsonValue] = [
-        {
-            "wire_index": index,
-            "length_m": math.dist(wire.start_m, wire.end_m),
-            "diameter_m": 2 * wire.radius_m,
-            "modeled_wire_quantity": 1,
-        }
-        for index, wire in enumerate(model.wires, 1)
-    ]
-    reproduction: list[JsonValue] = []
-    for run_id, source in evidence.models.items():
-        prefix = f"evidence/{run_id}/"
-        has_environment = prefix + "environment.json" in evidence.files
-        reproduction.append(
-            {
-                "run_id": run_id,
-                "frequency_hz": source.frequency_hz,
-                "request": prefix + "request.json",
-                "environment": prefix + "environment.json" if has_environment else None,
-                "historical_environment_status": "recorded_not_recreated" if has_environment else "missing",
-                "full_historical_reproduction_verified": False,
-                "argv": [
-                    "antenna-design",
-                    "solve",
-                    prefix + "request.json",
-                    "--output",
-                    f"recomputed/{run_id}",
-                    "--timeout",
-                    "120",
-                ],
-                "source_manifest_canonical_sha256": evidence.manifests[run_id],
-                "copied_artifacts": [
-                    ref.model_dump(mode="json")
-                    for name, ref in evidence.refs[run_id].items()
-                    if prefix + name in evidence.files
-                ],
-            }
-        )
-    return {
-        "design-report.md": _report(request, evaluation, evidence),
-        "geometry.svg": _geometry(model),
-        "dimensions.csv": _dimensions(model),
-        "model.json": _json(model),
-        "materials.json": _json(
-            {
-                "schema_version": 1,
-                "status": "MODEL_MATERIALS_NOT_A_PURCHASING_BOM",
-                "material": model.material.model_dump(mode="json"),
-                "items": material_rows,
-                "actual_alloy": None,
-                "tube_wall_thickness_m": None,
-                "boom_supports_and_matching_parts": None,
-                "note": "Ideal material is not an alloy choice; conductivity alone does not specify an actual alloy.",
-            }
-        ),
-        "evaluation.json": _json(evaluation),
-        "validation.json": _json(
-            {
-                "schema_version": 1,
-                "status": "CANDIDATE_NOT_VALIDATED",
-                "design_sha256": evaluation.design_sha256,
-                "verified_for_export": [
-                    "completed_source_manifests_and_copied_artifact_digests",
-                    "same_nonfrequency_design_across_selected_runs",
-                    "target_frequency_ground_and_direction_sample_consistency",
-                    "saved_native_impedance_reference_swr_and_directional_metrics",
-                ],
-                "not_verified": list(_UNVERIFIED),
-                "missing_source_artifacts": {run_id: list(missing) for run_id, missing in evidence.missing.items()},
-                "fabrication_approved": False,
-                "measurements_performed_by_export": False,
-                "solver_runs_this_call": 0,
-                "admissions_reserved": 0,
-                "mesh_sensitivity_status": evidence.verification.status if evidence.verification else "not_run",
-                "radiation_status_including_mesh_checks": _radiation_status(evaluation, evidence),
-                "search_stop_reason": evidence.optimization.stop_reason if evidence.optimization else None,
-                "matching_parameters_status": evidence.matching.status if evidence.matching else "not_computed",
-                "fixed_matching_checks": [
-                    {"status": check.status, "target_status": check.target_status}
-                    for check, _ in evidence.matching_checks
-                ],
-            }
-        ),
-        "construction.md": _construction(model, request),
-        "reproduce.json": _json(
-            {
-                "schema_version": 1,
-                "working_directory": "extracted_delivery_root",
-                "coordinate_unit": "m",
-                "frequency_unit": "Hz",
-                "runs": reproduction,
-                "optimization": "optimization/request.json" if evidence.optimization else None,
-                "optimization_result": "optimization/result.json" if evidence.optimization else None,
-                "mesh_verification": "verification/mesh.json" if evidence.verification else None,
-                "matching_parameters": "matching/l-networks.json" if evidence.matching else None,
-                "fixed_matching_checks": [
-                    f"matching/check-{number}/request.json" for number in range(1, len(evidence.matching_checks) + 1)
-                ],
-                "matching_options": request.matching_options.model_dump(mode="json")
-                if request.matching_options is not None
-                else None,
-                "instructions": [
-                    "Install an approved antenna-design environment; historical metadata is evidence, not a lock.",
-                    "Create the recomputed parent directory and use new outputs; original evidence is immutable.",
-                    "Commands are argv arrays for deliberate offline execution; this export executes no commands.",
-                    "Obtain required existing-project solve admission before recomputation; export grants no budget.",
-                    "Missing environment metadata prevents historical reconstruction; reproduction is uncertified.",
-                    "MAA and plots, when present, are copied originals; MMANA interoperability is not newly verified.",
-                ],
-            }
-        ),
-        _BRIEF: _json(
-            {
-                "schema_version": 1,
-                "delivery_id": request.delivery_id,
-                "title": request.title,
-                "purpose": request.purpose,
-                "assumptions": list(request.assumptions),
-                "sources": list(request.sources),
-                "caller_notes_verified": False,
-                "status": "CANDIDATE_NOT_VALIDATED",
-                "design_sha256": evaluation.design_sha256,
-                "targets": request.evaluation.model_dump(mode="json"),
-                "model_json_frequency_is_representative_only": True,
-            }
-        ),
-    }
 
 
 def _mime(name: str) -> str:
@@ -1017,27 +448,26 @@ def export_delivery(store: Path, request: DeliveryInput, snapshot: ProjectSnapsh
         evidence = _collect(store, request)
         evaluation = evaluate(store, request.evaluation, snapshot)
         _check_evaluation(store, evidence, evaluation)
-        if evaluation.design_sha256 is None:
-            raise ArtifactUnavailableError("A delivery requires a consistent saved design")
-        _collect_workflow(store, request, evidence, snapshot)
-        if request.matching_options is not None:
-            evidence.matching = synthesize_matching(evaluation, request.matching_options)
-            matching_data = _json(evidence.matching)
-            evidence.charge(len(matching_data))
-            evidence.files["matching/l-networks.json"] = matching_data
-        documents = _documents(request, evaluation, evidence)
+        assessment = assess_design(store, request, evaluation, snapshot)
+        _collect_workflow(store, request, evidence, assessment)
+        documents = render_documents(request, evaluation, evidence, assessment)
         documents["design.zip"] = _archive(documents, evidence)
         record = _DeliveryRecord(
             request=request,
             source_manifests=evidence.manifests,
             design_sha256=evaluation.design_sha256,
-            radiation_status=_radiation_status(evaluation, evidence),
-            next_actions=_next_actions(evaluation, evidence),
+            physical_design_sha256=evaluation.physical_design_sha256,
+            simulation_configurations=evaluation.simulation_configurations,
+            radiation_status=assessment.radiation_status,
+            matching_status=assessment.matching_status,
+            next_actions=assessment.next_actions,
         )
         root = _location(store, request.delivery_id, create=True)
         return _publish(root, record, documents)
     except DeliveryError:
         raise
+    except PresentationError as error:
+        raise DeliveryError(error.code, str(error)) from error
     except EvaluationError as error:
         raise DeliveryError(
             "DELIVERY_EVALUATION_FAILED", "Selected evidence cannot be evaluated on the stated basis."

@@ -11,6 +11,10 @@ description: 用已连接的天线 MCP 从性能目标推进原创细线天线�
 
 先确认本次是新方案、修改参数、取回结果还是补画。继续已有项目时，读取用户指定工作区中的输入和已有 run_id；不要通过长期记忆混入其他项目。只取回或补画时不要重新访谈、生成几何或求解。修改频点/架设时还可调用 `antenna.prepare_revision`；要求匹配参数时使用 `antenna.matching`，不要由模型代算电路。
 
+对于新版服务创建的 design 作业，先用 `antenna.get_design_state(run_id)` 查最后提交的领域里程碑及证据身份，再查询已有结果。阶段不是 worker 活跃状态；DELIVERED 也不是可制作验收。旧任务可能没有 WorkflowState，不据此推断它从未执行，不重放 design。若工具未在白名单中，提示更新联合配置并应用，不自行修改设置。
+
+已发布的候选包若因中断未登记 DELIVERED，查询会核对原输入、验证记录和交付完整性后补记，不重新计算。证据冲突必须保留现场，不能换编号重算来掩盖。交付回执的 matching_status 包含已提供细网格的直连 SWR 结果；不能拿基础网格达标覆盖细网格失败。历史包该字段为 null 表示未记录，不能当作通过。
+
 调用 `project_status` 核对服务的稳定 project_id、剩余额度和最近运行。项目由操作员配置的专用结果目录确定，不随聊天工作区自动切换；与工作区记录不一致时先澄清，不混用结果。丢失编号可按 `next_before_sequence` 翻页查找，不能直接生成新编号重算。旧服务没有此工具时明确缺少持久预算保障，不声称跨回合次数已经受控。
 
 ## 准备计算输入
@@ -51,6 +55,10 @@ description: 用已连接的天线 MCP 从性能目标推进原创细线天线�
 结果解释使用回执中的数值及单位；记录 `COMPUTED_NOT_VALIDATED`，不把单频结果称为完整带宽或制作验收。只引用摘要和文件，不把原始电流、全角度数组塞进聊天。文件预览由宿主提供；MCP URI 不是浏览器 URL。
 
 用 `evaluate` 比较已保存结果：逐点提供 frequency_hz、min_forward_gain_dbi、min_front_to_back_db 和 run_id，指定 ground、front_phi_deg、elevation_deg、system_impedance_ohm。比较平均值/标称参考时保持 `comparison_role=reference`；只有已选定为设计目标时才用 design_objective，它仍不是正式工程验收。min_* 在 reference 下只是比较基准，不将高于参考值说成已复现厂家性能。
+
+min_forward_gain_dbi / min_front_to_back_db 不是必填问卷；未要求的指标省略，表示 not_requested，不为了填 schema 编造门槛。全向方案不强加 F/B。优化模式 sampled_feasibility 只找全部已请求约束达标的候选，不承诺最大增益或 Pareto 最优；至少要有一个辐射门槛或显式直连 SWR 门槛。gain 是指定方向的 total gain，不是主瓣峰值或匹配后的 realized gain；F/B 使用同仰角的反向方位。scale 只调整缺口归一化，不放宽门槛。
+
+以 physical_design_sha256 识别物理方案，以 simulation_configurations 识别每次计算条件；相同物理方案的网格复核可用不同网格，但不能把不同地面、激励或采样口径当成同一次实验。旧 design_sha256 仅作历史字段，不据它判断网格变化是否换了物理方案。
 
 馈电方案未决定时保留 `matching=unspecified`，仍可比较辐射；选择另做匹配时用 separate_network，不填 max_direct_swr。只有用户确实要求直连及给出门槛时，才用 direct_feed + max_direct_swr。缺结果用 run_id=null，不编造编号；planned_new_solves 是含缺失点的下一批新求解数，省略时只估算缺失点。
 

@@ -9,13 +9,14 @@ from pydantic import Field
 
 from .contracts import Contract, EngineeringRequest, Positive
 from .evaluation import EvaluationInput, EvaluationResult, evaluate
+from .identity import identify
 from .mcp_resources import read_artifact, read_manifest, run_path
 from .project_store import ProjectSnapshot
 
 
 class MeshTolerances(Contract):
-    gain_db: Positive
-    front_back_db: Positive
+    gain_db: Positive | None = None
+    front_back_db: Positive | None = None
     impedance_ohm: Positive
 
 
@@ -27,13 +28,15 @@ class VerificationInput(Contract):
 class MeshDelta(Contract):
     from_segments: int
     to_segments: int
-    max_gain_change_db: float
-    max_front_back_change_db: float
+    max_gain_change_db: float | None
+    max_front_back_change_db: float | None
     max_impedance_change_ohm: float
 
 
 class VerificationResult(Contract):
-    status: Literal["recorded_not_assessed", "within_declared_tolerances", "exceeds_declared_tolerances"]
+    status: Literal[
+        "recorded_not_assessed", "within_declared_tolerances", "exceeds_declared_tolerances", "incomplete_evidence"
+    ]
     tolerances: MeshTolerances | None
     deltas: tuple[MeshDelta, ...]
     evaluations: tuple[EvaluationResult, ...]
@@ -46,7 +49,7 @@ def verify_mesh(
     """A tolerance result covers supplied mesh samples only, not physical acceptance."""
     evaluations = []
     segments: list[int] = []
-    physical: dict[str, object] | None = None
+    physical: tuple[str, str] | None = None
     basis = baseline.model_dump(exclude={"points", "planned_new_solves"})
     targets = tuple(point.model_dump(exclude={"run_id"}) for point in baseline.points)
     for sweep in (baseline, *query.refinements):
@@ -61,8 +64,8 @@ def verify_mesh(
                 raise ValueError("Mesh verification requires completed runs")
             root = run_path(store, point.run_id)
             model = EngineeringRequest.model_validate_json(read_artifact(root, read_manifest(root), "request"))
-            design = model.model_dump(exclude={"name", "frequency_hz", "mesh"})
-            design["mesh_mode"] = model.mesh.mode
+            identity = identify(model)
+            design = (identity.physical_design_sha256, identity.mesh_comparison_basis_sha256)
             if physical is None:
                 physical = design
             if design != physical:
@@ -81,30 +84,40 @@ def verify_mesh(
             ga, gb = a.forward_gain_dbi.actual, b.forward_gain_dbi.actual
             fa, fb_value = a.front_to_back_db.actual, b.front_to_back_db.actual
             za, zb = a.model_input_impedance_ohm, b.model_input_impedance_ohm
-            if ga is None or gb is None or fa is None or fb_value is None or za is None or zb is None:
-                raise ValueError("Mesh comparison has unavailable directional or impedance metrics")
-            gain.append(abs(gb - ga))
-            fb.append(abs(fb_value - fa))
+            if za is None or zb is None:
+                raise ValueError("Mesh comparison has unavailable impedance evidence")
+            if ga is not None and gb is not None:
+                gain.append(abs(gb - ga))
+            if fa is not None and fb_value is not None:
+                fb.append(abs(fb_value - fa))
             impedance.append(abs(complex(zb.r - za.r, zb.x - za.x)))
         deltas.append(
             MeshDelta(
                 from_segments=segments[index],
                 to_segments=segments[index + 1],
-                max_gain_change_db=max(gain),
-                max_front_back_change_db=max(fb),
+                max_gain_change_db=max(gain) if len(gain) == len(previous.points) else None,
+                max_front_back_change_db=max(fb) if len(fb) == len(previous.points) else None,
                 max_impedance_change_ohm=max(impedance),
             )
         )
     tolerance = query.tolerances
-    status: Literal["recorded_not_assessed", "within_declared_tolerances", "exceeds_declared_tolerances"] = (
-        "recorded_not_assessed"
-    )
+    status: Literal[
+        "recorded_not_assessed", "within_declared_tolerances", "exceeds_declared_tolerances", "incomplete_evidence"
+    ] = "recorded_not_assessed"
     if tolerance is not None:
-        within = all(
-            delta.max_gain_change_db <= tolerance.gain_db
-            and delta.max_front_back_change_db <= tolerance.front_back_db
-            and delta.max_impedance_change_ohm <= tolerance.impedance_ohm
+        comparisons = [
+            (actual, limit)
             for delta in deltas
-        )
-        status = "within_declared_tolerances" if within else "exceeds_declared_tolerances"
+            for actual, limit in (
+                (delta.max_gain_change_db, tolerance.gain_db),
+                (delta.max_front_back_change_db, tolerance.front_back_db),
+                (delta.max_impedance_change_ohm, tolerance.impedance_ohm),
+            )
+            if limit is not None
+        ]
+        if any(actual is None for actual, _ in comparisons):
+            status = "incomplete_evidence"
+        else:
+            within = all(actual is not None and actual <= limit for actual, limit in comparisons)
+            status = "within_declared_tolerances" if within else "exceeds_declared_tolerances"
     return VerificationResult(status=status, tolerances=tolerance, deltas=tuple(deltas), evaluations=tuple(evaluations))

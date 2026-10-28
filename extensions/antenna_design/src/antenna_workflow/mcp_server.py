@@ -42,12 +42,19 @@ from .delivery import (
     DeliveryError,
     DeliveryInput,
     DeliveryResult,
-    export_delivery,
     get_delivery,
     read_delivery_resource,
 )
-from .design import DesignInput, DesignPlan, plan_design
-from .evaluation import EvaluationError, EvaluationInput, EvaluationResult, evaluate
+from .design import (
+    DesignInput,
+    DesignPlan,
+    design_delivery_input,
+    export_design_delivery,
+    plan_design,
+    reconcile_design_delivery,
+)
+from .evaluation import EvaluationError, EvaluationInput, EvaluationResult, criteria_hash, evaluate
+from .identity import fingerprint, identify
 from .matching import (
     FixedMatchingInput,
     FixedMatchingResult,
@@ -86,6 +93,7 @@ from .project_store import (
 )
 from .revision import PreparedRevision, RevisionInput, prepare_revision
 from .verification import VerificationInput, verify_mesh
+from .workflow import WorkflowState
 
 logger = logging.getLogger(__name__)
 type AntennaServer = Server[dict[str, JsonValue], object]
@@ -317,6 +325,8 @@ async def _optimize(
     design: DesignInput | None = None,
     plan: DesignPlan | None = None,
 ) -> OptimizationResult:
+    if design is None and project.get_workflow(request.run_id) is not None:
+        raise AdmissionError("RUN_RESERVED", "This identifier belongs to a design job; inspect its existing state.")
     root = optimization_path(store, request.run_id)
     if root.exists():
         raise FileExistsError("Optimization identifier already exists; retrieve it without restarting")
@@ -377,6 +387,15 @@ async def _design(
         return max(1, ceil(seconds))
 
     root = optimization_path(store, query.run_id)
+    if root.exists() or project.charged_search_attempts(query.run_id):
+        raise AdmissionError("RUN_RESERVED", "Design identifier belongs to prior evidence; do not replay it.")
+    state = WorkflowState(
+        run_id=query.run_id,
+        input_sha256=fingerprint("design-input-v1", query.model_dump(mode="json")),
+        criteria_sha256=criteria_hash(query.targets),
+        physical_design_sha256=identify(query.model).physical_design_sha256,
+    )
+    project.save_workflow(state, expected_revision=None)
     with anyio.fail_after(timeout):
         activity.phase = "searching"
         search = await _optimize(
@@ -392,6 +411,8 @@ async def _design(
         if search.stop_reason in {"failed", "interrupted", "in_progress"}:
             raise RunUnavailableError("RUN_INCOMPLETE", "Search has not ended cleanly; no automatic replay.")
         model = candidate_model(query, search.best.parameters)
+        state = state.record_search(identify(model).physical_design_sha256, search.best.run_ids)
+        project.save_workflow(state, expected_revision=0)
         baseline = query.targets.model_copy(
             update={
                 "points": tuple(
@@ -429,29 +450,16 @@ async def _design(
             verify_mesh, store, baseline, verification, project.snapshot(StatusInput(limit=1))
         )
         write_json(root / "verification.json", checked)
+        state = state.record_validation(fingerprint("mesh-verification-v1", checked.model_dump(mode="json")))
+        project.save_workflow(state, expected_revision=1)
         activity.phase = "rendering selected candidate"
-        points = []
-        for number, point in enumerate(baseline.points, 1):
-            assert point.run_id is not None
-            run_id = f"{query.run_id}-plot-f{number}"
-            await _render(store, RenderInput(run_id=point.run_id, output_run_id=run_id), remaining(), project)
-            points.append(point.model_copy(update={"run_id": run_id}))
-        delivery = DeliveryInput(
-            delivery_id=query.run_id,
-            title=query.title,
-            purpose=query.purpose,
-            assumptions=query.assumptions,
-            sources=query.sources,
-            evaluation=baseline.model_copy(update={"points": tuple(points)}),
-            optimization_run_id=query.run_id,
-            verification=verification,
-            matching_options=query.matching_options,
-        )
+        delivery = design_delivery_input(query, baseline, verification)
+        for point, plotted in zip(baseline.points, delivery.evaluation.points, strict=True):
+            assert point.run_id is not None and plotted.run_id is not None
+            await _render(store, RenderInput(run_id=point.run_id, output_run_id=plotted.run_id), remaining(), project)
         remaining()
         activity.phase = "exporting candidate evidence"
-        result = await anyio.to_thread.run_sync(
-            export_delivery, store, delivery, project.snapshot(StatusInput(limit=1))
-        )
+        result = await anyio.to_thread.run_sync(export_design_delivery, store, delivery, project)
         await anyio.lowlevel.checkpoint()
         return result
 
@@ -594,6 +602,16 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
     async def list_tools() -> list[types.Tool]:
         return [
             types.Tool(
+                name="antenna.get_design_state",
+                description="Read the design milestone, reconciling an already published candidate with the ledger. "
+                "This does not resume computation, assert an active worker or certify fabrication readiness.",
+                inputSchema=ResultInput.model_json_schema(),
+                outputSchema=WorkflowState.model_json_schema(),
+                annotations=types.ToolAnnotations(
+                    readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
+                ),
+            ),
+            types.Tool(
                 name="antenna.plan_design",
                 description="Plan search and two mesh sweeps against the current project cap, without solves. "
                 "Reports minimum/recommended allowance and missing budget. Does not change the operator cap.",
@@ -606,7 +624,7 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
                 description="Run a complete bounded candidate workflow: numerical search, two mesh sweeps, plots "
                 "and evidence ZIP. Call plan_design first. run_id also identifies the delivery. "
                 "No model calls; no automatic replay. Optional tolerances assess mesh sensitivity, not fabrication. "
-                "After interruption use get_optimization/project_status; after delivery use get_delivery.",
+                "After interruption use get_design_state/get_optimization; after delivery use get_delivery.",
                 inputSchema=DesignInput.model_json_schema(),
                 outputSchema=DeliveryResult.model_json_schema(),
                 annotations=types.ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
@@ -655,11 +673,14 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
                 name="antenna.get_delivery",
                 description=(
                     "Retrieve an exported package by delivery_id after a lost reply or incomplete workspace import. "
+                    "Reconcile a matching published candidate with its recorded design milestone. "
                     "Does not solve, regenerate a package or overwrite source evidence."
                 ),
                 inputSchema=DeliveryQuery.model_json_schema(),
                 outputSchema=DeliveryResult.model_json_schema(),
-                annotations=types.ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+                annotations=types.ToolAnnotations(
+                    readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
+                ),
             ),
             types.Tool(
                 name="antenna.project_status",
@@ -822,6 +843,12 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
                     return plan_design(design, project.snapshot(StatusInput(limit=1)), timeout).model_dump(mode="json")
                 designed = await run(design)
                 return designed if isinstance(designed, types.CallToolResult) else designed.model_dump(mode="json")
+            if name == "antenna.get_design_state":
+                state_query = ResultInput.model_validate(arguments)
+                state = await anyio.to_thread.run_sync(reconcile_design_delivery, store, state_query.run_id, project)
+                if state is None:
+                    return _error("RUN_NOT_FOUND", "No workflow state was recorded; historical jobs are not inferred.")
+                return state.model_dump(mode="json")
             if name == "antenna.get_optimization":
                 query = ResultInput.model_validate(arguments)
                 search_root = optimization_path(store, query.run_id)
@@ -858,13 +885,12 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
                     if point.run_id in active:
                         return _error("RUN_ACTIVE", "Wait for the source run to complete before exporting.")
                     _result(run_path(store, point.run_id), point.run_id, reused=True)
-                delivery = await anyio.to_thread.run_sync(
-                    export_delivery, store, delivery_query, project.snapshot(StatusInput(limit=1))
-                )
+                delivery = await anyio.to_thread.run_sync(export_design_delivery, store, delivery_query, project)
                 return delivery.model_dump(mode="json")
             if name == "antenna.get_delivery":
                 delivery_id = DeliveryQuery.model_validate(arguments).delivery_id
                 saved_delivery = await anyio.to_thread.run_sync(get_delivery, store, delivery_id)
+                await anyio.to_thread.run_sync(reconcile_design_delivery, store, delivery_id, project, saved_delivery)
                 return saved_delivery.model_dump(mode="json")
             if name == "antenna.evaluate":
                 evaluation_query = EvaluationInput.model_validate(arguments)

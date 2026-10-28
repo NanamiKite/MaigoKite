@@ -70,7 +70,8 @@ class FixedMatchingResult(Contract):
     status: Literal["FIXED_IDEAL_NETWORK_SAMPLED_NOT_VALIDATED"] = "FIXED_IDEAL_NETWORK_SAMPLED_NOT_VALIDATED"
     network: FixedNetwork
     system_impedance_ohm: Positive
-    design_sha256: str
+    design_sha256: str | None
+    physical_design_sha256: str | None = None
     points: tuple[FixedMatchingPoint, ...]
     max_swr: Annotated[FiniteFloat | None, Field(ge=1)]
     worst_sample_swr: Annotated[FiniteFloat, Field(ge=1)]
@@ -105,7 +106,8 @@ class MatchingResult(Contract):
     status: Literal["IDEAL_PER_FREQUENCY_MATCH_NOT_VALIDATED"] = "IDEAL_PER_FREQUENCY_MATCH_NOT_VALIDATED"
     options: MatchingOptions
     system_impedance_ohm: Positive
-    design_sha256: str
+    design_sha256: str | None
+    physical_design_sha256: str | None = None
     points: tuple[MatchingPoint, ...]
     requires_retuning_or_switching: bool
     circuit_library: str
@@ -189,7 +191,7 @@ def _solutions(frequency_hz: float, impedance: Impedance, reference: float) -> t
 
 
 def synthesize_matching(evaluation: EvaluationResult, options: MatchingOptions) -> MatchingResult:
-    if evaluation.targets.matching != "separate_network" or evaluation.design_sha256 is None:
+    if evaluation.targets.matching != "separate_network" or evaluation.physical_design_sha256 is None:
         raise ValueError("Matching requires saved same-design samples and an explicit separate_network choice")
     points = []
     for point in evaluation.points:
@@ -211,6 +213,7 @@ def synthesize_matching(evaluation: EvaluationResult, options: MatchingOptions) 
         options=options,
         system_impedance_ohm=evaluation.targets.system_impedance_ohm,
         design_sha256=evaluation.design_sha256,
+        physical_design_sha256=evaluation.physical_design_sha256,
         points=tuple(points),
         requires_retuning_or_switching=len(points) > 1,
         circuit_library="scikit-rf " + version("scikit-rf"),
@@ -241,7 +244,7 @@ def evaluate_fixed_matching(evaluation: EvaluationResult, query: FixedMatchingIn
 
     if evaluation.targets != query.evaluation or evaluation.targets.matching != "separate_network":
         raise ValueError("Use the same explicit separate_network evaluation")
-    if evaluation.design_sha256 is None:
+    if evaluation.physical_design_sha256 is None:
         raise ValueError("Fixed matching requires verified same-design samples")
     reference = evaluation.targets.system_impedance_ohm
     points = []
@@ -277,6 +280,7 @@ def evaluate_fixed_matching(evaluation: EvaluationResult, query: FixedMatchingIn
         network=query.network,
         system_impedance_ohm=reference,
         design_sha256=evaluation.design_sha256,
+        physical_design_sha256=evaluation.physical_design_sha256,
         points=tuple(points),
         max_swr=query.max_swr,
         worst_sample_swr=worst,

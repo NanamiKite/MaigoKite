@@ -28,7 +28,7 @@ MaigoKite 是一个运行在你电脑上的个人 Agent，用来处理文件、�
 
 侧栏“扩展”用于管理本地 `SKILL.md` 和 stdio MCP Server。Skill 提供任务指令，本身不执行代码；MCP 接入外部工具。保存后点击应用；有运行或待处理交互时，先完成或取消任务。
 
-仓库还提供独立安装的[天线设计扩展](extensions/antenna_design/README.md)：通过 MCP + Skill 联合导入，进行薄线计算、指标比较并导出报告、尺寸、模型和证据 ZIP；聊天回执可打开文件，预览面板可下载。它不随主应用安装；候选设计包不等于可直接制作，自动优化与完整工程验证尚未交付。接入方式见[配置指南](docs/user-guide/Configuration.md#81-天线计算与方向图)。
+仓库还提供独立安装的[天线设计扩展](extensions/antenna_design/README.md)，可以按给定目标搜索导线尺寸、计算方向图、比较指标，并导出报告、尺寸和模型文件。它通过 MCP + Skill 接入，生成的文件可在聊天中打开或下载；不随主应用安装。结果仍是候选方案，制作前需要核对实际材料、工作带宽、匹配和机械条件。接入步骤见[配置指南](docs/user-guide/Configuration.md#81-天线计算与方向图)。
 
 修改默认目录、权限和扩展的操作步骤见 [配置指南](docs/user-guide/Configuration.md)。
 

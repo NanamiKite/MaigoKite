@@ -30,7 +30,7 @@ MaigoKite 是面向个人工作流的本地 Agent。本目录按读者和职责�
 | 长期记忆与检索边界 | [记忆与检索边界](agent-capabilities/memory/memory-system.md) |
 | MCP 传输方式 / 生命周期 | [MCP 集成](agent-capabilities/mcp/mcp-integration.md) |
 | SKILL.md / 扩展边界 | [本地技能与扩展边界](agent-capabilities/skills/skill-lifecycle.md) |
-| 天线工作流 / MMANA 兼容与求解器评估 | [天线设计](design/AntennaWorkflow.md)：独立计算包和可选 MCP 已接入，新增入口待运行验收；完整工作流仍在设计中 |
+| 天线工作流 / MMANA 兼容与求解器评估 | [天线设计](design/AntennaWorkflow.md)：参数搜索、网格复核、匹配计算与候选包已接入；Linux 有定向验收，制作验证未完成 |
 | 工具风险、模式、审批规则 | [工具权限](agent-capabilities/security/tool-permission.md) |
 | 威胁、身份、凭证与网络 | [安全边界](ops-security/Security.md) |
 | 日志、审计与排障 | [日志与诊断](ops-security/Observability.md) |
@@ -42,7 +42,7 @@ MaigoKite 是面向个人工作流的本地 Agent。本目录按读者和职责�
 | 用户首次使用 / 设置 | [安装与首次使用](user-guide/Installation.md)、[配置指南](user-guide/Configuration.md) |
 | 取舍历史 / 术语 | [架构决策](reference/Decisions.md)、[术语表](reference/Glossary.md) |
 
-天线扩展的安装和命令见 [独立包说明](../extensions/antenna_design/README.md)，数值对照过程见 [MMANA 兼容性实验](../experiments/mmana_compatibility/README.md)。实验结果不等于主应用接入或完整设计工作流已经验收。
+天线扩展的安装、工具参数和恢复操作见 [独立包说明](../extensions/antenna_design/README.md)，MMANA 数值对照见 [兼容性实验](../experiments/mmana_compatibility/README.md)。当前运行结果和剩余问题在路线图中记录，不把求解器实验、宿主接入和工程验证混为同一结论。
 
 历史需求快照、临时迁移记录和内部验收报告只保留在本地，不纳入版本控制。当前运行机制以智能体运行时设计为准。
 

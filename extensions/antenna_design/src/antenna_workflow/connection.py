@@ -63,6 +63,7 @@ def connection_bundle(root: Path, *, namespace: str, timeout: int, solve_limit: 
                     "antenna.optimize",
                     "antenna.plan_design",
                     "antenna.design",
+                    "antenna.get_design_state",
                     "antenna.get_optimization",
                     "antenna.get_result",
                     "antenna.render",

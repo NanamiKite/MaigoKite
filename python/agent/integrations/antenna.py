@@ -68,6 +68,10 @@ _FAILURE_HINTS = {
     "DELIVERY_INPUT_CONFLICT": ("这个交付编号已绑定其他输入。", "保留已有文件；修改设计说明时使用新的交付编号。"),
     "DELIVERY_UNAVAILABLE": ("交付文件不可用或完整性校验失败。", "检查原始文件，不要覆盖或自动重新求解。"),
     "DELIVERY_EVALUATION_FAILED": ("所选结果无法按给定口径评价。", "核对设计版本、目标和已有证据，不要重新求解。"),
+    "DELIVERY_GEOMETRY_UNAVAILABLE": ("模型尺寸超出绘图支持范围。", "核对几何坐标与单位，原计算证据保留。"),
+    "DELIVERY_WORKFLOW_CONFLICT": (
+        "交付包与已登记的设计或验证证据不一致。", "保留现场并核对原编号，不要覆盖或重新求解。",
+    ),
     "DELIVERY_TOO_LARGE": ("交付包超过文件大小限制。", "减少本包包含的频点；保留原始计算文件。"),
 }
 
@@ -189,14 +193,21 @@ class SolveReceipt(BaseModel):
 
 class DeliveryReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    schema_version: Literal[1]
+    schema_version: Literal[1, 2]
     kind: Literal["antenna_design_delivery"]
     delivery_id: str = Field(pattern=_RUN_ID)
     reused: bool
     status: Literal["CANDIDATE_NOT_VALIDATED"]
-    design_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    design_sha256: str | None = Field(pattern=r"^[0-9a-f]{64}$")
+    physical_design_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    simulation_configurations: dict[str, str] = Field(default_factory=dict)
     resources: Annotated[list[ResourceReference], Field(min_length=10, max_length=10)]
-    radiation_status: Literal["reference_only", "sampled_targets_met", "needs_optimization", "incomplete_evidence"]
+    radiation_status: Literal[
+        "reference_only", "sampled_targets_met", "needs_optimization", "incomplete_evidence", "not_evaluated"
+    ]
+    matching_status: Literal[
+        "not_evaluated", "direct_targets_met", "needs_matching", "incomplete_evidence"
+    ] | None = None
     next_actions: Annotated[list[Annotated[str, Field(max_length=1000)]], Field(max_length=20)]
 
 
@@ -399,6 +410,8 @@ class AntennaResults:
             source_identity = {
                 "delivery_id": receipt.delivery_id, "status": receipt.status, "design_sha256": receipt.design_sha256,
             }
+            if receipt.physical_design_sha256 is not None:
+                source_identity["physical_design_sha256"] = receipt.physical_design_sha256
         try:
             async with asyncio.timeout(30):
                 # Raster previews first; a later download failure does not invalidate already verified files.

@@ -30,7 +30,7 @@ SDK 的 AnyIO 上下文由单个连接所有者 `asyncio.Task` 进入和退出�
 
 ### 配置与凭证管理
 
-侧栏“扩展 → MCP”可添加或编辑 command、args、cwd、环境变量名，启停或移除服务器。两份配置职责不同，均不含凭证值，也不是执行状态：
+侧栏“扩展 → MCP”可添加或编辑 command、args、cwd、环境变量名、结果适配和工具请求时限，启停或移除服务器。工具请求默认 30 秒，可设置为 1～660 秒；发现和资源读取的限制不因此扩大。两份配置职责不同，均不含凭证值，也不是执行状态：
 
 - `workspace_settings.extensions.config` 保存期望配置。保存不改 YAML、不启动进程，revision 防止旧页面覆盖新配置。
 - `extensions.applied_config` 保存上次生效配置。Core 重启优先加载它，不用未应用的编辑替换待审批任务的服务。
@@ -73,21 +73,29 @@ ToolRegistry resolve / 参数规范化
 
 连接错误不盲目重试副作用。请求/工具调用 ID 用于关联；完整追踪上下文传播和 stderr 脱敏采集尚未接线。配置示例只在 [配置指南](../../user-guide/Configuration.md) 维护。
 
+SDK 的公开进度回调映射到同一工具调用的 `tool.started`，携带 `progress / total / title`。包装层最多每秒更新一次，回调有时限；完成或取消后不再接受该调用的进度。界面更新已有活动，不重置开始时间，也不把进度写进助手回复。该通知不是新的任务状态或后台任务协议。
+
 ### 3.1 天线结果资源适配
 
 `result_adapter=antenna_design` 是显式启用的宿主结果投影，缺省 `none`；不根据工具描述、服务名或端口猜测。切换时通过既有 apply 刷新工具包装，可复用配置和凭证未改变的健康连接，不另起服务。
 
-仅所选服务的 `antenna.solve` 成功回执进入 `agent.integrations.antenna.AntennaResults`。调用本身仍走 ToolPolicy、审批和审计，不降低 MCP 风险。适配器校验 `schema_version=1`、调用 run ID、有界摘要、固定资源清单；随后通过相同 SDK 会话 `resources/read`，核对返回 URI、MIME、字节长度、SHA256 和 PNG 文件头，使用既有安全文件访问写入当前对话工作区。
+所选服务的 `antenna.solve / get_result / render` 返回计算结果，`antenna.design / export / get_delivery` 返回候选包；这些成功回执进入 `agent.integrations.antenna.AntennaResults`。调用仍走 ToolPolicy、审批和审计，不因服务自报只读而降权。适配器校验 `schema_version=1`、对应 run ID 或 delivery ID、有界摘要和固定资源清单，再通过相同 SDK 会话 `resources/read` 核对 URI、MIME、字节长度、SHA256 和 PNG 文件头，写入当前对话目录。
 
 资源读取不开放为任意 URL 下载或模型工具；单文件最多 16 MiB，整个导入最多 48 MiB、30 秒（文件写入清理另计）。限制约束接受的资源内容，不等于 SDK JSON-RPC 分配上限或系统磁盘配额。每次读资源和落盘前查询当前目录/权限；只读时不继续写，写入不覆盖不同内容的已存在文件。
 
-完成后模型只得到紧凑回执与引用，数值数组和图片字节不进入 ToolMessage。PNG 沿用聊天图片组件和受控工作区文件 API，SVG/JSON/MAA 保存在同目录供查看。最后写 `import-receipt.json`；部分导入失败保留已校验文件，以 `import_complete=false / import_warning` 提醒，不重跑求解。取消时等待正在写入的本地线程结束，但这不是 MCP 远端执行停止回执。
+计算副本保留 PNG、SVG、JSON 和可用 MAA；候选包固定包含报告、几何、尺寸、模型、材料、评价、验证、施工调试、复算和 ZIP 十项资源。PNG 复用聊天图片，其他文件使用工作区预览或鉴权下载；宿主不解压 ZIP。目录标识由命名空间、结果编号和资源内容 hash 决定，重复取回补齐同一副本，不覆盖用户修改。
 
-领域包仍独立安装，不导入主应用或 LangGraph；结果适配不新增 Runtime、领域阶段状态或项目预算。该新链路尚未运行端到端/Windows 验收，不纳入此前通用 MCP 验收的通过范围。
+最后写 `import-receipt.json`；部分导入失败保留已校验文件，以 `import_complete=false / import_warning` 和稳定警告码提示，不重跑求解或重新导出。取消等待当前本地写入线程结束，但线程结束不等于远端 worker 停止。数值完整、图不完整时可导入数值，随后通过 `render` 补画；丢失交付回执用 `get_delivery`，不是 `get_result`。
+
+模型只得到紧凑回执与引用，不接收原始数值数组或图片字节。`antenna_receipts.py` 另对 `optimize / get_optimization / evaluate / plan_design` 提取指标、停止原因和预算，去掉重复 MCP 文本与逐点证据 hash；完整原始回执保留供检查。求解与评价仍属于独立包，宿主不实现工程算法。
+
+领域包独立安装，不导入主应用或 LangGraph；项目求解准入保存在服务自己的 SQLite 中，不进入主应用 Repository。Linux 已有真实 MCP、生产 Core 审批/取消、重启取回、冲突保护和导入的定向记录，具体范围见 [路线图](../../project/Roadmap.md#2026-10-23-天线恢复与生产调用验收)。这些结果不证明任意第三方 MCP 可恢复，也不覆盖完整 GUI、自然语言编排或 Windows。
 
 ## 4. 取消、关闭和隔离限制
 
-`asyncio.CancelledError` 向调用方传播，不被转换成成功结果或重试。原生 `asyncio.timeout` 覆盖整个 SDK `call_tool` 的发送与等待；超时提示远端执行结果可能未知。当前锁定 SDK 的请求等待取消不能证明已向服务器发送取消通知，更不能证明远端副作用停止。本批不重新实现协议取消通知，不承诺 MCP 远端取消确认。
+`asyncio.CancelledError` 向调用方传播，不被转换成成功结果或重试。原生 `asyncio.timeout` 覆盖整个 SDK `call_tool` 的发送与等待；通用 MCP 超时仍提示远端执行结果可能未知。当前锁定 SDK 的本地等待取消不能证明已发送协议取消，更不能证明远端副作用停止，不为此重写协议。
+
+天线适配单独处理自己发起的 `solve / render / optimize / design`：通过公开 `_meta` 传随机 `operation_id`，取消或请求超时后调用 `antenna.cancel`，最多额外等待 10 秒。服务只有在对应 worker 退出、清理和证据保存后才确认，身份不符不能停止其他调用，共享 MCP 连接不关闭。缺少回执、旧服务或断线时仍提示“远端停止未确认”，不得自动重算。这是该扩展的停止确认，不是通用 MCP 取消保证，也不是实验性 MCP Tasks 接入。
 
 Core 关闭先停止并等待自己的调用，再退出 SDK 上下文，由 SDK 关闭 stdin、等待并按平台回收进程；不再自行轮询 returncode 或发送 killpg。单个连接关闭失败不跳过其余连接，错误汇总到 Core。上述本地验收不覆盖任意第三方服务器崩溃、Windows 子进程树或远端副作用停止。
 

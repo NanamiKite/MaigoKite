@@ -15,6 +15,7 @@ from pydantic import Field
 
 from .contracts import Contract, EngineeringRequest
 from .mcp_resources import RUN_ID_PATTERN, ArtifactUnavailableError, run_path
+from .workflow import WorkflowState
 
 DEFAULT_SOLVE_LIMIT = 3
 MAX_SOLVE_LIMIT = 1_000_000
@@ -80,7 +81,7 @@ class ProjectStore:
         with closing(self._connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if schema_version not in (0, 1):
+            if schema_version not in (0, 1, 2):
                 raise ValueError("Unsupported antenna project database version")
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS project ("
@@ -121,7 +122,70 @@ class ProjectStore:
                     "VALUES (?, 'imported', 1)",
                     (child.name,),
                 )
-            connection.execute("PRAGMA user_version = 1")
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS workflows ("
+                "run_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, state_json TEXT NOT NULL)"
+            )
+            connection.execute("PRAGMA user_version = 2")
+
+    def get_workflow(self, run_id: str) -> WorkflowState | None:
+        run_path(self.root, run_id)
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT state_json, revision FROM workflows WHERE run_id = ?", (run_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        state = WorkflowState.model_validate_json(row[0])
+        if state.run_id != run_id or state.revision != row[1]:
+            raise ValueError("Workflow identity mismatch")
+        return state
+
+    def save_workflow(self, state: WorkflowState, *, expected_revision: int | None) -> None:
+        """Commit an evidence milestone once; concurrent writers cannot replace another revision."""
+        state = WorkflowState.model_validate(state.model_dump())
+        if state.revision != (0 if expected_revision is None else expected_revision + 1):
+            raise ValueError("Invalid workflow revision")
+        with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT state_json, revision FROM workflows WHERE run_id = ?", (state.run_id,)
+            ).fetchone()
+            if expected_revision is None:
+                if row is not None:
+                    raise AdmissionError("RUN_RESERVED", "Design already exists; inspect its state, do not replay it.")
+                connection.execute(
+                    "INSERT INTO workflows VALUES (?, ?, ?)",
+                    (state.run_id, state.revision, state.model_dump_json()),
+                )
+            else:
+                previous = WorkflowState.model_validate_json(row[0]) if row is not None else None
+                if previous is not None and previous.revision != row[1]:
+                    raise ValueError("Workflow revision mismatch")
+                # Publication and recovery can observe the same completion concurrently.
+                # Accept that identical commit, but never overwrite a different milestone.
+                if previous == state:
+                    return
+                if (
+                    previous is None
+                    or previous.revision != expected_revision
+                    or previous.input_sha256 != state.input_sha256
+                    or previous.criteria_sha256 != state.criteria_sha256
+                ):
+                    raise ValueError("Workflow changed; reload its committed state")
+                if expected_revision >= 1 and (
+                    previous.physical_design_sha256 != state.physical_design_sha256
+                    or previous.selected_run_ids != state.selected_run_ids
+                ):
+                    raise ValueError("Validation and delivery must preserve the selected design")
+                if expected_revision >= 2 and previous.verification_sha256 != state.verification_sha256:
+                    raise ValueError("Delivery must preserve the recorded validation evidence")
+                updated = connection.execute(
+                    "UPDATE workflows SET revision = ?, state_json = ? WHERE run_id = ? AND revision = ?",
+                    (state.revision, state.model_dump_json(), state.run_id, expected_revision),
+                )
+                if updated.rowcount != 1:
+                    raise ValueError("Workflow revision was not committed")
 
     def reserve_solve(self, run_id: str, model: EngineeringRequest) -> None:
         digest = hashlib.sha256(model.model_dump_json().encode()).hexdigest()

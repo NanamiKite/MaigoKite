@@ -7,8 +7,6 @@ it cannot certify a bandwidth, simulate a matching network or grant permission.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 from pathlib import Path
 from typing import Annotated, Literal, Self
@@ -16,16 +14,21 @@ from typing import Annotated, Literal, Self
 from pydantic import Field, FiniteFloat, StrictInt, model_validator
 
 from .contracts import Contract, EngineeringRequest, EngineeringSummary, FarField, Ground, Impedance, Positive
+from .identity import DesignIdentity, fingerprint, identify
 from .mcp_resources import RUN_ID_PATTERN, read_artifact, read_manifest, resource_uri, run_path
 from .project_store import MAX_SOLVE_LIMIT, ProjectSnapshot
 
-type MetricStatus = Literal["at_or_above", "below", "unavailable"]
+type MetricStatus = Literal["at_or_above", "below", "unavailable", "not_requested"]
+type RadiationStatus = Literal[
+    "reference_only", "sampled_targets_met", "needs_optimization", "incomplete_evidence", "not_evaluated"
+]
+type MatchingStatus = Literal["not_evaluated", "direct_targets_met", "needs_matching", "incomplete_evidence"]
 
 
 class FrequencyTarget(Contract):
     frequency_hz: Annotated[FiniteFloat, Field(ge=1e6, le=1e9)]
-    min_forward_gain_dbi: FiniteFloat
-    min_front_to_back_db: FiniteFloat
+    min_forward_gain_dbi: FiniteFloat | None = None
+    min_front_to_back_db: FiniteFloat | None = None
     run_id: Annotated[str | None, Field(pattern=f"^{RUN_ID_PATTERN}$")] = None
 
 
@@ -57,7 +60,7 @@ class EvaluationInput(Contract):
 
 class MetricComparison(Contract):
     actual: FiniteFloat | None
-    minimum: FiniteFloat
+    minimum: FiniteFloat | None
     margin: FiniteFloat | None
     status: MetricStatus
 
@@ -96,13 +99,16 @@ class BudgetProposal(Contract):
 
 
 class EvaluationResult(Contract):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 2
     status: Literal["SAMPLED_COMPARISON_NOT_VALIDATED"] = "SAMPLED_COMPARISON_NOT_VALIDATED"
     targets: EvaluationInput
     design_sha256: str | None
+    physical_design_sha256: str | None = None
+    simulation_configurations: dict[str, str] = Field(default_factory=dict)
+    criteria_sha256: str | None = None
     points: tuple[PointEvaluation, ...]
-    radiation_status: Literal["reference_only", "sampled_targets_met", "needs_optimization", "incomplete_evidence"]
-    matching_status: Literal["not_evaluated", "direct_targets_met", "needs_matching", "incomplete_evidence"]
+    radiation_status: RadiationStatus
+    matching_status: MatchingStatus
     budget: BudgetProposal
     next_actions: tuple[str, ...]
     not_verified: tuple[str, ...] = (
@@ -121,20 +127,22 @@ class EvaluationError(ValueError):
         self.code = code
 
 
-def _minimum(actual: float | None, target: float) -> MetricComparison:
+def criteria_hash(query: EvaluationInput) -> str:
+    """Identify acceptance criteria independently of artifact locations and proposed compute budget."""
+    data = query.model_dump(mode="json", exclude={"points", "planned_new_solves"})
+    data["points"] = [point.model_dump(mode="json", exclude={"run_id"}) for point in query.points]
+    return fingerprint("sampled-acceptance-criteria-v1", data)
+
+
+def _minimum(actual: float | None, target: float | None) -> MetricComparison:
+    if target is None:
+        return MetricComparison(actual=actual, minimum=None, margin=None, status="not_requested")
     return MetricComparison(
         actual=actual,
         minimum=target,
         margin=None if actual is None else actual - target,
         status="unavailable" if actual is None else "at_or_above" if actual >= target else "below",
     )
-
-
-def _design_hash(request: EngineeringRequest) -> str:
-    # Frequency varies within a sweep; geometry, feed, material and numerical
-    # settings must not. A display name is not a physical design identity.
-    physical = request.model_dump(mode="json", exclude={"name", "frequency_hz"})
-    return hashlib.sha256(json.dumps(physical, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def _direct_swr(impedance: Impedance, reference: float) -> float | None:
@@ -145,7 +153,9 @@ def _direct_swr(impedance: Impedance, reference: float) -> float | None:
     return (1 + reflection) / (1 - reflection) if reflection < 1 else None
 
 
-def _load_point(store: Path, target: FrequencyTarget, query: EvaluationInput) -> tuple[PointEvaluation, str | None]:
+def _load_point(
+    store: Path, target: FrequencyTarget, query: EvaluationInput
+) -> tuple[PointEvaluation, DesignIdentity | None]:
     if target.run_id is None:
         return PointEvaluation(
             frequency_hz=target.frequency_hz,
@@ -225,22 +235,28 @@ def _load_point(store: Path, target: FrequencyTarget, query: EvaluationInput) ->
             far_field_sha256=manifest["pattern/far_field.json"].sha256,
         ),
         warnings=summary.warnings,
-    ), _design_hash(request)
+    ), identify(request)
 
 
 def evaluate(store: Path, query: EvaluationInput, snapshot: ProjectSnapshot) -> EvaluationResult:
     """Project immutable run evidence into target margins and a non-binding next-batch proposal."""
     loaded = tuple(_load_point(store, point, query) for point in query.points)
-    identities = {identity for _, identity in loaded if identity is not None}
-    if len(identities) > 1:
+    identities = [identity for _, identity in loaded if identity is not None]
+    physical_ids = {identity.physical_design_sha256 for identity in identities}
+    if len(physical_ids) > 1:
         raise EvaluationError(
             "EVALUATION_DESIGN_MISMATCH",
-            "Results must share geometry, feed, material and numerical settings; evaluate revisions separately.",
+            "Results must share conductor geometry, feed placement and material; evaluate revisions separately.",
         )
+    if len({identity.sweep_basis_sha256 for identity in identities}) > 1:
+        raise EvaluationError("EVALUATION_BASIS_MISMATCH", "Evaluate different simulation settings separately.")
+    legacy_ids = {identity.legacy_design_sha256 for identity in identities}
     points = tuple(point for point, _ in loaded)
     metrics = [metric.status for point in points for metric in (point.forward_gain_dbi, point.front_to_back_db)]
-    radiation: Literal["reference_only", "sampled_targets_met", "needs_optimization", "incomplete_evidence"] = (
-        "incomplete_evidence"
+    radiation: RadiationStatus = (
+        "not_evaluated"
+        if all(metric == "not_requested" for metric in metrics)
+        else "incomplete_evidence"
         if "unavailable" in metrics
         else "reference_only"
         if query.comparison_role == "reference"
@@ -248,7 +264,7 @@ def evaluate(store: Path, query: EvaluationInput, snapshot: ProjectSnapshot) -> 
         if "below" in metrics
         else "sampled_targets_met"
     )
-    matching: Literal["not_evaluated", "direct_targets_met", "needs_matching", "incomplete_evidence"] = "not_evaluated"
+    matching: MatchingStatus = "not_evaluated"
     if query.max_direct_swr is not None:
         swr_states = {point.direct_swr_status for point in points}
         matching = (
@@ -287,7 +303,14 @@ def evaluate(store: Path, query: EvaluationInput, snapshot: ProjectSnapshot) -> 
         actions.append("plan_band_edges_mesh_convergence_and_physical_validation")
     return EvaluationResult(
         targets=query,
-        design_sha256=next(iter(identities), None),
+        design_sha256=next(iter(legacy_ids)) if len(legacy_ids) == 1 else None,
+        physical_design_sha256=next(iter(physical_ids), None),
+        simulation_configurations={
+            point.run_id: identity.simulation_configuration_sha256
+            for point, identity in loaded
+            if point.run_id is not None and identity is not None
+        },
+        criteria_sha256=criteria_hash(query),
         points=points,
         radiation_status=radiation,
         matching_status=matching,

@@ -212,13 +212,7 @@ const {
           role="alert"
         >{{ $t(copyError) }}</small>
         <small
-          v-if="endpointChanged"
-          class="warning"
-        >{{
-          $t('服务地址或接口已更换，请重新填写 API Key。')
-        }}</small>
-        <small
-          v-else-if="draft.credentialConfigured"
+          v-if="draft.credentialConfigured && !endpointChanged"
           class="credential-confirmed"
         ><i />{{ $t('密钥已保存') }}</small>
       </label>

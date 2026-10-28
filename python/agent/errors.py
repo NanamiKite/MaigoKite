@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from pathlib import Path
 
 type ErrorParameter = str | int | float | bool
 
@@ -36,6 +37,17 @@ class UserFacingCancellation(asyncio.CancelledError):
 
     Remains a BaseException so recoverable tool-error handlers cannot swallow stop.
     """
+
+
+def error_location(error: BaseException) -> str:
+    """Locate internal failures without logging exception bodies, URLs or locals."""
+    trace = error.__traceback__
+    if trace is None:
+        return type(error).__name__
+    while trace.tb_next is not None:
+        trace = trace.tb_next
+    code = trace.tb_frame.f_code
+    return f"{type(error).__name__} at {Path(code.co_filename).name}:{trace.tb_lineno} ({code.co_name})"
 
 
 def public_error(error: BaseException) -> str:

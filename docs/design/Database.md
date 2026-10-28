@@ -16,6 +16,8 @@
 
 当前 Repository 采用单进程写入模型。不能仅凭接口抽象，就推断它已支持多实例并发或 PostgreSQL。
 
+天线扩展在服务 `--root` 中另存 `.antenna-project.sqlite3`，不属于下方主应用业务表。它用 `project / reservations / budget_changes` 保存项目身份、求解准入、补画来源与限额调整；预算先提交再启动计算，失败/取消不自动退回。活跃 worker 状态仍来自进程所有权，不写成另一套执行状态机，也不与 LangGraph checkpoint 双向同步。恢复项目需同时保留该库和服务产物，规则见 [备份与恢复](../ops-security/Backup.md)。
+
 `sqlite_schema.py` 使用 Repository 创建的连接，不自行 commit、close 或持有锁。Repository 负责连接、锁和提交；审批决定、授权复用、任务与审计更新不拆成独立 Store。
 
 会话级子 Agent 存储增量（新库设置/调用已验收，旧库迁移/子图恢复未覆盖）：启动迁移为 conversations 增加

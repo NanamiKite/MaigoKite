@@ -20,7 +20,8 @@ from pydantic import Field, FiniteFloat, StrictInt, model_validator
 
 from .artifacts import complete_bundle, compute_bundle, fail_bundle, prepare_bundle, write_json
 from .contracts import Contract, EngineeringRequest, InvalidCandidateError, Point, Positive, Wire
-from .evaluation import EvaluationInput, EvaluationResult, FrequencyTarget, evaluate
+from .evaluation import EvaluationInput, EvaluationResult, FrequencyTarget, criteria_hash, evaluate
+from .identity import identify
 from .mcp_resources import MAX_METADATA_BYTES, read_artifact, read_bounded, read_manifest, run_path
 from .project_store import AdmissionError, ProjectStore, StatusInput
 
@@ -59,6 +60,7 @@ class OptimizeInput(Contract):
     model: EngineeringRequest
     dimensions: Annotated[tuple[Dimension, ...], Field(min_length=1, max_length=24)]
     targets: OptimizationTargets
+    objective_mode: Literal["sampled_feasibility"] = "sampled_feasibility"
     max_solver_runs: Annotated[StrictInt | None, Field(ge=1, le=4096)] = None
     random_seed: Annotated[StrictInt, Field(ge=0, le=2**32 - 1)] = 0
     population_size: Annotated[StrictInt | None, Field(ge=5, le=256)] = None
@@ -70,6 +72,11 @@ class OptimizeInput(Contract):
 
     @model_validator(mode="after")
     def search_contract(self) -> Self:
+        if self.targets.max_direct_swr is None and not any(
+            point.min_forward_gain_dbi is not None or point.min_front_to_back_db is not None
+            for point in self.targets.points
+        ):
+            raise ValueError("A feasibility search requires at least one explicit engineering threshold")
         if self.targets.comparison_role != "design_objective":
             raise ValueError("Choose explicit design_objective targets; nominal references are not requirements")
         if self.targets.planned_new_solves is not None:
@@ -201,13 +208,22 @@ def candidate_model(query: OptimizeInput, values: tuple[float, ...]) -> Engineer
 
 
 def objective(query: OptimizeInput, evaluation: EvaluationResult) -> float | None:
-    """Sum squared normalized shortfalls; surplus gain cannot cancel a bad F/B point."""
+    """Minimize violations of requested thresholds; stop at feasibility, not maximum gain.
+
+    Scales normalize violations and do not relax acceptance thresholds. Radiation
+    uses total gain at the specified direction, not peak gain or realized gain;
+    F/B compares the opposite azimuth at the same elevation. SWR is at the feed.
+    """
+    if criteria_hash(query.targets) != criteria_hash(evaluation.targets):
+        raise ValueError("Objective scoring requires the agreed acceptance criteria")
     shortfalls = []
     for point in evaluation.points:
         for metric, scale in (
             (point.forward_gain_dbi, query.gain_scale_db),
             (point.front_to_back_db, query.front_back_scale_db),
         ):
+            if metric.minimum is None:
+                continue
             if metric.margin is None:
                 return None
             shortfalls.append(max(0, -metric.margin) / scale)
@@ -221,13 +237,25 @@ def objective(query: OptimizeInput, evaluation: EvaluationResult) -> float | Non
     return score if math.isfinite(score) else None
 
 
-def _targets_met(evaluation: EvaluationResult) -> bool:
+def targets_satisfied(evaluation: EvaluationResult) -> bool:
     # Feasibility is checked from the actual comparisons, independently of
     # user-selected scoring scales and floating-point underflow in the score.
-    return evaluation.radiation_status == "sampled_targets_met" and evaluation.matching_status in {
-        "not_evaluated",
-        "direct_targets_met",
-    }
+    requested = [
+        metric
+        for point in evaluation.points
+        for metric in (point.forward_gain_dbi, point.front_to_back_db)
+        if metric.minimum is not None
+    ]
+    return (
+        evaluation.targets.comparison_role == "design_objective"
+        and bool(requested or evaluation.targets.max_direct_swr is not None)
+        and all(metric.status == "at_or_above" for metric in requested)
+        and evaluation.matching_status
+        in {
+            "not_evaluated",
+            "direct_targets_met",
+        }
+    )
 
 
 def _evaluate_candidate(
@@ -246,8 +274,11 @@ def _check_baseline(store: Path, query: OptimizeInput, project: ProjectStore) ->
     for run_id in run_ids:
         root = run_path(store, run_id)
         saved = EngineeringRequest.model_validate_json(read_artifact(root, read_manifest(root), "request"))
-        physical = saved.model_dump(exclude={"name", "frequency_hz"})
-        if physical != query.model.model_dump(exclude={"name", "frequency_hz"}):
+        actual, expected = identify(saved), identify(query.model)
+        if (
+            actual.physical_design_sha256 != expected.physical_design_sha256
+            or actual.sweep_basis_sha256 != expected.sweep_basis_sha256
+        ):
             raise ValueError("Baseline evidence must describe the exact seed geometry, feed and numerical settings")
     evaluation = _evaluate_candidate(store, query, run_ids, project)
     score = objective(query, evaluation)
@@ -331,7 +362,7 @@ def get_optimization(store: Path, run_id: str, project: ProjectStore, *, active:
             raise ValueError("Saved objective disagrees with published numerical evidence")
         result = result.model_copy(update={"best": result.best.model_copy(update={"evaluation": verified.evaluation})})
     if result.stop_reason == "sampled_targets_met" and (
-        result.best is None or not _targets_met(result.best.evaluation)
+        result.best is None or not targets_satisfied(result.best.evaluation)
     ):
         raise ValueError("Target satisfaction requires a complete zero-shortfall candidate")
     if not active and result.stop_reason == "in_progress":
@@ -455,7 +486,7 @@ def optimize(root: Path, *, timeout: int) -> None:
                 run_ids.append(run_id)
             evaluation = _evaluate_candidate(store, query, tuple(run_ids), project)
             score = objective(query, evaluation)
-            satisfied = _targets_met(evaluation)
+            satisfied = targets_satisfied(evaluation)
         except AdmissionError as error:
             if error.code != "SOLVE_BUDGET_EXHAUSTED":
                 raise
@@ -524,7 +555,7 @@ def optimize(root: Path, *, timeout: int) -> None:
     reason: StopReason = "failed"
     try:
         cost(np.asarray(initial, dtype=np.float64))
-        if result.best is not None and _targets_met(result.best.evaluation):
+        if result.best is not None and targets_satisfied(result.best.evaluation):
             raise _SearchStoppedError("sampled_targets_met")
         bounds = [(item.lower, item.upper) for item in query.dimensions]
         population = qmc.scale(

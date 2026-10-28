@@ -37,7 +37,9 @@
 5. 停止后仍有活动、事件缺口或进程残留，按运行时/发布门禁记录故障，不伪造成功终态。
 6. 数据异常先保留一致性副本再操作，见 [备份与恢复](Backup.md)。
 
-天线结果没有完整显示时，先区分服务计算失败与本地导入失败。`import_warning` 表示副本不完整；检查服务原件、当前目录权限及 `import-receipt.json`，不要再次发起求解来修复展示。服务和宿主都不以 `COMPUTED_NOT_VALIDATED` 宣称工程验证完成，具体资源范围见 [MCP 结果适配](../agent-capabilities/mcp/mcp-integration.md#31-天线结果资源适配)。
+天线结果缺失时先查 project_status 和停止原因，区分计算、绘图、交付及本地导入失败。单次结果用 get_result，优化用 get_optimization，候选包用 get_delivery；数值完整而图不全才用 render 补画，不重复求解来修复展示。`import_warning` 表示副本不完整，检查服务原件、当前目录权限和 `import-receipt.json`，冲突时先保留用户修改。
+
+进度不是完成证明，停滞/次数或时限用尽也不等于达标。停止未确认时先核实原编号，不重新提交；配额以独立项目库为准，不从文件数或聊天文字估算。`COMPUTED_NOT_VALIDATED / CANDIDATE_NOT_VALIDATED` 都不是工程验证通过，具体状态与资源见 [MCP 结果适配](../agent-capabilities/mcp/mcp-integration.md#31-天线结果资源适配)。
 
 用户侧连接提示见 [安装与首次使用](../user-guide/Installation.md) 和 [配置指南](../user-guide/Configuration.md)。事件 DTO 以 [API 设计](../design/API.md) 为准。
 

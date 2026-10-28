@@ -10,7 +10,7 @@ import { type ProviderChoice } from '@/config/model-provider-choices'
 
 type PanelMode = 'list' | 'providers' | 'editor'
 
-// The existing model editor keeps the same Gateway requests and credential rules.
+// Keep edits in a draft so endpoint changes cannot reuse a saved service's key.
 export function useModelSettings() {
   const settings = useSettingsStore()
   const mode = ref<PanelMode>('list')
@@ -103,8 +103,7 @@ export function useModelSettings() {
       !Object.values(capacityErrors.value).some(Boolean) &&
       modelCount.value && manualModelId.value.trim().length <= 200 &&
       (!requiresEndpoint.value || draft.baseUrl.trim()) &&
-      (!keyRequired.value || apiKey.value.trim() || (draft.credentialConfigured && !endpointChanged.value)) &&
-      (!endpointChanged.value || apiKey.value.trim()),
+      (!keyRequired.value || apiKey.value.trim() || (draft.credentialConfigured && !endpointChanged.value)),
     ),
   )
   function catalogCapacity(model: string): number | undefined {

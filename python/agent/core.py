@@ -192,13 +192,6 @@ class AgentCore:
             await self._extensions.connect_servers(
                 extension_config.mcp_servers, self._policy.workspace_root, self.observability,
             )
-        except BaseException as exc:
-            try:
-                await self.shutdown()
-            except Exception as cleanup:
-                raise BaseExceptionGroup("Core startup and cleanup failed", [exc, cleanup]) from None
-            raise
-        try:
             self._configured_tool_selection()
             self._langgraph_runtime = await self._create_langgraph_runtime(
                 self._extensions.registry, self._extensions.skills,

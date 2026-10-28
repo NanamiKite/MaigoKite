@@ -295,6 +295,7 @@ DELETE /workspaces/{workspace_id}/models/{model_id}
 POST  /workspaces/{workspace_id}/models/{model_id}/default
 POST  /workspaces/{workspace_id}/models/actions/validate
 POST  /workspaces/{workspace_id}/models/actions/discover
+POST  /workspaces/{workspace_id}/models/actions/batch
 GET   /workspaces/{workspace_id}/credential-references
 POST  /workspaces/{workspace_id}/credential-references
 PUT   /workspaces/{workspace_id}/credential-references/{credential_id}
@@ -406,11 +407,19 @@ Claude 使用 adaptive + effort，Ollama 使用原生 reasoning/think；不自�
 LM Studio 仅原生 API 暴露的 on/off 尚不映射到兼容接口，返回 `native_control_only`；
 未知兼容服务、旧版缺少元数据或未接入的预算型控制返回不可调节，保持服务默认。
 
-模型目录支持多选及手动追加 ID；每个选中模型保存为既有的独立配置，共享本次填写的服务连接信息。前端使用稳定配置 ID，串行调用现有 `PUT models/{model_id}`，避免配置目录的读改写发生并发覆盖；部分失败保留已保存项和草稿，重试更新同一 ID，不承诺跨配置事务。
+模型目录支持多选及手动追加 ID；每个选中模型仍为独立配置。设置页一次提交 `POST models/actions/batch`，不再逐项复制凭证、保存和删除。请求包含 `operation_id`（一次编辑的 UUID）、`expected_revision`（打开编辑页时的目录版本）、`profiles`、`removed_ids` 和可选服务 `api_key`。新配置的 `id` 留空，由后端根据编辑标识及模型 ID 分配稳定标识；已有配置保留原 ID、默认项及独立生成设置。
 
-模型保存请求可携带 `credential_source_id`，由 API 从同工作区、同接口协议、同规范化基础地址的已保存配置复用密钥；来源无效时在写入前拒绝。显式提交 `api_key` 优先，密钥仍按目标模型 ID 存储，不回传前端。此字段不建立新的 Provider 注册表或共享密钥域。
+后端复用现有模型变更锁，先校验整批输入和容量，再保存、最后删除；目录版本不符返回 `409 MODEL_CATALOG_CHANGED`，不写入。GET models、设置默认项及批量响应都携带 `revision`。新增项的密钥只从本批涉及的同工作区、同协议、同规范化地址配置复用，已有独立凭证不被空输入覆盖；明确填写新密钥则应用到本批模型。地址/协议改变仍先撤销旧凭证。
+
+`reuse_credentials` 表示本次编辑是否要求沿用已配置服务密钥，默认 true；无密钥服务由设置页明确提交 false。要求复用但无法取得来源密钥时，在任何写入/删除之前返回错误，不能静默创建无密钥配置再移除旧来源。页面只提交此意图，不选择或复制各模型的凭证；协议/地址改变后不能沿用原服务密钥。
+
+SQLite 与 OS 密钥链不具备共同事务。可预期的部分失败返回实际目录、`saved_ids`、`removed_ids` 和结构化 `error`；成功时 error 为 null。未知程序错误交给 API 安全诊断边界，前端重新读取实际状态但不自动重试写入。只有明确批量回执才能推进草稿版本；丢失响应或其他窗口写入后发生版本冲突，须重新打开编辑页。仍保留最多 32 项及先保存后删除语义：已满时需先删除再新增，不能假装可原子替换满额目录。
+
+旧单模型保存 API 保留 `credential_source_id` 兼容入口；批量入口不接受逐项凭证来源，统一由后端选择。密钥仍按目标模型 ID 存储，不回传前端，也不进入目录版本、普通配置或审计正文。
 
 模型 API 管理工作区的聊天模型配置集合，并保证最多一个默认模型。`models/actions/validate` 使用提交的草稿配置做一次最小模型调用，不保存草稿。`models/actions/discover` 根据模型提供方与基础地址查询服务端模型目录：OpenAI、Anthropic 和兼容端点使用 `/models`，Ollama 使用 `/api/tags`。
+
+连接验证及目录发现仅转换明确的配置、连接、认证及服务响应异常；未知程序错误不再冒充 `ok=false` 或目录不可用，交给统一 API 边界，日志仅记录异常类型与代码位置，不记录第三方异常正文。天线 MCP 资源读取也区分无效/损坏资源与内部错误，并保留脱敏终端边界，避免 MCP SDK 将未知异常原文回传。
 
 目录发现优先使用本次草稿中的 Key。仅当模型提供方与基础地址同已保存配置完全匹配时，才读取该配置的凭证存储引用。结果和敏感凭证都不持久化。目录请求禁用重定向并检查链路本地地址；只有本地端点绕过系统代理，公网兼容服务遵循用户的代理环境。不按端口猜厂商。
 

@@ -2,28 +2,30 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
+import json
 import logging
-import os
-import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+import aiohttp
+import anthropic
+import httpx
+import ollama
+import openai
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field, StrictBool
 
 from agent.api import contracts as dto
+from agent.api.model_profiles import ModelProfiles
 from agent.api.sessions import owner
-from agent.errors import error_location, public_error
+from agent.errors import UserFacingError, error_location, public_error
 from agent.models.discovery import discover_models
 from agent.models.image_generation import IMAGE_SETTING_KEY, ImageSettings
-from agent.models.native_model import normalize_base_url
 from agent.safety import SAFETY_CREDENTIAL_REFERENCE, SAFETY_FORMATS, SAFETY_JEV_LAYOUTS
 
 if TYPE_CHECKING:
     from agent.api.credentials import Credentials
     from agent.core import AgentCore
-    from agent.models.runtime import ChatModelSettings
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,7 @@ class ImageSettingsResponse(BaseModel):
 def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
     router = APIRouter()
     owner_only = [Depends(owner)]
+    profiles = ModelProfiles(core.models, credentials, core.repository)
 
     async def audit(workspace: str, action: str, resource: str, result: str = "success") -> None:
         await core.repository.record_audit(workspace, dto.Principal, action, resource, result, {})
@@ -85,21 +88,10 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
             )
             return ImageSettingsResponse(settings=value, credential_configured=required)
 
-    async def model_value(workspace: str, model: ChatModelSettings) -> dict[str, object]:
-        configured = False
-        if model.id:
-            with contextlib.suppress(dto.APIError):
-                configured = bool(await credentials.model_key(workspace, model))
-        env = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}.get(model.provider, "")
-        return {**model.to_dict(), "credential_configured": configured or bool(os.getenv(env))}
-
-    async def catalog(workspace: str) -> dict[str, object]:
-        models, default = await core.models.list_settings(workspace)
-        return {"models": [await model_value(workspace, item) for item in models], "default_model_id": default}
-
     @router.get("/settings", dependencies=owner_only, response_model=None)
     async def get_settings(workspace_id: str) -> dict[str, object]:
-        return {"models": {"chat": await model_value(workspace_id, await core.models.get_settings(workspace_id))}}
+        value = await profiles.value(workspace_id, await core.models.get_settings(workspace_id))
+        return {"models": {"chat": value.model_dump()}}
 
     @router.patch("/settings", dependencies=owner_only, response_model=None)
     async def update_settings(workspace_id: str, body: dto.SettingsUpdate) -> dict[str, object]:
@@ -108,9 +100,14 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
             value = body.models.chat.model_copy(update={"id": current.id, "is_default": True})
             return {"models": {"chat": await persist_model(workspace_id, value)}}
 
-    @router.get("/models", response_model=None)
-    async def models(workspace_id: str) -> dict[str, object]:
-        return await catalog(workspace_id)
+    @router.get("/models", response_model=dto.ModelCatalogResponse)
+    async def models(workspace_id: str) -> dto.ModelCatalogResponse:
+        async with credentials.model_changes:
+            return await profiles.catalog(workspace_id)
+
+    @router.post("/models/actions/batch", dependencies=owner_only, response_model=dto.ModelBatchResponse)
+    async def update_models(workspace_id: str, body: dto.ModelBatchInput) -> dto.ModelBatchResponse:
+        return await profiles.apply(workspace_id, body)
 
     @router.get("/models/{model_id}/thinking", response_model=None)
     async def thinking(workspace_id: str, model_id: str) -> dict[str, object]:
@@ -128,7 +125,6 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
             return await persist_model(workspace_id, body)
 
     async def persist_model(workspace_id: str, body: dto.ModelInput) -> dict[str, object]:
-        from dataclasses import replace
         settings = body.settings()
         secret = body.api_key
         if not secret and body.credential_source_id:
@@ -137,22 +133,8 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
             )
             if not secret:
                 raise dto.APIError(400, "CREDENTIAL_SOURCE_INVALID", "无法复用此配置的密钥，请确认接口与地址一致。")
-        previous = None
-        if settings.id:
-            with contextlib.suppress(KeyError):
-                previous = await core.models.get_profile(workspace_id, settings.id)
-        else:
-            settings = replace(settings, id="model_" + uuid.uuid4().hex)
-        # Revoke before changing the host; OS cleanup can fail without enabling reuse.
-        if previous is not None and (previous.provider, normalize_base_url(previous.base_url)) != (
-            settings.provider, settings.base_url,
-        ):
-            await credentials.revoke_model(workspace_id, previous)
-        item = await core.models.upsert_settings(workspace_id, settings)
-        if secret:
-            await credentials.save(workspace_id, "model-profile." + item.id, secret)
-        await audit(workspace_id, "model.profile.saved", item.id)
-        return await model_value(workspace_id, item)
+        item = await profiles.persist(workspace_id, settings, secret)
+        return (await profiles.value(workspace_id, item)).model_dump()
 
     @router.post("/models", status_code=201, dependencies=owner_only, response_model=None)
     async def add_model(workspace_id: str, body: dto.ModelInput) -> dict[str, object]:
@@ -165,17 +147,14 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
     @router.delete("/models/{model_id}", status_code=204, dependencies=owner_only, response_model=None)
     async def delete_model(workspace_id: str, model_id: str) -> Response:
         async with credentials.model_changes:
-            profile = await core.models.get_profile(workspace_id, model_id)
-            await credentials.revoke_model(workspace_id, profile)
-            await core.models.delete_settings(workspace_id, model_id)
-            await audit(workspace_id, "model.profile.deleted", model_id)
+            await profiles.remove(workspace_id, model_id)
         return Response(status_code=204)
 
-    @router.post("/models/{model_id}/default", dependencies=owner_only, response_model=None)
-    async def set_default(workspace_id: str, model_id: str) -> dict[str, object]:
+    @router.post("/models/{model_id}/default", dependencies=owner_only, response_model=dto.ModelCatalogResponse)
+    async def set_default(workspace_id: str, model_id: str) -> dto.ModelCatalogResponse:
         async with credentials.model_changes:
             await core.models.set_default(workspace_id, model_id)
-        return await catalog(workspace_id)
+            return await profiles.catalog(workspace_id)
 
     @router.post("/models/actions/validate", dependencies=owner_only, response_model=None)
     async def validate(workspace_id: str, body: dto.ModelValidation) -> dict[str, object]:
@@ -187,7 +166,9 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
             )
             await core.models.validate_connection(body.chat.settings(), key)
             ok, message = True, "connection successful"
-        except Exception as exc:
+        except (UserFacingError, openai.APIError, anthropic.APIError, ollama.ResponseError,
+                httpx.HTTPError, ConnectionError, TimeoutError) as exc:
+            logger.info("Model validation failed: %s", error_location(exc))
             ok, message = False, public_error(exc)
         await audit(
             workspace_id,
@@ -202,7 +183,7 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
         try:
             key = body.api_key or await credentials.profile_key(workspace_id, body.id, body.provider, body.base_url)
             result = await discover_models(body.provider, body.base_url, key)
-        except Exception as exc:
+        except (UserFacingError, aiohttp.ClientError, OSError, json.JSONDecodeError) as exc:
             logger.warning("Model discovery failed: %s", error_location(exc))
             raise dto.APIError(502, "MODEL_DISCOVERY_FAILED", public_error(exc)) from exc
         await audit(workspace_id, "model.catalog.discovered", body.provider)

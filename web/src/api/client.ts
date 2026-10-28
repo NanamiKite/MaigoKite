@@ -17,6 +17,8 @@ import {
   validateQuestionResponse,
   validateQuestionsResponse,
   validateWorkspaceFileResponse,
+  validateModelCatalogResponse,
+  validateModelBatchResponse,
 } from './generated/validators.js'
 import { mockConnect } from './mock'
 import type { ContextUsage, PlanItem } from './events'
@@ -234,6 +236,21 @@ export interface ChatModelProfile extends ChatModelSettings {
   isDefault: boolean
 }
 
+export interface ModelCatalog {
+  models: ChatModelProfile[]
+  defaultModelId: string
+  revision: string
+}
+
+export interface ModelBatchEdit {
+  operationId: string
+  expectedRevision: string
+  profiles: ChatModelProfile[]
+  removedIds: string[]
+  apiKey: string
+  reuseCredentials: boolean
+}
+
 interface ChatModelWire {
   id?: string
   name?: string
@@ -242,7 +259,7 @@ interface ChatModelWire {
   base_url: string
   temperature: number
   max_tokens: number
-  context_window?: number
+  context_window?: number | null
   timeout_seconds: number
   credential_configured?: boolean
   is_default?: boolean
@@ -455,7 +472,7 @@ function chatModelFromWire(value: ChatModelWire): ChatModelSettings {
     maxTokens: value.max_tokens,
     contextWindow:
       Number.isSafeInteger(value.context_window) && (value.context_window ?? 0) > 0
-        ? value.context_window
+        ? (value.context_window ?? undefined)
         : undefined,
     timeoutSeconds: value.timeout_seconds,
     credentialConfigured: value.credential_configured ?? false,
@@ -483,12 +500,22 @@ function chatModelProfileFromWire(value: ChatModelWire): ChatModelProfile {
   }
 }
 
-function chatModelProfileToWire(value: ChatModelProfile): ChatModelWire {
+function chatModelProfileToWire(value: ChatModelProfile): Transport['ModelInput'] {
   return {
     ...chatModelToWire(value),
-    id: value.id || undefined,
+    id: value.id,
     name: value.name,
     is_default: value.isDefault,
+    api_key: '',
+    credential_source_id: '',
+  }
+}
+
+function modelCatalogFromWire(value: Transport['ModelCatalogResponse']): ModelCatalog {
+  return {
+    models: value.models.map(chatModelProfileFromWire),
+    defaultModelId: value.default_model_id,
+    revision: value.revision,
   }
 }
 
@@ -556,13 +583,33 @@ export const api = {
     })
     return chatModelFromWire(body.models.chat)
   },
-  async listChatModels(): Promise<{ models: ChatModelProfile[]; defaultModelId: string }> {
-    const body = await request<{ models: ChatModelWire[]; default_model_id: string }>(
-      `${path}/models`,
+  async listChatModels(): Promise<ModelCatalog> {
+    return modelCatalogFromWire(
+      await request(`${path}/models`, undefined, validateModelCatalogResponse),
+    )
+  },
+  async updateChatModels(edit: ModelBatchEdit) {
+    const input: Transport['ModelBatchInput'] = {
+      operation_id: edit.operationId,
+      expected_revision: edit.expectedRevision,
+      profiles: edit.profiles.map(chatModelProfileToWire),
+      removed_ids: edit.removedIds,
+      api_key: edit.apiKey,
+      reuse_credentials: edit.reuseCredentials,
+    }
+    const body = await request(
+      `${path}/models/actions/batch`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+      validateModelBatchResponse,
     )
     return {
-      models: (body.models || []).map(chatModelProfileFromWire),
-      defaultModelId: body.default_model_id || '',
+      ...modelCatalogFromWire(body),
+      savedIds: body.saved_ids,
+      removedIds: body.removed_ids,
+      error: body.error,
     }
   },
   getModelThinking(modelId: string, signal?: AbortSignal): Promise<ThinkingControl> {
@@ -594,17 +641,13 @@ export const api = {
   deleteChatModel(id: string): Promise<void> {
     return request(`${path}/models/${encodeURIComponent(id)}`, { method: 'DELETE' })
   },
-  async setDefaultChatModel(
-    id: string,
-  ): Promise<{ models: ChatModelProfile[]; defaultModelId: string }> {
-    const body = await request<{ models: ChatModelWire[]; default_model_id: string }>(
+  async setDefaultChatModel(id: string): Promise<ModelCatalog> {
+    const body = await request(
       `${path}/models/${encodeURIComponent(id)}/default`,
       { method: 'POST' },
+      validateModelCatalogResponse,
     )
-    return {
-      models: body.models.map(chatModelProfileFromWire),
-      defaultModelId: body.default_model_id,
-    }
+    return modelCatalogFromWire(body)
   },
   validateChatModel(
     settings: ChatModelSettings | ChatModelProfile,

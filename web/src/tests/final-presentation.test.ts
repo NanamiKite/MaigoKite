@@ -20,7 +20,11 @@ beforeEach(() => {
   mockDialogs()
   vi.spyOn(api, 'getUserPreferences').mockResolvedValue({ assistantName: '小七' })
   vi.spyOn(api, 'getPermissionSettings').mockResolvedValue({ default_mode: 'workspace' })
-  vi.spyOn(api, 'listChatModels').mockResolvedValue({ models: [], defaultModelId: '' })
+  vi.spyOn(api, 'listChatModels').mockResolvedValue({
+    models: [],
+    defaultModelId: '',
+    revision: 'a'.repeat(64),
+  })
   vi.spyOn(api, 'listCredentialReferences').mockResolvedValue([])
 })
 afterEach(() => {

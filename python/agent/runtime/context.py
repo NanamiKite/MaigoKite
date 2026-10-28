@@ -6,7 +6,7 @@ import asyncio
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 from langchain.agents.middleware import AgentMiddleware, SummarizationMiddleware
 from langchain.agents.middleware.summarization import DEFAULT_SUMMARY_PROMPT
@@ -21,8 +21,8 @@ from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately, merge_message_runs
 from langgraph.constants import TAG_NOSTREAM
+from langgraph.runtime import Runtime
 from langgraph.types import Command
-from langgraph.typing import ContextT
 
 from agent.errors import UserFacingError
 from agent.models.context_capacity import (
@@ -36,6 +36,16 @@ from agent.models.usage import message_usage
 from agent.runtime.memory import project_memories
 from agent.runtime.run_context import ChildContext, RunContext
 from agent.structured_output import output_budget_tools
+
+type ProductContext = RunContext | ChildContext | None
+ContextT = TypeVar("ContextT", bound=ProductContext)
+
+
+def _product_context(value: object) -> ProductContext:
+    """Validate the SDK injection once; unknown objects must not disable guards silently."""
+    if value is None or isinstance(value, (RunContext, ChildContext)):
+        return value
+    raise TypeError("Context middleware requires RunContext, ChildContext or None")
 
 
 # The class name is persisted and sent as error_type in compaction/task events.
@@ -122,7 +132,7 @@ def context_payload(model: Any, capacity: ContextCapacity, configured: int) -> d
     }
 
 
-async def _emit(context: object, kind: str, payload: dict[str, Any]) -> None:
+async def _emit(context: ProductContext, kind: str, payload: dict[str, Any]) -> None:
     if isinstance(context, ChildContext):
         # Charge child usage without replacing the parent's context meter or reply.
         if kind.startswith("model."):
@@ -142,7 +152,7 @@ async def _charge_call(context: RunContext | ChildContext | None) -> None:
 
 
 async def _publish_context(
-    context: Any, model: Any, capacity: ContextCapacity, configured: int, used: int, *,
+    context: ProductContext, model: Any, capacity: ContextCapacity, configured: int, used: int, *,
     call_id: str, measurement: str = "estimate", purpose: str = "response",
     memory: dict[str, Any] | None = None,
 ) -> None:
@@ -178,7 +188,7 @@ class _SummaryObservation(AsyncCallbackHandler):
 
     raise_error = True
 
-    def __init__(self, context: Any, input_budget: int, model: Any = None, configured: int = 32000) -> None:
+    def __init__(self, context: ProductContext, input_budget: int, model: Any = None, configured: int = 32000) -> None:
         self.context = context
         self.input_budget = input_budget
         self.model = model
@@ -243,44 +253,45 @@ class SafeSummarizationMiddleware(SummarizationMiddleware):
         self.tools = []  # Do not register the supplied counting-only tools again.
         self.budget_tools = list(tools or [])
 
-    async def abefore_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
-        if getattr(runtime.context, "direct_tool", None) is not None:
+    async def abefore_model(self, state: AgentState[Any], runtime: Runtime[Any]) -> dict[str, Any] | None:
+        context = _product_context(runtime.context)
+        if isinstance(context, RunContext) and context.direct_tool is not None:
             # Explicit commands never need an LLM call, including summarization.
             return None
         # Refresh at every model turn, also after approvals/restarts. Load-time
         # settings can change without changing the model profile or graph key.
-        capacity = await resolve_context_capacity(self.model, getattr(runtime.context, "context_capacity", None))
-        if runtime.context is not None:
-            runtime.context.context_capacity = capacity
+        capacity = await resolve_context_capacity(self.model, context.context_capacity if context is not None else None)
+        if context is not None:
+            context.context_capacity = capacity
         try:
             return await self._compact(state, runtime, capacity)
         except asyncio.CancelledError:
-            await _emit(runtime.context, "context.compaction.skipped", {
+            await _emit(context, "context.compaction.skipped", {
                 "reason": "cancelled", "message": "任务已停止，原始历史未替换。",
             })
             raise
         except Exception as exc:
-            await _emit(runtime.context, "context.compaction.failed", {
+            await _emit(context, "context.compaction.failed", {
                 "error_type": type(exc).__name__,
                 "message": str(exc) if isinstance(exc, ContextBudgetExceeded) else "上下文压缩失败，原始历史未替换。",
                 "reason": getattr(exc, "reason", ""),
-                "model_context_window": (getattr(runtime.context, "context_capacity", None) or capacity).tokens,
+                "model_context_window": (context.context_capacity or capacity).tokens if context else capacity.tokens,
             })
             raise
 
     async def _compact(
-        self, state: Any, runtime: Any, capacity: ContextCapacity, *, force: bool = False,
+        self, state: AgentState[Any], runtime: Runtime[Any], capacity: ContextCapacity, *, force: bool = False,
         system_message: SystemMessage | None = None, request_tools: list[Any] | None = None,
         reason: str = "pressure",
     ) -> dict[str, Any] | None:
         messages = state["messages"]
         systems = [item for item in messages if isinstance(item, SystemMessage)]
         conversation = [item for item in messages if not isinstance(item, SystemMessage)]
-        context = runtime.context
-        enabled = getattr(context, "execution_metadata", {}).get("enabled_tools")
+        context = _product_context(runtime.context)
+        enabled = context.execution_metadata.get("enabled_tools") if context is not None else None
         tools = [tool for tool in self.budget_tools
                  if enabled is None or getattr(tool, "name", "") in {*enabled, "write_todos"}]
-        if getattr(context, "max_subagent_calls", None) == 0:
+        if isinstance(context, RunContext) and context.max_subagent_calls == 0:
             tools = [tool for tool in tools if getattr(tool, "name", "") not in {"delegate", "list_subagent_models"}]
         fixed = [*systems, *([SystemMessage(self.system_prompt)] if self.system_prompt else [])]
         if system_message is not None:
@@ -412,7 +423,7 @@ class SafeSummarizationMiddleware(SummarizationMiddleware):
         # Generation is not a committed replacement. The runtime projects this
         # receipt only after LangGraph's checkpoint contains the summary ID.
         summary.id = summary.id or f"summary_{uuid.uuid4().hex}"
-        if context is not None and hasattr(context, "compaction_receipt"):
+        if isinstance(context, RunContext):
             context.compaction_receipt = (summary.id, receipt)
         return {**update, "messages": [replacements[0], *systems, summary, *retained]}
 
@@ -428,8 +439,12 @@ class ContextBudgetMiddleware(AgentMiddleware[AgentState[object], ContextT]):
         self, request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[str]]],
     ) -> ToolMessage | Command[str]:
-        context = cast("RunContext", request.runtime.context)
-        if request.tool_call["name"] == "delegate" and self.summarizer is not None and context.result_budget is None:
+        context = _product_context(request.runtime.context)
+        if request.tool_call["name"] == "delegate" and self.summarizer is not None:
+            if not isinstance(context, RunContext):
+                raise TypeError("Delegation requires a parent RunContext")
+            if context.result_budget is not None:
+                return await handler(request)
             # Resuming an approval can enter ToolNode without a model call in
             # this process. Recompute estimates from the model configuration;
             # execution history still comes from ToolRuntime's checkpoint state.
@@ -464,6 +479,7 @@ class ContextBudgetMiddleware(AgentMiddleware[AgentState[object], ContextT]):
         """
         if self.summarizer is None:
             return None
+        context = _product_context(request.runtime.context)
         try:
             update = await self.summarizer._compact(
                 request.state, request.runtime, capacity, force=force, reason=reason,
@@ -481,16 +497,16 @@ class ContextBudgetMiddleware(AgentMiddleware[AgentState[object], ContextT]):
                 command=Command(update={**update, "messages": [*update["messages"], *response.result]}),
             )
         except asyncio.CancelledError:
-            if hasattr(request.runtime.context, "compaction_receipt"):
-                cast("RunContext", request.runtime.context).compaction_receipt = None
-            await _emit(request.runtime.context, "context.compaction.skipped", {
+            if isinstance(context, RunContext):
+                context.compaction_receipt = None
+            await _emit(context, "context.compaction.skipped", {
                 "reason": "cancelled", "message": "任务已停止，压缩结果未提交。",
             })
             raise
         except Exception as exc:
-            if hasattr(request.runtime.context, "compaction_receipt"):
-                cast("RunContext", request.runtime.context).compaction_receipt = None
-            await _emit(request.runtime.context, "context.compaction.failed", {
+            if isinstance(context, RunContext):
+                context.compaction_receipt = None
+            await _emit(context, "context.compaction.failed", {
                 "error_type": type(exc).__name__, "reason": getattr(exc, "reason", ""),
                 "message": str(exc) if isinstance(exc, ContextBudgetExceeded)
                            else "上下文压缩或后续请求失败，原始历史未替换。",
@@ -527,13 +543,13 @@ class ContextBudgetMiddleware(AgentMiddleware[AgentState[object], ContextT]):
             messages.insert(0, request.system_message)
         # Historical usage describes the pre-compaction prompt. Scaling this
         # rewritten input by those counters would falsely reject a short summary.
-        context = cast("RunContext | ChildContext | None", request.runtime.context)
+        context = _product_context(request.runtime.context)
         budget_tools = output_budget_tools(request.tools, context)
         estimated = count_tokens_approximately(messages, tools=budget_tools, use_usage_metadata_scaling=False)
-        capacity = getattr(context, "context_capacity", None)
+        capacity = context.context_capacity if context is not None else None
         # Parent compaction has just fetched the window. Children have no
         # summarizer, so resolve their own model rather than inheriting it.
-        if capacity is None or getattr(context, "parent", None) is not None:
+        if capacity is None or isinstance(context, ChildContext):
             capacity = await resolve_context_capacity(request.model, capacity)
             if context is not None:
                 context.context_capacity = capacity
@@ -566,9 +582,9 @@ class ContextBudgetMiddleware(AgentMiddleware[AgentState[object], ContextT]):
                 # overhead beyond the conservative reference-only estimate.
                 projected = request.messages
                 memory.update(included_count=0, ids=[], estimated_tokens=0)
-        if context is not None and hasattr(context, "result_budget"):
+        if isinstance(context, RunContext):
             history = count_tokens_approximately(request.messages, use_usage_metadata_scaling=False)
-            cast("RunContext", context).result_budget = (input_budget, max(0, estimated - history))
+            context.result_budget = (input_budget, max(0, estimated - history))
         call_id = f"call_{uuid.uuid4().hex}"
         await _publish_context(context, request.model, capacity, self.max_tokens, estimated,
                                call_id=call_id, memory=memory)
@@ -595,7 +611,7 @@ class ContextBudgetMiddleware(AgentMiddleware[AgentState[object], ContextT]):
         reserve = _output_reserve(request.model, capacity)
         if field is not None and reserve:
             options[field] = reserve
-        child_limit = getattr(context, "result_token_limit", 0)
+        child_limit = context.result_token_limit if isinstance(context, ChildContext) else 0
         if field is not None and child_limit >= _minimum_output(request.model):
             # Apply the cap to this invocation's copy, not a shared model. A
             # provider thinking minimum must not be silently disabled to fit it.
@@ -623,7 +639,7 @@ class ContextBudgetMiddleware(AgentMiddleware[AgentState[object], ContextT]):
                 # replacement; public Command commits it with the final result.
                 try:
                     compacted = await self._compact_request(
-                        request, handler, getattr(context, "context_capacity", None) or capacity,
+                        request, handler, (context.context_capacity if context is not None else None) or capacity,
                         force=True, reason="provider_overflow",
                     )
                     if compacted is not None:

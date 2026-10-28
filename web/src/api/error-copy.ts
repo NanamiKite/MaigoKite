@@ -4,6 +4,9 @@ import type { components } from './generated/transport'
 export type ErrorParameters = NonNullable<components['schemas']['ErrorDetail']['params']>
 
 const messages: Record<string, { text: string; numbers?: string[] }> = {
+  MODEL_CATALOG_CHANGED: { text: '模型设置已更改，请重新打开编辑页面。' },
+  MODEL_BATCH_INVALID: { text: '模型编辑内容无效，请重新选择模型后保存。' },
+  MODEL_LIMIT: { text: '最多配置 32 个模型，请先移除不再使用的模型。' },
   INVALID_PERMISSION_MODE: { text: '无效的权限模式。' },
   INVALID_RESPONSE_MODE: { text: '无效的响应模式。' },
   INVALID_SOURCE_MESSAGE: { text: '来源消息标识无效。' },

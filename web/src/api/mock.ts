@@ -303,6 +303,8 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
     result = { ok: true, message: '本地预览', model: 'demo' }
   else if (parsed.pathname.includes('/models/actions/discover'))
     result = { models: [{ id: 'demo' }] }
+  else if (parsed.pathname.endsWith('/models/actions/batch'))
+    throw new Error(t('此操作不可用，请重启或更新应用。'))
   else if (parsed.pathname.endsWith('/thinking'))
     result = {
       kind: 'effort',
@@ -312,7 +314,7 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
       reason: '',
     }
   else if (parsed.pathname.endsWith('/models') || parsed.pathname.endsWith('/default'))
-    result = { models: [model], default_model_id: 'demo' }
+    result = { models: [model], default_model_id: 'demo', revision: '0'.repeat(64) }
   else if (parsed.pathname.includes('/models/')) result = { ...model, ...body }
   else if (parsed.pathname.endsWith('/settings')) result = { models: { chat: model } }
   else if (parsed.pathname.includes('/credential-references')) result = { engines: [] }

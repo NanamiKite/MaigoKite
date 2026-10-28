@@ -501,6 +501,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/models/actions/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Update Models */
+        post: operations["update_models_api_v1_workspaces__workspace_id__models_actions_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/models/{model_id}/thinking": {
         parameters: {
             query?: never;
@@ -965,6 +982,23 @@ export interface paths {
         };
         /** Content */
         get: operations["content_api_v1_workspaces__workspace_id__files_content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/files/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download File */
+        get: operations["download_file_api_v1_workspaces__workspace_id__files_download_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1700,6 +1734,53 @@ export interface components {
             /** Messages */
             messages: components["schemas"]["MessageResponse"][];
         };
+        /** ModelBatchInput */
+        ModelBatchInput: {
+            /**
+             * Operation Id
+             * Format: uuid
+             */
+            operation_id: string;
+            /** Expected Revision */
+            expected_revision: string;
+            /** Profiles */
+            profiles?: components["schemas"]["ModelInput"][];
+            /** Removed Ids */
+            removed_ids?: string[];
+            /**
+             * Api Key
+             * @default
+             */
+            api_key: string;
+            /**
+             * Reuse Credentials
+             * @default true
+             */
+            reuse_credentials: boolean;
+        };
+        /** ModelBatchResponse */
+        ModelBatchResponse: {
+            /** Models */
+            models: components["schemas"]["ModelProfileResponse"][];
+            /** Default Model Id */
+            default_model_id: string;
+            /** Revision */
+            revision: string;
+            /** Saved Ids */
+            saved_ids: string[];
+            /** Removed Ids */
+            removed_ids: string[];
+            error?: components["schemas"]["ErrorDetail"] | null;
+        };
+        /** ModelCatalogResponse */
+        ModelCatalogResponse: {
+            /** Models */
+            models: components["schemas"]["ModelProfileResponse"][];
+            /** Default Model Id */
+            default_model_id: string;
+            /** Revision */
+            revision: string;
+        };
         /** ModelInput */
         ModelInput: {
             /**
@@ -1756,6 +1837,55 @@ export interface components {
              * @default
              */
             credential_source_id: string;
+        };
+        /** ModelProfileResponse */
+        ModelProfileResponse: {
+            /**
+             * Id
+             * @default
+             */
+            id: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "openai" | "anthropic" | "openai_compatible" | "ollama";
+            /** Model */
+            model: string;
+            /**
+             * Base Url
+             * @default
+             */
+            base_url: string;
+            /**
+             * Temperature
+             * @default 0.7
+             */
+            temperature: number;
+            /**
+             * Max Tokens
+             * @default 4096
+             */
+            max_tokens: number;
+            /** Context Window */
+            context_window?: number | null;
+            /**
+             * Timeout Seconds
+             * @default 60
+             */
+            timeout_seconds: number;
+            /**
+             * Is Default
+             * @default false
+             */
+            is_default: boolean;
+            /** Credential Configured */
+            credential_configured: boolean;
         };
         /** ModelValidation */
         ModelValidation: {
@@ -3544,7 +3674,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ModelCatalogResponse"];
                 };
             };
             /** @description Default Response */
@@ -3580,6 +3710,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_models_api_v1_workspaces__workspace_id__models_actions_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelBatchInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelBatchResponse"];
                 };
             };
             /** @description Default Response */
@@ -3741,7 +3906,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ModelCatalogResponse"];
                 };
             };
             /** @description Default Response */
@@ -4908,6 +5073,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceFileResponse"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    download_file_api_v1_workspaces__workspace_id__files_download_get: {
+        parameters: {
+            query?: {
+                folder_id?: string;
+                path?: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Default Response */

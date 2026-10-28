@@ -20,3 +20,5 @@ export function validateQuestionResponse(value: unknown): value is components['s
 export function validateImageReference(value: unknown): value is components['schemas']['ImageReference'];
 export function validateImageSettingsResponse(value: unknown): value is components['schemas']['ImageSettingsResponse'];
 export function validateWorkspaceFileResponse(value: unknown): value is components['schemas']['WorkspaceFileResponse'];
+export function validateModelCatalogResponse(value: unknown): value is components['schemas']['ModelCatalogResponse'];
+export function validateModelBatchResponse(value: unknown): value is components['schemas']['ModelBatchResponse'];

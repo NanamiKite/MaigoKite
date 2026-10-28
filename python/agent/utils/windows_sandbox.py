@@ -121,82 +121,84 @@ async def execute(executor: SandboxExecutor, args: list[str], timeout: float, *,
     if executor.workspace_root.drive.startswith("\\\\"):
         raise UserFacingError("Windows 沙箱需要本地工作区，不支持 UNC 共享目录。")
     async with _exclusive(state, timeout):
-        with windows_directory(executor.workspace_root):
-            with tempfile.TemporaryDirectory(prefix="run-", dir=state) as directory:
-                receipt_path = Path(directory) / "receipt.json"
-                resolved = executor._resolve_argv(args)
-                executable = resolved[0]
-                if len(resolved) < 2:
-                    # SRT's public entry takes a command after shell arguments.
-                    # A zero-argument executable can use a literal PS call inside
-                    # the sandbox without adding a fake argument to the target.
-                    resolved = powershell_argv("& '" + executable.replace("'", "''") + "'", "powershell")
-                denied_read, denied_write = await asyncio.to_thread(executor._protected_paths)
-                home = Path.home().resolve()
-                allowed = [str(executor.workspace_root), *executor.windows_read_paths()]
-                # The separate account lacks the caller's default profile ACLs.
-                # Add specific credential denies, not a deny on C:\Users (whose
-                # parent/ancestor ACLs would require admin on every invocation).
-                denied_read.extend(path for path in home.iterdir() if is_sensitive_path(path))
-                denied_read.extend(path for path in (home / ".maigokite", state) if path.exists())
-                def literal(path: str | Path) -> dict[str, Any]:
-                    return {"path": str(path), "literal": True}
+        with (
+            windows_directory(executor.workspace_root),
+            tempfile.TemporaryDirectory(prefix="run-", dir=state) as directory,
+        ):
+            receipt_path = Path(directory) / "receipt.json"
+            resolved = executor._resolve_argv(args)
+            executable = resolved[0]
+            if len(resolved) < 2:
+                # SRT's public entry takes a command after shell arguments.
+                # A zero-argument executable can use a literal PS call inside
+                # the sandbox without adding a fake argument to the target.
+                resolved = powershell_argv("& '" + executable.replace("'", "''") + "'", "powershell")
+            denied_read, denied_write = await asyncio.to_thread(executor._protected_paths)
+            home = Path.home().resolve()
+            allowed = [str(executor.workspace_root), *executor.windows_read_paths()]
+            # The separate account lacks the caller's default profile ACLs.
+            # Add specific credential denies, not a deny on C:\Users (whose
+            # parent/ancestor ACLs would require admin on every invocation).
+            denied_read.extend(path for path in home.iterdir() if is_sensitive_path(path))
+            denied_read.extend(path for path in (home / ".maigokite", state) if path.exists())
+            def literal(path: str | Path) -> dict[str, Any]:
+                return {"path": str(path), "literal": True}
 
-                config = {
-                    "network": {"allowedDomains": ["*"] if executor.allow_network else [],
-                                "deniedDomains": [], "strictAllowlist": True},
-                    "filesystem": {
-                        "allowRead": [literal(path) for path in allowed],
-                        "allowWrite": [literal(executor.workspace_root)] if executor.mode == "workspace" else [],
-                        "denyRead": [literal(path) for path in denied_read],
-                        "denyWrite": [literal(path) for path in denied_write]
-                                     + ([literal(executor.workspace_root)] if executor.mode == "read_only" else []),
-                    },
-                }
-                control_lock = asyncio.Lock()
+            config = {
+                "network": {"allowedDomains": ["*"] if executor.allow_network else [],
+                            "deniedDomains": [], "strictAllowlist": True},
+                "filesystem": {
+                    "allowRead": [literal(path) for path in allowed],
+                    "allowWrite": [literal(executor.workspace_root)] if executor.mode == "workspace" else [],
+                    "denyRead": [literal(path) for path in denied_read],
+                    "denyWrite": [literal(path) for path in denied_write]
+                                 + ([literal(executor.workspace_root)] if executor.mode == "read_only" else []),
+                },
+            }
+            control_lock = asyncio.Lock()
 
-                async def stop(process: asyncio.subprocess.Process) -> None:
-                    if process.returncode is None:
-                        try:
-                            async with control_lock:
-                                try:
-                                    stdin = cast(asyncio.StreamWriter, process.stdin)
-                                    stdin.write(b"stop\n")
-                                    await asyncio.wait_for(stdin.drain(), 5)
-                                except (BrokenPipeError, ConnectionResetError):
-                                    # A normally exiting bridge can close stdin
-                                    # between returncode inspection and write.
-                                    # Its exit and receipt still decide cleanup.
-                                    pass
-                            # Allow SDK ACL revocation and Job close before the
-                            # product's cancellation/timeout can become terminal.
-                            await asyncio.wait_for(asyncio.shield(process.wait()), 90)
-                        except OSError, TimeoutError:
-                            await executor._kill_process_group(process)
-                            await process.wait()
-                            raise UserFacingError(
-                                "Windows 沙箱清理未确认；已停止宿主桥接，请检查沙箱 ACL 恢复状态。"
-                            ) from None
+            async def stop(process: asyncio.subprocess.Process) -> None:
+                if process.returncode is None:
                     try:
-                        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-                    except (OSError, ValueError):
-                        raise UserFacingError("Windows 沙箱未提供退出清理回执，不能确认已安全回收。") from None
-                    if receipt.get("cleanup_complete") is not True:
-                        raise UserFacingError("Windows 沙箱 ACL 清理失败，不能把本次运行报告为成功。")
+                        async with control_lock:
+                            try:
+                                stdin = cast(asyncio.StreamWriter, process.stdin)
+                                stdin.write(b"stop\n")
+                                await asyncio.wait_for(stdin.drain(), 5)
+                            except (BrokenPipeError, ConnectionResetError):
+                                # A normally exiting bridge can close stdin
+                                # between returncode inspection and write.
+                                # Its exit and receipt still decide cleanup.
+                                pass
+                        # Allow SDK ACL revocation and Job close before the
+                        # product's cancellation/timeout can become terminal.
+                        await asyncio.wait_for(asyncio.shield(process.wait()), 90)
+                    except OSError, TimeoutError:
+                        await executor._kill_process_group(process)
+                        await process.wait()
+                        raise UserFacingError(
+                            "Windows 沙箱清理未确认；已停止宿主桥接，请检查沙箱 ACL 恢复状态。"
+                        ) from None
+                try:
+                    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    raise UserFacingError("Windows 沙箱未提供退出清理回执，不能确认已安全回收。") from None
+                if receipt.get("cleanup_complete") is not True:
+                    raise UserFacingError("Windows 沙箱 ACL 清理失败，不能把本次运行报告为成功。")
 
-                payload = json.dumps(
-                    {"argv": resolved, "cwd": str(executor.workdir), "config": config}, ensure_ascii=False
-                )
-                if len(payload.encode("utf-8")) > 1024 * 1024:
-                    raise UserFacingError("Windows 沙箱路径规则过多，请缩小工作区。")
-                environment = bridge_environment()
-                environment["PATH"] = executor._execution_path()
-                result = await executor._capture(
-                    [*bridge, "run", str(receipt_path)], timeout, sandboxed=True, executable=executable,
-                    shell=shell, on_spawn=on_spawn, on_exit=on_exit, env=environment,
-                    stdin_prefix=(payload + "\n").encode("utf-8"), stop=stop,
-                )
-                receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-                if receipt.get("error"):
-                    raise SandboxUnavailableError("Windows 沙箱启动或执行失败，请检查安装状态及目录权限。")
-                return result
+            payload = json.dumps(
+                {"argv": resolved, "cwd": str(executor.workdir), "config": config}, ensure_ascii=False
+            )
+            if len(payload.encode("utf-8")) > 1024 * 1024:
+                raise UserFacingError("Windows 沙箱路径规则过多，请缩小工作区。")
+            environment = bridge_environment()
+            environment["PATH"] = executor._execution_path()
+            result = await executor._capture(
+                [*bridge, "run", str(receipt_path)], timeout, sandboxed=True, executable=executable,
+                shell=shell, on_spawn=on_spawn, on_exit=on_exit, env=environment,
+                stdin_prefix=(payload + "\n").encode("utf-8"), stop=stop,
+            )
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            if receipt.get("error"):
+                raise SandboxUnavailableError("Windows 沙箱启动或执行失败，请检查安装状态及目录权限。")
+            return result

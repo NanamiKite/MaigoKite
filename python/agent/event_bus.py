@@ -16,7 +16,6 @@ EventSink = Callable[[str, Mapping[str, object]], Awaitable[JSONObject]]
 class EventBus:
     def __init__(self) -> None:
         self._subscribers: dict[str, set[EventCallback]] = defaultdict(set)
-        self._lock = asyncio.Lock()
         self._sink: EventSink | None = None
 
     def set_sink(self, sink: EventSink | None) -> None:
@@ -35,8 +34,9 @@ class EventBus:
 
     async def publish(self, event_type: str, payload: Mapping[str, object]) -> None:
         delivered = await self._sink(event_type, payload) if self._sink else event_payload(event_type, payload)
-        async with self._lock:
-            callbacks = tuple(self._subscribers.get(event_type, ())) + tuple(self._subscribers.get("*", ()))
+        # Subscription changes and this snapshot are synchronous on the Core loop.
+        # Callbacks run afterwards and may subscribe/unsubscribe independently.
+        callbacks = tuple(self._subscribers.get(event_type, ())) + tuple(self._subscribers.get("*", ()))
         if callbacks:
             await asyncio.gather(*(cb(event_type, delivered) for cb in callbacks))
 

@@ -1,4 +1,9 @@
 const en: Record<string, string> = {
+  '模型设置已更改，请重新打开编辑页面。': 'Model settings have changed. Please reopen the editor.',
+  '模型编辑内容无效，请重新选择模型后保存。':
+    'Invalid model changes. Please select your models again and save.',
+  '最多配置 32 个模型，请先移除不再使用的模型。':
+    'You can configure up to 32 models. Remove unused models first.',
   下载文件: 'Download file',
   '正在下载…': 'Downloading…',
   '文件超过下载大小限制（48 MiB）。': 'The file exceeds the download limit (48 MiB).',

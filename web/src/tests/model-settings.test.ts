@@ -41,9 +41,7 @@ describe('model settings', () => {
     await wrapper.get('[data-provider-choice="custom"]').trigger('click')
 
     expect((wrapper.get('[data-testid="model-id"]').element as HTMLInputElement).value).toBe('')
-    expect((wrapper.get('[data-testid="base-url"]').element as HTMLInputElement).value).toBe(
-      '',
-    )
+    expect((wrapper.get('[data-testid="base-url"]').element as HTMLInputElement).value).toBe('')
     expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
     expect(store.modelProfiles).toHaveLength(1)
   })
@@ -76,7 +74,7 @@ describe('model settings', () => {
   })
 
   it('requires a new key before moving a credentialed profile to another endpoint', async () => {
-    const save = vi.spyOn(api, 'saveChatModel')
+    const save = vi.spyOn(api, 'updateChatModels')
     const store = useSettingsStore()
     store.modelProfiles = [
       {
@@ -110,12 +108,19 @@ describe('model settings', () => {
 
   it('creates a named profile and keeps the save confirmation', async () => {
     const store = useSettingsStore()
-    let saved: ChatModelProfile | undefined
-    vi.spyOn(api, 'saveChatModel').mockImplementation(async (profile) => {
-      saved = { ...profile, isDefault: true }
-      return saved
+    store.modelRevision = 'a'.repeat(64)
+    vi.spyOn(api, 'updateChatModels').mockImplementation(async (edit) => {
+      const saved = { ...edit.profiles[0], id: 'model_new', isDefault: true }
+      return {
+        models: [saved],
+        defaultModelId: saved.id,
+        revision: 'b'.repeat(64),
+        savedIds: [saved.id],
+        removedIds: [],
+        error: null,
+      }
     })
-    vi.spyOn(api, 'listChatModels').mockImplementation(async () => ({ models: saved ? [saved] : [], defaultModelId: saved?.id || '' }))
+    const list = vi.spyOn(api, 'listChatModels')
     const wrapper = mount(ModelSettingsPanel)
 
     await wrapper.get('[data-testid="add-model"]').trigger('click')
@@ -127,8 +132,23 @@ describe('model settings', () => {
 
     expect(store.success).toContain('Local Qwen')
     expect(store.modelProfiles).toHaveLength(1)
-    expect(api.saveChatModel).toHaveBeenCalledWith(expect.objectContaining({ name: 'Local Qwen', model: 'local-model', provider: 'ollama', baseUrl: 'http://127.0.0.1:11434' }), '', '')
-    expect(api.listChatModels).toHaveBeenCalledTimes(1)
+    expect(api.updateChatModels).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedRevision: 'a'.repeat(64),
+        apiKey: '',
+        removedIds: [],
+        profiles: [
+          expect.objectContaining({
+            id: '',
+            name: 'Local Qwen',
+            model: 'local-model',
+            provider: 'ollama',
+            baseUrl: 'http://127.0.0.1:11434',
+          }),
+        ],
+      }),
+    )
+    expect(list).not.toHaveBeenCalled()
     expect(wrapper.find('form').exists()).toBe(false)
   })
 
@@ -143,7 +163,9 @@ describe('model settings', () => {
   })
 
   it('offers a server-provided catalog without preventing a custom model id', async () => {
-    vi.spyOn(api, 'discoverChatModels').mockResolvedValue([{ id: 'server-model', name: 'My served model' }])
+    vi.spyOn(api, 'discoverChatModels').mockResolvedValue([
+      { id: 'server-model', name: 'My served model' },
+    ])
     const wrapper = mount(ModelSettingsPanel)
     await wrapper.get('[data-testid="add-model"]').trigger('click')
     await wrapper.get('[data-provider-choice="ollama"]').trigger('click')
@@ -190,7 +212,7 @@ describe('model settings', () => {
   })
 
   it('searches and multi-selects in a draft without persisting until save', async () => {
-    const save = vi.spyOn(api, 'saveChatModel')
+    const save = vi.spyOn(api, 'updateChatModels')
     vi.spyOn(api, 'discoverChatModels').mockResolvedValue([
       { id: 'alpha-chat', name: 'Alpha Chat' },
       { id: 'beta-code', name: 'Beta Code' },
@@ -235,7 +257,12 @@ describe('model settings', () => {
 
   it('discards a late discovery response after changing the provider endpoint', async () => {
     let resolve!: (models: { id: string }[]) => void
-    const discover = vi.spyOn(api, 'discoverChatModels').mockImplementation(() => new Promise(done => { resolve = done }))
+    const discover = vi.spyOn(api, 'discoverChatModels').mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done
+        }),
+    )
     const wrapper = mount(ModelSettingsPanel)
     await wrapper.get('[data-testid="add-model"]').trigger('click')
     await wrapper.get('[data-provider-choice="ollama"]').trigger('click')
@@ -251,12 +278,20 @@ describe('model settings', () => {
 
   it('does not restore stale connection feedback when an in-flight test completes', async () => {
     let resolve!: (result: { ok: boolean; message: string; model: string }) => void
-    vi.spyOn(api, 'validateChatModel').mockImplementation(() => new Promise(done => { resolve = done }))
+    vi.spyOn(api, 'validateChatModel').mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done
+        }),
+    )
     const wrapper = mount(ModelSettingsPanel)
     await wrapper.get('[data-testid="add-model"]').trigger('click')
     await wrapper.get('[data-provider-choice="ollama"]').trigger('click')
     await wrapper.get('[data-testid="model-id"]').setValue('old-model')
-    await wrapper.findAll('button').find(button => button.text() === '测试连接')!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '测试连接')!
+      .trigger('click')
     expect(api.validateChatModel).toHaveBeenCalledTimes(1)
     await wrapper.get('[data-testid="model-id"]').setValue('new-model')
     resolve({ ok: true, message: 'OK', model: 'old-model' })

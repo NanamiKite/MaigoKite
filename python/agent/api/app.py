@@ -244,7 +244,7 @@ def create_app(core: AgentCore, web_dir: Path | None = None) -> FastAPI:
         if isinstance(error, UserFacingError):
             code = error.code or code
             params = error.params
-        logger.warning("API operation failed: %s (%s)", code, type(error).__name__)
+        logger.warning("API operation failed: %s (%s)", code, error_location(error))
         body = ErrorResponse(error=ErrorDetail(code=code, message=message, params=params))
         return JSONResponse(body.model_dump(), status_code=status)
 

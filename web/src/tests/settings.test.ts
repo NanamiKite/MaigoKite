@@ -26,7 +26,9 @@ describe('settings store', () => {
 
   it('loads and saves the per-user assistant name', async () => {
     vi.spyOn(api, 'getUserPreferences').mockResolvedValue({ assistantName: '小七' })
-    const update = vi.spyOn(api, 'updateUserPreferences').mockResolvedValue({ assistantName: '小七 Agent' })
+    const update = vi
+      .spyOn(api, 'updateUserPreferences')
+      .mockResolvedValue({ assistantName: '小七 Agent' })
     const store = useSettingsStore()
 
     await store.loadPreferences()
@@ -40,8 +42,17 @@ describe('settings store', () => {
   })
 
   it('loads persisted model settings from the application service', async () => {
-    const profile: ChatModelProfile = { ...localSettings, id: 'model_local', name: 'Local', isDefault: true }
-    vi.spyOn(api, 'listChatModels').mockResolvedValue({ models: [profile], defaultModelId: profile.id })
+    const profile: ChatModelProfile = {
+      ...localSettings,
+      id: 'model_local',
+      name: 'Local',
+      isDefault: true,
+    }
+    vi.spyOn(api, 'listChatModels').mockResolvedValue({
+      models: [profile],
+      defaultModelId: profile.id,
+      revision: 'a'.repeat(64),
+    })
     vi.spyOn(api, 'listCredentialReferences').mockResolvedValue([])
     const store = useSettingsStore()
 
@@ -62,20 +73,40 @@ describe('settings store', () => {
       baseUrl: '',
       isDefault: true,
     }
-    const save = vi.spyOn(api, 'saveChatModel').mockResolvedValue({ ...cloudSettings, credentialConfigured: true })
+    const save = vi.spyOn(api, 'updateChatModels').mockResolvedValue({
+      models: [{ ...cloudSettings, credentialConfigured: true }],
+      defaultModelId: cloudSettings.id,
+      revision: 'b'.repeat(64),
+      savedIds: [cloudSettings.id],
+      removedIds: [],
+      error: null,
+    })
     const store = useSettingsStore()
 
-    const saved = await store.saveModelProfile(cloudSettings, 'secret-key')
+    const edit = {
+      operationId: crypto.randomUUID(),
+      expectedRevision: 'a'.repeat(64),
+      profiles: [cloudSettings],
+      apiKey: 'secret-key',
+      reuseCredentials: false,
+      removedIds: [],
+    }
+    const saved = await store.applyModelEdit(edit)
 
-    expect(saved?.id).toBe('model_cloud')
-    expect(save).toHaveBeenCalledWith(cloudSettings, 'secret-key')
+    expect(saved.ok).toBe(true)
+    expect(store.modelProfiles[0].id).toBe('model_cloud')
+    expect(save).toHaveBeenCalledWith(edit)
     expect(store.success).toContain('已保存')
   })
 
   it('presents settings without release phases or the internal project name', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    vi.spyOn(api, 'listChatModels').mockResolvedValue({ models: [], defaultModelId: '' })
+    vi.spyOn(api, 'listChatModels').mockResolvedValue({
+      models: [],
+      defaultModelId: '',
+      revision: 'a'.repeat(64),
+    })
     vi.spyOn(api, 'listCredentialReferences').mockResolvedValue([])
     vi.spyOn(api, 'getUserPreferences').mockResolvedValue({ assistantName: '小七' })
     vi.spyOn(api, 'getPermissionSettings').mockResolvedValue({ default_mode: 'workspace' })
@@ -83,7 +114,9 @@ describe('settings store', () => {
 
     // This legacy assembly checks the name form; the independent search widget
     // has its own keyboard/focus coverage in final-presentation.test.ts.
-    const wrapper = mount(Settings, { global: { plugins: [pinia, router], stubs: { SettingsSearch: true } } })
+    const wrapper = mount(Settings, {
+      global: { plugins: [pinia, router], stubs: { SettingsSearch: true } },
+    })
     await flushPromises()
 
     for (const label of ['外观与称呼', '模型', '工具', '权限', '工作区'])

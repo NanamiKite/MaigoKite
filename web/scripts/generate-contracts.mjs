@@ -43,6 +43,8 @@ const names = [
   'ImageReference',
   'ImageSettingsResponse',
   'WorkspaceFileResponse',
+  'ModelCatalogResponse',
+  'ModelBatchResponse',
 ]
 const ajv = new Ajv2020({
   strict: false,

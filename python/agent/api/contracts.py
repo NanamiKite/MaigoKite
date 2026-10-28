@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
@@ -138,17 +139,21 @@ class JobInput(Input):
     eof: StrictBool = False
 
 
-class ModelInput(Input):
+class ModelFields(Input):
     id: str = Field(default="", max_length=86)
     name: str = Field(default="", max_length=80)
     provider: Literal["openai", "anthropic", "openai_compatible", "ollama"]
-    model: str = Field(min_length=1, max_length=200)
+    model: str = Field(max_length=200)
     base_url: str = Field(default="", max_length=2048)
     temperature: float = Field(default=0.7, ge=0, le=2)
     max_tokens: int = Field(default=4096, ge=1, le=65536)
     context_window: int | None = Field(default=None, ge=0, le=9007199254740991)
     timeout_seconds: int = Field(default=60, ge=1, le=600)
     is_default: StrictBool = False
+
+
+class ModelInput(ModelFields):
+    model: str = Field(min_length=1, max_length=200)
     api_key: str = Field(default="", max_length=8192, repr=False)
     credential_source_id: str = Field(default="", max_length=86)
 
@@ -157,6 +162,33 @@ class ModelInput(Input):
         result = ChatModelSettings.from_dict(self.model_dump(exclude={"api_key", "credential_source_id"}))
         result.validate()
         return result
+
+
+class ModelProfileResponse(ModelFields):
+    credential_configured: bool
+
+
+class ModelCatalogResponse(BaseModel):
+    models: list[ModelProfileResponse]
+    default_model_id: str
+    revision: str
+
+
+class ModelBatchInput(Input):
+    operation_id: UUID
+    expected_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    profiles: list[ModelInput] = Field(default_factory=list, max_length=32)
+    removed_ids: list[Annotated[str, Field(pattern=r"^model_[A-Za-z0-9_-]{1,80}$")]] = Field(
+        default_factory=list, max_length=32,
+    )
+    api_key: str = Field(default="", max_length=8192, repr=False)
+    reuse_credentials: StrictBool = True
+
+
+class ModelBatchResponse(ModelCatalogResponse):
+    saved_ids: list[str]
+    removed_ids: list[str]
+    error: ErrorDetail | None = None
 
 
 class ModelValidation(Input):

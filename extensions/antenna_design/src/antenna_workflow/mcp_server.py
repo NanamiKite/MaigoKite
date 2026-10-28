@@ -24,6 +24,7 @@ import mcp.types as types
 from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.stdio import stdio_server
+from mcp.shared.exceptions import McpError
 from pydantic import AnyUrl, Field, JsonValue, ValidationError
 
 from .artifacts import (
@@ -1001,10 +1002,28 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
                 mime = PUBLIC_ARTIFACTS[artifact_id][1]
             content = data if mime in {"image/png", "application/zip"} else data.decode("utf-8")
             return [ReadResourceContents(content=content, mime_type=mime)]
-        except Exception:
+        except (ArtifactUnavailableError, DeliveryError, OSError, UnicodeError, ValidationError) as error:
             raise ValueError(
                 "Resource unavailable: only intact, completed, allowlisted artifacts can be read."
-            ) from None
+            ) from error
+        except Exception as error:
+            # The SDK otherwise sends str(error) to its caller. Log only the
+            # origin, never artifact contents, host paths or arbitrary arguments.
+            trace = error.__traceback__
+            while trace is not None and trace.tb_next is not None:
+                trace = trace.tb_next
+            logger.error(
+                "Resource read failed: %s at %s:%s",
+                type(error).__name__,
+                Path(trace.tb_frame.f_code.co_filename).name if trace is not None else "unknown",
+                trace.tb_lineno if trace is not None else 0,
+            )
+            raise McpError(
+                types.ErrorData(
+                    code=types.INTERNAL_ERROR,
+                    message="Internal resource read failure.",
+                )
+            ) from error
 
     # MCP 1.30 omits return annotations on these registration decorators; handlers remain fully typed.
     server.list_tools()(list_tools)  # type: ignore[no-untyped-call]

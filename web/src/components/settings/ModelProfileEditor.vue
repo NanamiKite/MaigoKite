@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, toRefs, type UnwrapNestedRefs } from 'vue'
+import { computed, onBeforeUnmount, ref, toRefs, type UnwrapNestedRefs } from 'vue'
 import type { useModelSettings } from '@/composables/useModelSettings'
 import { MODEL_PROVIDERS, COMPATIBLE_PROVIDER_PRESETS } from '@/config/model-providers'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import ModelSelectionField from './ModelSelectionField.vue'
 import InkSelect from '@/components/common/InkSelect.vue'
+import { t } from '@/i18n'
 const props = defineProps<{ editor: UnwrapNestedRefs<ReturnType<typeof useModelSettings>> }>()
 const emit = defineEmits<{ result: [ok: boolean, message: string] }>()
 const copied = ref(false),
@@ -74,6 +75,20 @@ const {
   handlePresetChange,
   handleProtocolChange,
 } = toRefs(props.editor)
+const needsNewKey = computed(
+  () => endpointChanged.value && keyRequired.value && !apiKey.value.trim(),
+)
+const protocolOptions = [
+  { value: 'openai_compatible', label: 'OpenAI · Chat Completions' },
+  { value: 'anthropic', label: 'Anthropic · Messages' },
+]
+const providerOptions = computed(() =>
+  MODEL_PROVIDERS.map((item) => ({ value: item.id, label: t(item.name) })),
+)
+const presetOptions = computed(() => [
+  { value: '', label: t('自定义地址') },
+  ...COMPATIBLE_PROVIDER_PRESETS.map((item) => ({ value: item.id, label: t(item.name) })),
+])
 </script>
 
 <template>
@@ -94,15 +109,19 @@ const {
         <span
           class="provider-mark"
           :class="draft.provider"
-        >{{
-          customService ? '+' : compatiblePreset?.monogram || provider.monogram
-        }}</span>
-        <span><small>{{ draft.id ? $t('编辑模型服务') : $t('添加模型服务') }}</small>
-          <h3>{{ displayProviderName }}</h3></span>
+        >
+          {{ customService ? '+' : compatiblePreset?.monogram || provider.monogram }}
+        </span>
+        <span>
+          <small>{{ draft.id ? $t('编辑模型服务') : $t('添加模型服务') }}</small>
+          <h3>{{ displayProviderName }}</h3>
+        </span>
         <i
           v-if="draft.isDefault"
           class="default-pill"
-        >{{ $t('默认') }}</i>
+        >
+          {{ $t('默认') }}
+        </i>
       </div>
     </header>
 
@@ -111,13 +130,16 @@ const {
       :disabled="settings.saving"
     >
       <label class="form-field">
-        <span>{{ $t('服务名称') }}<b>{{ $t('必填') }}</b></span>
+        <span>
+          {{ $t('服务名称') }}
+          <b>{{ $t('必填') }}</b>
+        </span>
         <input
           v-model.trim="draft.name"
           data-testid="profile-name"
           maxlength="80"
           :placeholder="$t('服务名称')"
-        >
+        />
       </label>
 
       <label
@@ -129,7 +151,7 @@ const {
           data-testid="relay-protocol"
           :value="draft.provider"
           :disabled="settings.saving"
-          :options="[{ value: 'openai_compatible', label: 'OpenAI · Chat Completions' }, { value: 'anthropic', label: 'Anthropic · Messages' }]"
+          :options="protocolOptions"
           @change="handleProtocolChange"
         />
       </label>
@@ -138,8 +160,10 @@ const {
         class="form-field"
         data-settings-field="model-base-url"
       >
-        <label for="model-base-url">{{ customService ? $t('中转站 / 网关地址') : $t(provider.baseUrlLabel) }}
-          <b v-if="requiresEndpoint">{{ $t('必填') }}</b></label>
+        <label for="model-base-url">
+          {{ customService ? $t('中转站 / 网关地址') : $t(provider.baseUrlLabel) }}
+          <b v-if="requiresEndpoint">{{ $t('必填') }}</b>
+        </label>
         <input
           id="model-base-url"
           v-model.trim="draft.baseUrl"
@@ -153,14 +177,18 @@ const {
                 : 'https://gateway.example/v1'
               : compatiblePreset?.baseUrl || $t(provider.baseUrlPlaceholder)
           "
-        >
-        <small>{{ endpointHelp }}
+        />
+        <small>
+          {{ endpointHelp }}
           <a
             v-if="compatiblePreset?.docsUrl && !customService"
             :href="compatiblePreset.docsUrl"
             target="_blank"
             rel="noopener noreferrer"
-          >{{ $t('查看服务文档 ↗') }}</a></small>
+          >
+            {{ $t('查看服务文档 ↗') }}
+          </a>
+        </small>
       </div>
 
       <label
@@ -168,19 +196,23 @@ const {
         class="form-field"
         data-settings-field="model-api-key"
       >
-        <span>API Key <b>{{ keyRequired ? $t('必填') : $t('按需') }}</b></span>
+        <span>
+          API Key
+          <b>{{ keyRequired ? $t('必填') : $t('按需') }}</b>
+        </span>
         <span class="secret">
           <input
             v-model="apiKey"
             data-testid="api-key"
             :type="revealKey ? 'text' : 'password'"
             autocomplete="new-password"
+            :aria-describedby="needsNewKey ? 'model-key-warning' : undefined"
             :placeholder="
               draft.credentialConfigured && !endpointChanged
                 ? $t('已配置；留空继续使用')
                 : $t('粘贴 API Key')
             "
-          >
+          />
           <button
             type="button"
             :aria-label="revealKey ? $t('隐藏 API Key') : $t('显示 API Key')"
@@ -206,15 +238,30 @@ const {
         <small
           v-if="copied"
           role="status"
-        >{{ $t('已复制') }}</small>
+        >
+          {{ $t('已复制') }}
+        </small>
         <small
           v-if="copyError"
           role="alert"
-        >{{ $t(copyError) }}</small>
+        >
+          {{ $t(copyError) }}
+        </small>
+        <small
+          v-if="needsNewKey"
+          id="model-key-warning"
+          class="warning"
+          role="status"
+        >
+          {{ $t('服务地址或接口已更换，请重新填写 API Key。') }}
+        </small>
         <small
           v-if="draft.credentialConfigured && !endpointChanged"
           class="credential-confirmed"
-        ><i />{{ $t('密钥已保存') }}</small>
+        >
+          <i />
+          {{ $t('密钥已保存') }}
+        </small>
       </label>
 
       <ModelSelectionField :editor="editor" />
@@ -224,7 +271,9 @@ const {
         class="custom-settings"
       >
         <summary>
-          <span><strong>{{ $t('自定义设置') }}</strong></span>
+          <span>
+            <strong>{{ $t('自定义设置') }}</strong>
+          </span>
           <i>›</i>
         </summary>
         <div class="custom-settings-body">
@@ -237,7 +286,7 @@ const {
               data-testid="provider-type"
               :value="draft.provider"
               :disabled="settings.saving"
-              :options="MODEL_PROVIDERS.map(item => ({ value: item.id, label: $t(item.name) }))"
+              :options="providerOptions"
               @change="handleProviderChange"
             />
           </label>
@@ -250,7 +299,7 @@ const {
               data-testid="preset-select"
               :value="compatiblePreset?.id || ''"
               :disabled="settings.saving"
-              :options="[{ value: '', label: $t('自定义地址') }, ...COMPATIBLE_PROVIDER_PRESETS.map(item => ({ value: item.id, label: $t(item.name) }))]"
+              :options="presetOptions"
               @change="handlePresetChange"
             />
           </label>
@@ -265,9 +314,8 @@ const {
         <IconSymbol
           :name="settings.validation.ok ? 'check' : 'alert'"
           :size="15"
-        />{{
-          settings.validation.message
-        }}
+        />
+        {{ settings.validation.message }}
       </p>
     </fieldset>
 

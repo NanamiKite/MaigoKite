@@ -7,6 +7,13 @@
 
 ## 尚未发布
 
+### 2026-10-28 模型凭证提示与指令菜单回归修复
+
+- 恢复更换模型服务地址或接口后重新填写 API Key 的就地提示，沿用原有凭证复用限制与保存校验；将选项表达式整理为命名数据，修正 ModelProfileEditor 的 Prettier 格式问题。
+- `/` 指令选择后的关闭继续由父组件更新草稿驱动，`+` 菜单保留自身关闭状态，恢复 Tab / Alt 数字键选择与 Esc 优先关闭菜单的契约。
+- 按用户授权执行 `npm run test:run -- src/tests/model-settings.test.ts src/tests/stage3b-presentation.test.ts`：2 个文件、31 项通过，0 失败；未修改测试断言、夹具或检查规则。全量 `npm run lint`、两处修改组件的 Prettier 检查、`vue-tsc --noEmit -p tsconfig.json --incremental false` 和 `npm run build:web` 均通过。
+- 未运行前端全量测试、远程 CI 或 GUI；Sass legacy-js-api 弃用警告仍在。未操作 Git、未启动客户端或后端。本记录不将此前静态检查通过等同于行为回归通过。
+
 ### 2026-10-28 输入区附件与操作菜单
 
 - 补齐运行、待处理、模型、权限、工具、子 Agent、用量、扩展和快捷键入口；`+` 菜单增加独立搜索，长列表可滚动，未配置模型时仍可进入设置。Skill 从已加载目录动态读取，选中后加入草稿、不自动发送；读取失败可重试，关闭菜单取消请求。原有指令保留，不添加无对应能力的手动压缩等按钮。

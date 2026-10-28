@@ -52,8 +52,9 @@ function listId() {
 }
 function chooseCommand(item: SlashCommand) {
   if (item.disabled) return
-  if (!launched.value && slashQuery.value !== undefined) emit('update:modelValue', '')
-  closeMenu()
+  // Typed commands follow the parent's draft; only the + menu owns its open state.
+  if (launched.value) closeMenu()
+  else if (slashQuery.value !== undefined) emit('update:modelValue', '')
   textarea.value?.focus({ preventScroll: true })
   emit('command', item)
 }

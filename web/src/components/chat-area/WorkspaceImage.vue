@@ -6,7 +6,7 @@ import { useUIStore } from '@/stores/ui'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { t } from '@/i18n'
 
-const props = defineProps<{ image: ImageReference }>()
+const props = defineProps<{ image: ImageReference; compact?: boolean }>()
 const container = ref<HTMLElement | null>(null),
   url = ref(''),
   error = ref(''),
@@ -66,6 +66,7 @@ onBeforeUnmount(() => {
   <figure
     ref="container"
     class="workspace-image"
+    :class="{ compact }"
   >
     <button
       type="button"
@@ -82,7 +83,7 @@ onBeforeUnmount(() => {
       />
       <span v-else>{{ busy ? $t('正在读取图片…') : $t('打开图片文件') }}</span>
     </button>
-    <figcaption>
+    <figcaption v-if="!compact">
       <button
         type="button"
         @click="open"
@@ -132,5 +133,33 @@ figcaption {
 }
 p {
   font-size: var(--text-xs);
+}
+.workspace-image.compact {
+  margin: 0;
+  width: 100%;
+}
+.compact .image-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  height: var(--attachment-thumbnail-size);
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: var(--transparent);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+}
+.compact img {
+  width: 100%;
+  height: var(--attachment-thumbnail-size);
+  object-fit: cover;
+}
+.compact p {
+  margin: var(--space-2);
+  overflow-wrap: anywhere;
 }
 </style>

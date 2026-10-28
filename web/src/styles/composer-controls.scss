@@ -19,7 +19,7 @@
 .control-spacer {
   flex: 1;
 }
-.reference-button {
+.add-button {
   @include mixins.interactive-row;
   padding: 0;
   width: var(--size-28);
@@ -27,6 +27,13 @@
   border: 0;
   background: var(--transparent);
   color: var(--ink-2);
+  display: grid;
+  place-content: center;
+  border-radius: var(--radius-sm);
+}
+.add-button[aria-expanded='true'] {
+  background: var(--accent-selected);
+  color: var(--accent);
 }
 .send-button {
   width: var(--preview-button-size);

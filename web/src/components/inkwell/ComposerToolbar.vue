@@ -18,12 +18,14 @@ const props = withDefaults(
       busy: boolean
       hasDraft: boolean
       guideDisabled: boolean
+      commandsOpen?: boolean
+      commandsId?: string
     }
   >(),
-  composerDefaults,
+  { ...composerDefaults, commandsId: undefined },
 )
 const emit = defineEmits<{
-  (event: 'reference' | 'cancel'): void
+  (event: 'commands' | 'cancel'): void
   (event: 'send', later?: boolean): void
   (event: 'mode', value: 'ask' | 'plan' | 'auto'): void
   (event: 'model-change', value: string): void
@@ -35,11 +37,14 @@ const menuOpen = ref(false),
   menu = ref<HTMLElement | null>(null)
 const session = useSessionStore()
 const ui = useUIStore()
-const sendShortcut = computed(() =>
-  ui.appearance.enterBehavior === 'send' ? 'Enter' : 'Alt+S',
-)
+const sendShortcut = computed(() => (ui.appearance.enterBehavior === 'send' ? 'Enter' : 'Alt+S'))
 const confirmFullAccess = ref(false)
-watch(() => [props.sessionId, props.permissionMode], () => { confirmFullAccess.value = false })
+watch(
+  () => [props.sessionId, props.permissionMode],
+  () => {
+    confirmFullAccess.value = false
+  },
+)
 function choosePermission(event: Event) {
   const select = event.target as HTMLSelectElement
   const value = select.value as PermissionMode
@@ -61,6 +66,10 @@ function closeMenu() {
   menuOpen.value = false
   trigger.value?.focus()
   return true
+}
+function openCommands() {
+  closeMenu()
+  emit('commands')
 }
 async function toggleMenu() {
   menuOpen.value = !menuOpen.value
@@ -94,12 +103,18 @@ defineExpose({ closeMenu })
 <template>
   <div class="composer-controls">
     <button
-      class="reference-button"
-      :aria-label="$t('引用文件、会话或记忆')"
-      @click="emit('reference')"
+      class="add-button"
+      type="button"
+      :aria-label="$t('添加与操作')"
+      :title="$t('添加与操作')"
+      aria-haspopup="listbox"
+      :aria-expanded="commandsOpen || false"
+      :aria-controls="commandsOpen ? commandsId : undefined"
+      :disabled="isSubmitting"
+      @click="openCommands"
     >
       <IconSymbol
-        name="at"
+        name="plus"
         :size="16"
       />
     </button>
@@ -130,8 +145,12 @@ defineExpose({ closeMenu })
       :options="[
         { value: 'read_only', label: $t('只读') },
         { value: 'workspace', label: $t('工作区') },
-        ...(['full_access', 'workspace_auto'].includes(permissionMode) ? [{ value: permissionMode, label: $t('受限自动'), disabled: true }] : []),
-        ...(session.capabilities.permission_boundary_v2 || permissionMode === 'danger_full_access' ? [{ value: 'danger_full_access', label: $t('完全访问') }] : []),
+        ...(['full_access', 'workspace_auto'].includes(permissionMode)
+          ? [{ value: permissionMode, label: $t('受限自动'), disabled: true }]
+          : []),
+        ...(session.capabilities.permission_boundary_v2 || permissionMode === 'danger_full_access'
+          ? [{ value: 'danger_full_access', label: $t('完全访问') }]
+          : []),
       ]"
       :aria-label="$t('执行权限')"
       :title="$t('权限调整从下一个尚未开始的操作生效')"
@@ -142,7 +161,9 @@ defineExpose({ closeMenu })
       class="permission-confirm"
       role="alert"
     >
-      <span>{{ $t('完全访问会在本机执行命令、访问工作区外文件和网络，不再逐项审批。是否开启？') }}</span>
+      <span>
+        {{ $t('完全访问会在本机执行命令、访问工作区外文件和网络，不再逐项审批。是否开启？') }}
+      </span>
       <button
         class="danger-button"
         :disabled="isSubmitting"
@@ -168,7 +189,8 @@ defineExpose({ closeMenu })
       <Pulse
         v-if="isStopping"
         state="acting"
-      /><IconSymbol
+      />
+      <IconSymbol
         v-else
         name="stop"
         :size="15"
@@ -186,7 +208,8 @@ defineExpose({ closeMenu })
       <Pulse
         v-if="busy"
         state="acting"
-      /><IconSymbol
+      />
+      <IconSymbol
         v-else
         :name="isSending ? 'clock' : 'send'"
         :size="15"
@@ -220,7 +243,8 @@ defineExpose({ closeMenu })
           :disabled="busy || !hasDraft"
           @click="send(true)"
         >
-          {{ $t('加入队列') }}<small>{{ sendShortcut }}</small>
+          {{ $t('加入队列') }}
+          <small>{{ sendShortcut }}</small>
         </button>
         <button
           :disabled="busy || guideDisabled || !hasDraft"
@@ -245,5 +269,7 @@ defineExpose({ closeMenu })
   border: var(--hairline) solid var(--seal);
   font-size: var(--text-xs);
 }
-.permission-confirm span { flex-basis: 100%; }
+.permission-confirm span {
+  flex-basis: 100%;
+}
 </style>

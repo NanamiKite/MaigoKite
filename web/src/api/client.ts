@@ -745,8 +745,8 @@ export const api = {
     const body = await request<{ servers: MCPServerStatus[] }>(`${path}/mcp-servers`)
     return body.servers || []
   },
-  async listSkills(): Promise<InstalledSkill[]> {
-    const body = await request<{ skills: InstalledSkill[] }>(`${path}/skills`)
+  async listSkills(signal?: AbortSignal): Promise<InstalledSkill[]> {
+    const body = await request<{ skills: InstalledSkill[] }>(`${path}/skills`, { signal })
     return body.skills || []
   },
   getExtensions(): Promise<ExtensionSettings> {

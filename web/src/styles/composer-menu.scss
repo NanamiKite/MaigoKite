@@ -53,6 +53,68 @@ code {
   font-family: var(--font-mono);
   color: var(--ink-2);
 }
+.command-group {
+  padding: var(--space-3) var(--size-10) var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--ink-2);
+}
+.command-group:not(:first-child) {
+  border-top: var(--hairline) solid var(--rule);
+  margin-top: var(--space-2);
+}
+.slash-menu .command-copy {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: var(--space-1);
+  white-space: normal;
+}
+.slash-menu code {
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-inline-start: auto;
+  font-size: var(--text-xs);
+}
+.slash-menu {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.command-results {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.command-search {
+  flex: none;
+  width: 100%;
+  border: 0;
+  border-bottom: var(--hairline) solid var(--rule);
+  border-radius: 0;
+  padding: var(--space-4);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: var(--text-sm);
+}
+.command-status {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: var(--space-3);
+}
+.command-status button {
+  @include mixins.text-action;
+  flex: none;
+  width: auto;
+}
+.slash-menu [aria-disabled='true'] {
+  cursor: default;
+  color: var(--ink-3);
+}
 p {
   margin: var(--size-10);
   color: var(--ink-2);

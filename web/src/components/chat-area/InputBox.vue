@@ -2,14 +2,12 @@
 import { vDeskPaper } from '@/utils/desk-paper'
 import { t } from '@/i18n'
 import { computed, nextTick, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { useUIStore } from '@/stores/ui'
 import { useMentions } from '@/composables/useMentions'
+import { useComposerCommands } from '@/composables/useComposerCommands'
 import { useComposerKeyboard } from '@/composables/useComposerKeyboard'
 import { useChatDraft } from '@/composables/useChatDraft'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { Mention } from '@/components/inkwell/MentionMenu.vue'
-import type { SlashCommand } from '@/components/inkwell/SlashMenu.vue'
 import {
   composerDefaults,
   type ComposerProps,
@@ -34,6 +32,9 @@ const submitting = ref(false),
   submitError = ref('')
 const images = ref<ImageReference[]>([]),
   uploading = ref(false)
+const attachments = ref<InstanceType<typeof ImageAttachments> | null>(null)
+const commandsOpen = ref(false)
+const attachmentsReady = computed(() => !attachments.value?.hasPending)
 const busy = computed(() => props.isSubmitting || submitting.value || uploading.value)
 const guideDisabled = computed(() => Boolean(props.waiting || props.guideReason))
 const showGuideHelp = ref(false)
@@ -44,23 +45,19 @@ const draftKey = computed(() => props.sessionId || 'draft:' + workspace.selected
 const draftCache = useChatDraft(draftKey, inputValue, images, mode, () =>
   props.permissionMode === 'read_only' ? 'ask' : 'auto',
 )
-const ui = useUIStore(),
-  router = useRouter(),
-  mentions = useMentions(inputValue)
-const commands: SlashCommand[] = [
-  { id: 'new', label: '新页' },
-  { id: 'memory', label: '它记得' },
-  { id: 'settings', label: '设置' },
-  { id: 'files', label: '工作区文件' },
-  { id: 'changes', label: '查看变更' },
-  { id: 'plan', label: '查看计划' },
-  { id: 'stop', label: '中断任务' },
-]
-const slashItems = computed(() =>
-  inputValue.value.startsWith('/') && !inputValue.value.includes(' ')
-    ? commands.filter((c) => c.id.includes(inputValue.value.slice(1)))
-    : [],
-)
+const mentions = useMentions(inputValue)
+const commandMenu = useComposerCommands({
+  open: () => commandsOpen.value,
+  imageDisabled: () => busy.value || props.isSending || !props.submit || !props.modelOptions.length,
+  isSending: () => props.isSending,
+  image: () => attachments.value?.choose(),
+  reference,
+  stop: () => emit('cancel'),
+  insert(text) {
+    inputValue.value = `${text}\n\n${inputValue.value}`
+    void nextTick(() => textarea.value?.focus())
+  },
+})
 watch(inputValue, () => {
   draftRevision++
 })
@@ -85,7 +82,7 @@ function chooseMode(value: 'ask' | 'plan' | 'auto') {
 }
 async function send(later = props.isSending) {
   const content = inputValue.value.trim() || (images.value.length ? t('请描述这些图片。') : '')
-  if (!content || !props.modelOptions.length || busy.value) return
+  if (!content || !props.modelOptions.length || busy.value || !attachmentsReady.value) return
   if (images.value.length && props.isSending) {
     submitError.value = t('请等待当前任务结束后再发送图片。')
     return
@@ -100,6 +97,7 @@ async function send(later = props.isSending) {
       ? '请先分析并列出计划，暂不执行修改。\n\n' + content
       : content
   toolbar.value?.closeMenu()
+  textarea.value?.closeMenu()
   submitError.value = ''
   if (!props.submit) {
     emit('send', payload)
@@ -163,23 +161,19 @@ defineExpose({
     void nextTick(() => textarea.value?.focus())
   },
 })
-function command(item: SlashCommand) {
-  inputValue.value = ''
-  if (item.id === 'new') void router.push('/chat')
-  else if (['memory', 'settings'].includes(item.id)) void router.push('/' + item.id)
-  else if (item.id === 'stop') emit('cancel')
-  else ui.openDrawer(item.id as 'files' | 'changes' | 'plan')
-}
 const handleKeydown = useComposerKeyboard({
   draft: inputValue,
   context: () => [props.sessionId, props.modelId, mode.value, props.isSending],
   lastMessage: () => props.lastMessage,
   canSend: () =>
     Boolean(
-      (inputValue.value.trim() || images.value.length) && props.modelOptions.length && !busy.value,
+      (inputValue.value.trim() || images.value.length) &&
+      props.modelOptions.length &&
+      !busy.value &&
+      attachmentsReady.value,
     ),
   isSending: () => props.isSending,
-  closeMenu: () => toolbar.value?.closeMenu() || false,
+  closeMenu: () => textarea.value?.closeMenu() || toolbar.value?.closeMenu() || false,
   send,
   cancel: () => emit('cancel'),
 })
@@ -194,6 +188,11 @@ const handleKeydown = useComposerKeyboard({
       v-desk-paper
       class="composer"
       :aria-busy="isSending || busy"
+      @paste="attachments?.paste($event)"
+      @dragenter="attachments?.dragEnter($event)"
+      @dragleave="attachments?.dragLeave($event)"
+      @dragover="attachments?.dragOver($event)"
+      @drop="attachments?.drop($event)"
     >
       <svg
         v-if="sent"
@@ -204,6 +203,13 @@ const handleKeydown = useComposerKeyboard({
       >
         <path d="M12 2C10 7 5 11 5 15a7 7 0 0 0 14 0c0-4-5-8-7-13Z" />
       </svg>
+      <ImageAttachments
+        :key="draftKey + ':' + workspace.selectedId"
+        ref="attachments"
+        v-model="images"
+        :disabled="isSubmitting || submitting || isSending || !props.submit || !modelOptions.length"
+        @busy="uploading = $event"
+      />
       <ComposerDraft
         ref="textarea"
         v-model="inputValue"
@@ -211,7 +217,9 @@ const handleKeydown = useComposerKeyboard({
         :mentions="mentions.items.value"
         :mention-query="mentions.query.value"
         :loading="mentions.loading.value"
-        :commands="slashItems"
+        :commands="commandMenu.commands.value"
+        :commands-loading="commandMenu.loading.value"
+        :commands-error="commandMenu.error.value"
         :placeholder="
           isSending
             ? $t('写下一条消息…')
@@ -221,25 +229,23 @@ const handleKeydown = useComposerKeyboard({
         "
         :disabled="!modelOptions.length"
         @mention="chooseMention"
-        @command="command"
+        @command="commandMenu.select"
+        @retry-commands="commandMenu.retry"
+        @commands-open="commandsOpen = $event"
         @focus="hint?.show()"
         @keydown="handleKeydown"
       />
       <ComposerHint ref="hint" />
-      <ImageAttachments
-        :key="draftKey + ':' + workspace.selectedId"
-        v-model="images"
-        :disabled="busy || isSending || !props.submit"
-        @busy="uploading = $event"
-      />
       <ComposerToolbar
         ref="toolbar"
         v-bind="props"
         :mode="mode"
         :busy="busy"
-        :has-draft="Boolean(inputValue.trim() || images.length)"
+        :has-draft="Boolean(inputValue.trim() || images.length) && attachmentsReady"
         :guide-disabled="guideDisabled"
-        @reference="reference"
+        :commands-open="commandsOpen"
+        :commands-id="menuId + '-commands'"
+        @commands="textarea?.toggleCommands()"
         @mode="chooseMode"
         @cancel="emit('cancel')"
         @send="send"

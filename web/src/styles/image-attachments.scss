@@ -1,0 +1,77 @@
+@use './mixins';
+.image-attachments {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: var(--space-2) var(--space-1) var(--space-4);
+}
+.image-chip {
+  position: relative;
+  flex: none;
+  width: var(--attachment-thumbnail-size);
+  min-height: var(--attachment-thumbnail-size);
+  border: var(--hairline) solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--paper-2);
+}
+.image-remove {
+  @include mixins.interactive-row;
+  position: absolute;
+  top: var(--space-1);
+  inset-inline-end: var(--space-1);
+  display: grid;
+  place-content: center;
+  width: var(--measure-22px);
+  height: var(--measure-22px);
+  padding: 0;
+  border: var(--hairline) solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+}
+.image-pending {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  color: var(--ink-2);
+}
+.image-pending span {
+  width: 100%;
+  font-size: var(--text-xs);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.attachment-status {
+  margin: 0 0 var(--space-4);
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+}
+.attachment-status button {
+  @include mixins.text-action;
+  margin-inline-start: var(--space-3);
+}
+.image-drop-target {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-detail);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  border: var(--pending-line) dashed var(--accent);
+  border-radius: inherit;
+  background: var(--paper);
+  color: var(--accent-ink);
+  font-size: var(--text-sm);
+  pointer-events: none;
+}
+.image-drop-target.unavailable {
+  border-color: var(--rule);
+  color: var(--ink-2);
+}

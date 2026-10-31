@@ -67,7 +67,7 @@ deadline
 
 当前版本没有独立的 `/me`、工作区 CRUD 或成员管理 REST。所有已注册资源都位于 `/workspaces/{workspace_id}` 下，受本地访问中间件与智能体核心成员关系检查共同约束。API 层当前固定映射到 `local-user`，这不构成远程设备认证。团队身份、工作区 CRUD 与成员管理已移出当前路线，不在本文保留未注册接口草案。
 
-`local-user` / owner 检查只决定产品数据归属，不证明调用者是桌面客户端。桌面模式先在 LocalBoundary 中校验本次启动的 `X-MaigoKite-Desktop-Token`，覆盖 HTTP、OPTIONS 和 WebSocket；认证发生在 CORS 与业务路由之前。凭据由 Electron 主进程附加，渲染页及公开 DTO 不持有它。`Origin: null` 必须同时通过凭据验证，`file://` 不放行；未验证的来源返回 403，来源合法但缺少桌面凭据返回 401 `LOCAL_AUTH_REQUIRED`，WebSocket 拒绝码为 1008。直接 peer 与 Host 必须仍为 loopback，不使用转发头认证。
+`local-user` / owner 检查只决定产品数据归属，不证明调用者是桌面客户端。桌面模式先在 LocalBoundary 中校验本次启动的 `X-MaigoKite-Desktop-Token`，覆盖 HTTP、OPTIONS 和 WebSocket；认证发生在 CORS 与业务路由之前。凭据由 Electron 主进程附加，渲染页及公开 DTO 不持有它。`Origin: null` 必须同时通过凭据验证；Electron 本地页面的 WebSocket 使用精确的 `Origin: file://`，也仅在凭据有效时接受。HTTP/OPTIONS 不接受 `file://`，CORS 不新增此来源。未验证的来源返回 403，来源合法但缺少桌面凭据返回 401 `LOCAL_AUTH_REQUIRED`，WebSocket 拒绝码为 1008（接受前拒绝时，握手表现为 HTTP 403）。直接 peer 与 Host 必须仍为 loopback，不使用转发头认证。
 
 浏览器模式保留现有本机 HTTP / 无 Origin 原生调用，拒绝不透明页面来源；它尚不是完整的本机进程或设备认证。详见 [安全边界](../ops-security/Security.md#5-网络与-electron)。
 

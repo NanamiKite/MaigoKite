@@ -7,6 +7,14 @@
 
 ## 尚未发布
 
+### 2026-10-31 桌面对话实时回复连接修复
+
+- 修复本地 HTML 桌面窗口中，回复已经保存但界面持续停在“思考中/正在回复”的连接问题。真实 Electron 44.8.0 诊断确认：HTTP 成功、主 frame 认证头有效，WebSocket 却以 `Origin: file://` 被 LocalBoundary 拒绝；切换对话通过 HTTP 快照读到结果，因此看似重新打开才显示。
+- 仅修改后端来源判断：带本次有效桌面凭据的精确 `file://` WebSocket 可以连接。无凭据/错误凭据、不受允许的来源和带路径的 file URL 继续拒绝；HTTP/OPTIONS 与 CORS 不放开 file 来源。没有修改 Agent 执行、消息持久化、前端事件或渲染逻辑。
+- 经用户授权执行临时命令 `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python .venv/bin/python /tmp/maigokite_connection_diag.py`：复用生产请求头注入函数与 LocalBoundary，隔离的 file/HTTP 开发页面均完成 GET/POST 并收到注册、正文增量和任务完成三个诊断事件，未授权页面被拒绝；另有 8 项 WebSocket、3 项 HTTP 边界检查通过。修复前确实观察到 file 页面 WebSocket 1006/服务端拒绝，修复后正常接收并关闭。
+- 静态检查：`ruff check --no-cache python/agent` 和 `mypy --cache-dir=/tmp/maigokite-diagnostic-mypy python/agent/api/app.py` 通过（后者 1 个直接检查文件、strict 配置）。项目虚拟环境未安装这两个命令，直接调用失败后复用本机缓存的锁定 Ruff 0.15.22、mypy 2.3.0 及其依赖；没有安装包、修改依赖环境或锁文件。
+- 没有读取/修改既有测试源码，没有运行现有测试套件、真实模型、完整产品 GUI/Core 聊天、实际预检、重定向、Windows 或远程 CI；本轮没有前端源码改动，未运行前端构建。隔离 Electron、临时服务、profile、诊断脚本和检查缓存均已清理，未操作 Git。源码桌面端须从托盘退出后重新启动，让 Python 后端加载修复。
+
 ### 2026-10-31 同步文件读取取消用例装配修复
 
 - 同步慢读取替身改为接收权限归一化后的完整参数，并复用生产 FileReadParams 校验；修复多模态参数扩展后，旧四参数签名在进入工作线程函数体前报 TypeError、导致启动事件始终未触发的问题。生产工具、权限和取消实现不变。

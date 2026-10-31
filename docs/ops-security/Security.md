@@ -58,7 +58,9 @@ Windows 原生后端只通过公开 SDK 接入，普通安装依赖不修改系�
 
 Electron 主进程用 Node `crypto.randomBytes(32)` 为本次启动生成随机凭据，仅通过子进程环境 `MAIGOKITE_DESKTOP_TOKEN` 交给其后端。后端在初始化 Core 前从环境移除该值，使用内存中的凭据核对 `X-MaigoKite-Desktop-Token`，避免向工具/MCP 子进程继承。凭据不进入前端配置、preload IPC、URL、数据库或日志；重启产生新值。
 
-桌面模式的 HTTP、预检和 WebSocket 请求都必须通过该验证，不能通过伪造 localhost Origin 或省略 Origin 降级绕过。LocalBoundary 位于 CORS 外侧，校验 ASGI 直接连接地址、Host、来源和凭据后才进入 CORS 或业务路由；比较使用 `secrets.compare_digest`。只有已验证的桌面请求才可获得 `Access-Control-Allow-Origin: null`，无凭据的 `null` 请求返回 403，WebSocket 在接受前以 1008 拒绝；精确 `file://` 字符串也不作为可信来源。
+桌面模式的 HTTP、预检和 WebSocket 请求都必须通过该验证，不能通过伪造 localhost Origin 或省略 Origin 降级绕过。LocalBoundary 位于 CORS 外侧，校验 ASGI 直接连接地址、Host、来源和凭据后才进入 CORS 或业务路由；比较使用 `secrets.compare_digest`。只有已验证的桌面请求才可获得 `Access-Control-Allow-Origin: null`，无凭据的 `null` 请求返回 403，WebSocket 在接受前以 1008 拒绝。
+
+Electron 本地页面的 WebSocket 实际发送 `Origin: file://`，它仅在本次桌面凭据验证成功时可通过；来源字符串本身不建立信任。带路径的 file URL、无凭据/错误凭据的 file 来源继续拒绝；HTTP/OPTIONS 的 file 来源仍不放行，CORS 保持不变。10 月 31 日在隔离的 Linux Electron 44.8.0 中复现修复前的拒绝，并验证修复后增量和终态事件可达；这不等于完整客户端、预检、重定向或安装包验收。
 
 主进程复用 Electron `webRequest.onBeforeSendHeaders`，仅对主窗口/胶囊窗口的已允许主 frame，以及自有后端或开发代理的 API/health 地址附加凭据；子 frame 和未知窗口不授权。每个目标重新计算请求头，跨地址重定向不保留凭据。主进程健康探测与工作区查询显式携带相同凭据。该机制不能防止已攻陷的应用主 frame、同 OS 用户的恶意程序或调试器读取进程内存，也不替代远程设备认证。
 

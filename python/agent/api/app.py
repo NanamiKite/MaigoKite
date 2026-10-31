@@ -67,10 +67,15 @@ class LocalBoundary:
         desktop_authenticated = bool(self.desktop_token) and secrets.compare_digest(
             headers.get(b"x-maigokite-desktop-token", "").encode("latin-1"), self.desktop_token,
         )
+        # Electron's file-backed WebSocket uses file://, not the HTTP null origin.
+        # Neither origin proves identity without the per-launch desktop credential.
+        desktop_origin = desktop_authenticated and (
+            origin == "null" or (scope["type"] == "websocket" and origin == "file://")
+        )
         try:
             host = urlsplit("//" + headers.get(b"host", "")).hostname or ""
             source = urlsplit(origin)
-            trusted_origin = origin == "" or (origin == "null" and desktop_authenticated) or (
+            trusted_origin = origin == "" or desktop_origin or (
                 source.scheme == "http" and loopback(source.hostname or "")
                 and source.username is None and source.password is None and not source.path
                 and not source.query and not source.fragment

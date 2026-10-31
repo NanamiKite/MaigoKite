@@ -47,12 +47,13 @@ export function useComposerCommands(options: {
   const commands = computed<ComposerCommand[]>(() => [
     {
       id: 'image',
-      label: '添加图片',
+      label: '添加附件',
+      keywords: '图片 文本 Markdown 文件 image text attachment',
       icon: 'image',
       group: '添加',
       run: options.image,
       disabled: options.imageDisabled(),
-      reason: options.isSending() ? t('请等待当前任务结束后再发送图片。') : undefined,
+      reason: options.isSending() ? t('请等待当前任务结束后再发送附件。') : undefined,
     },
     {
       id: 'reference',

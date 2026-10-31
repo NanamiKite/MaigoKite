@@ -53,8 +53,9 @@ from agent.data_contracts import (
     approval_notice,
     available_approval_scopes,
 )
+from agent.document_visuals import ocr_executable
 from agent.errors import UserFacingError, public_error
-from agent.media import IMAGE_LIMIT, ImageReference
+from agent.media import ATTACHMENT_REFERENCE, IMAGE_LIMIT
 from agent.models.reasoning import message_text
 from agent.repository import ConversationBusyError, SQLiteRepository
 from agent.runtime.context import ContextBudgetMiddleware, SafeSummarizationMiddleware
@@ -385,6 +386,9 @@ class LangGraphRuntime:
             else:
                 schema = json.loads(task["output_schema_json"]) if task.get("output_schema_json") else None
         if self.model is not None:
+            if (any(item.type == "image" for item in request.attachments)
+                    and (self.model.profile or {}).get("image_inputs") is False and ocr_executable() is None):
+                raise UserFacingError("当前模型不支持图片输入，请切换模型后发送。", code="IMAGE_INPUT_UNSUPPORTED")
             return self._create_graph(self.model, output_schema=schema) if schema is not None else self._graphs["fixed"]
         assert self.model_resolver is not None
         conversation = await self.repository.get_conversation(
@@ -395,6 +399,9 @@ class LangGraphRuntime:
             str(conversation.get("thinking") or ""),
         )
         self._require_open()
+        if (any(item.type == "image" for item in request.attachments)
+                and (model.profile or {}).get("image_inputs") is False and ocr_executable() is None):
+            raise UserFacingError("当前模型不支持图片输入，请切换模型后发送。", code="IMAGE_INPUT_UNSUPPORTED")
         graph = self._graphs.get(key)
         if graph is None or schema is not None:
             catalog = await self.model_catalog(request.workspace_id) if self.model_catalog else []
@@ -470,13 +477,14 @@ class LangGraphRuntime:
         branch = await self.repository.get_conversation(actual.workspace_id, actual.conversation_id)
         metadata: ExecutionMetadata = await self._execution_metadata(actual) if self._execution_metadata else {}
         root = Path(metadata.get("workspace_root", str(self.workspace_root)))
-        if len(actual.attachments) > 4 or sum(image.size for image in actual.attachments) > IMAGE_LIMIT:
-            raise UserFacingError("每条消息最多附带 4 张图片，总计不能超过 16 MiB。")
-        image_bytes = sum(image.size for image in actual.attachments)
+        if (len(actual.attachments) > 8 or sum(item.type == "image" for item in actual.attachments) > 4
+                or sum(item.size for item in actual.attachments) > IMAGE_LIMIT):
+            raise UserFacingError("每条消息最多附带 8 个文件，其中图片最多 4 张，总计不能超过 16 MiB。")
+        image_bytes = sum(image.size for image in actual.attachments if image.type == "image")
         if any(image.folder_id != branch["folder_id"] for image in actual.attachments):
-            raise UserFacingError("图片所属工作区与当前对话不一致，请在当前工作区重新添加。")
+            raise UserFacingError("附件所属工作区与当前对话不一致，请在当前工作区重新添加。")
         if actual.attachments and prompt.startswith("/tool "):
-            raise UserFacingError("图片分析请使用普通聊天消息；直接工具指令不会读取图片附件。")
+            raise UserFacingError("请使用普通聊天消息发送附件；直接工具指令不会读取附件。")
         user_message = await image_message(prompt, actual.attachments, root)
         self._direct_tool_call(prompt, actual.task_id)  # Validate command syntax before persisting.
         messages: list[Any] = []
@@ -487,19 +495,21 @@ class LangGraphRuntime:
                 # Carry the framework's retained messages, including its summary
                 # and ToolMessages. Counters/interrupts belong to the old run.
                 messages = list(snapshot.values.get("messages", []))
-                messages = [
-                    HumanMessage(content=message.text + "\n[图片未跨工作区附带]", id=message.id)
-                    if isinstance(message, HumanMessage) and message.additional_kwargs.get("image_folder") is not None
-                    and message.additional_kwargs["image_folder"] != branch["folder_id"] else message
-                    for message in messages
-                ]
-                image_bytes += sum(
-                    message.additional_kwargs.get("image_bytes", 0)
-                    for message in messages if isinstance(message, HumanMessage)
-                    and type(message.additional_kwargs.get("image_bytes", 0)) is int
-                )
-                if image_bytes > IMAGE_LIMIT:
-                    raise UserFacingError("当前上下文的图片总量超过 16 MiB，请减少图片大小或在新对话中发送。")
+                for index, message in enumerate(messages):
+                    folder = message.additional_kwargs.get("image_folder")
+                    if folder is None or folder == branch["folder_id"]:
+                        continue
+                    if isinstance(message, HumanMessage):
+                        messages[index] = HumanMessage(
+                            content=message.additional_kwargs.get("attachment_prompt", message.text)
+                            + "\n[附件未跨工作区附带]", id=message.id,
+                        )
+                    elif isinstance(message, ToolMessage):
+                        messages[index] = message.model_copy(update={
+                            "content": "[Earlier attachment content is unavailable in this workspace.]",
+                            "additional_kwargs": {**message.additional_kwargs, "image_bytes": 0,
+                                                  "attachment_refs": []},
+                        })
                 history_source = "checkpoint"
         if not messages:
             # First migration/legacy or interrupted history: no invented tool
@@ -510,20 +520,22 @@ class LangGraphRuntime:
             )
             for item in history:
                 if item["role"] == "user":
-                    references = tuple(ImageReference.model_validate(value)
+                    references = tuple(ATTACHMENT_REFERENCE.validate_python(value)
                                        for value in json.loads(item.get("attachments_json", "[]")))
                     try:
                         if any(image.folder_id != branch["folder_id"] for image in references):
-                            raise UserFacingError("图片未跨工作区附带")
-                        size = sum(image.size for image in references)
-                        if image_bytes + size > IMAGE_LIMIT:
-                            raise UserFacingError("历史图片超过当前输入大小限制")
-                        messages.append(await image_message(item["content"], references, root))
-                        image_bytes += size
+                            raise UserFacingError("附件未跨工作区附带")
+                        size = sum(image.size for image in references if image.type == "image")
+                        include_images = image_bytes + size <= IMAGE_LIMIT
+                        messages.append(await image_message(
+                            item["content"], references, root, include_images=include_images,
+                        ))
+                        if include_images:
+                            image_bytes += size
                     except (OSError, UserFacingError):
                         messages.append(HumanMessage(
-                            content=item["content"] + "\n[历史图片未附带：文件已改变、不可用、跨工作区或超过大小限制。"
-                            "如回答依赖该图片，应先说明缺失并请用户重新添加，不能猜测图片内容。]",
+                            content=item["content"] + "\n[历史附件未附带：文件已改变、不可用、跨工作区或超过大小限制。"
+                            "如回答依赖该附件，应先说明缺失并请用户重新添加，不能猜测文件内容。]",
                         ))
                 elif item["role"] in {"assistant", "system"}:
                     messages.append({"role": item["role"], "content": item["content"]})
@@ -657,8 +669,7 @@ class LangGraphRuntime:
                 self.repository, request,
                 RunProjection(self.repository, self._event_publisher, request, asyncio.Queue()),
             )
-            if self._execution_metadata is not None:
-                review_context.execution_metadata = await self._execution_metadata(request)
+            await self._tool_middleware.refresh_authority(review_context)
             policy = self._tool_middleware.evaluate(call["name"], call["args"], review_context)
             if policy.outcome == "deny" or not self._tool_middleware.matches_approval(pending, call["name"], policy):
                 # Do not consume the user's version for a different normalized

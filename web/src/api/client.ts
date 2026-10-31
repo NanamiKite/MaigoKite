@@ -23,7 +23,7 @@ import {
 import { mockConnect } from './mock'
 import type { ContextUsage, PlanItem } from './events'
 import { mapContextPayload } from './model-events'
-import type { ImageReference } from './images'
+import type { AttachmentReference } from './images'
 
 type Transport = components['schemas']
 export type TaskResult = Transport['TaskResultResponse']
@@ -976,7 +976,7 @@ export const api = {
     id: string,
     content: string,
     idempotencyKey: string,
-    attachments: ImageReference[] = [],
+    attachments: AttachmentReference[] = [],
   ): Promise<MessageReceipt> {
     return request(`${path}/conversations/${id}/messages`, {
       method: 'POST',
@@ -1072,9 +1072,10 @@ export const api = {
     relativePath: string,
     folderId = '',
     signal?: AbortSignal,
+    sha256 = '',
   ): Promise<WorkspaceFileContent> {
     return request(
-      `${path}/files/content?path=${encodeURIComponent(relativePath)}&${folderQuery(folderId)}`,
+      `${path}/files/content?path=${encodeURIComponent(relativePath)}&${folderQuery(folderId)}&sha256=${encodeURIComponent(sha256)}`,
       { signal },
       validateWorkspaceFileResponse,
     )

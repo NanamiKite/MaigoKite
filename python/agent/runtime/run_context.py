@@ -10,7 +10,7 @@ from typing import Any
 from langchain_core.messages import ToolCall as NativeToolCall
 
 from agent.data_contracts import AuthorizationRecord, JSONObject, PermissionMode
-from agent.media import ImageReference
+from agent.media import AttachmentReference
 from agent.models.context_capacity import ContextCapacity
 from agent.repository import SQLiteRepository
 from agent.runtime.projection import RunProjection
@@ -27,7 +27,7 @@ class RuntimeRunRequest:
     trace_id: str = ""
     request_hash: str = ""
     output_schema: JSONObject | None = None
-    attachments: tuple[ImageReference, ...] = ()
+    attachments: tuple[AttachmentReference, ...] = ()
 
 
 @dataclass(slots=True)

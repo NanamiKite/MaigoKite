@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import IconSymbol from '@/components/common/IconSymbol.vue'
-import type { ImageReference } from '@/api/images'
+import type { AttachmentReference } from '@/api/images'
 import { t } from '@/i18n'
 const props = defineProps<{
-  items: { id: string; content: string; attachments?: ImageReference[] }[]
+  items: { id: string; content: string; attachments?: AttachmentReference[] }[]
   paused: boolean
   guideReason: string
   canContinue: boolean
@@ -205,7 +205,7 @@ async function guideNow(id: string) {
         <template v-else>
           <p>{{ item.content }}</p>
           <small v-if="item.attachments?.length">
-            {{ $t('包含 {0} 张图片', [item.attachments.length]) }}
+            {{ $t('包含 {0} 个附件', [item.attachments.length]) }}
           </small>
           <div class="queue-actions">
             <button
@@ -214,7 +214,7 @@ async function guideNow(id: string) {
               :disabled="Boolean(guideReason) || Boolean(busy) || Boolean(item.attachments?.length)"
               :title="
                 item.attachments?.length
-                  ? $t('请等待当前任务结束后再发送图片。')
+                  ? $t('请等待当前任务结束后再发送附件。')
                   : guideReason || undefined
               "
               @click="guideNow(item.id)"

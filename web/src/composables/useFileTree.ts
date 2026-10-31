@@ -18,6 +18,7 @@ export interface FileTreeNode {
   loading?: boolean
   size?: number
   modified_at?: string
+  sha256?: string
 }
 
 export function useFileTree() {
@@ -117,13 +118,14 @@ export function useFileTree() {
     selectedContent.value = null
     previewError.value = null
     previewLoading.value = false
-    if (node.type !== 'file') return
+    if (node.type !== 'file' || /\.(pdf|docx|xlsx|pptx)$/i.test(node.name)) return
     previewLoading.value = true
     try {
       const content = await api.getWorkspaceFile(
         node.path,
         workspace.selectedId,
         previewController.signal,
+        node.sha256,
       )
       if (request === previewRequest) selectedContent.value = content
     } catch (reason) {
@@ -135,7 +137,7 @@ export function useFileTree() {
   }
 
   /** Reveal an existing path using the same tree/preview APIs as a user click. */
-  async function revealFile(path: string, type: 'file' | 'directory' = 'file') {
+  async function revealFile(path: string, type: 'file' | 'directory' = 'file', sha256?: string) {
     const intent = ++revealRequest,
       request = treeRequest
     const parts = path.split('/').filter(Boolean)
@@ -153,7 +155,7 @@ export function useFileTree() {
       path,
       type,
     }
-    await selectNode(node)
+    await selectNode(sha256 ? { ...node, sha256 } : node)
   }
 
   /** 获取展开的子节点 */

@@ -33,7 +33,7 @@ from agent.event_bus import EventBus
 from agent.extensions import ExtensionCatalog, ExtensionConfig, MCPServerStatus, close_mcp_clients, startup_config
 from agent.integrations.antenna import AntennaResults
 from agent.mcp import MCPClient
-from agent.media import ImageReference
+from agent.media import ATTACHMENT_REFERENCE
 from agent.memory.notes import FolderMemories
 from agent.models.image_generation import IMAGE_SETTING_KEY, ImageSettings
 from agent.models.runtime import ChatModelRuntime, ChatModelSettings
@@ -649,7 +649,7 @@ class AgentCore:
             task_id=str(metadata.get("task_id") or ""),
             request_hash=str(metadata.get("request_hash") or ""),
             output_schema=metadata.get("output_schema"),
-            attachments=tuple(ImageReference.model_validate(item) for item in metadata.get("attachments", [])),
+            attachments=tuple(ATTACHMENT_REFERENCE.validate_python(item) for item in metadata.get("attachments", [])),
         )
         handle = await runtime.start(prompt, request)
         await self._wait_for_run(handle)
@@ -770,6 +770,7 @@ class AgentCore:
             ),
             "approved": False,
             "workspace_root": folder["root_path"],
+            "folder_id": conversation["folder_id"],
             "api_keys": api_keys,
             "image_configuration": ImageSettings.model_validate(
                 await self.repository.get_workspace_setting(workspace_id, IMAGE_SETTING_KEY) or {}

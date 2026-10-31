@@ -360,3 +360,38 @@ Codex 依据：[智能体主循环官方说明](https://openai.com/index/unrolli
 - **pi-ai**：重点调查多模型提供方、OpenAI-compatible 兼容边界、流式工具调用、异常/取消与用量反馈；比较可复用组件和当前模型适配器的维护成本，不自行抄写协议实现。依据：[pi-ai](https://github.com/earendil-works/pi/blob/main/packages/ai/README.md)。
 - **pi-coding-agent**：重点调查会话上下文投影、压缩与分支摘要、技能按需加载及扩展边界；只借鉴通用个人智能体能力，不把产品重新收窄为编码助手。依据：[编码智能体](https://github.com/earendil-works/pi/tree/main/packages/coding-agent)、[上下文压缩](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/compaction.md)。
 - **采用门槛**：当前核心服务为 Python，pi SDK 为 TypeScript。需比较直接复用/进程适配所带来的部署和生命周期成本与可删除的自研代码，不因它轻量就直接加入第二个执行内核；若替换收益明确，再单独提出迁移决策。本次不修改运行代码、不安装 pi、不运行测试。
+
+### 文本与图片附件的请求组装（2026-10-28）
+
+- 继续使用现有消息引用、`runtime/images.py`、`SafeSummarizationMiddleware` 和 `file_read`。不建立第二个多模态 Runtime、解析任务系统或上下文事实来源。
+- 当前消息的文本附件共用 `min(有效输入预算的 10%, 8000 tokens, 扣除消息与工具定义后的剩余预算)`。计数沿用现有近似 token counter；超过 32000 字节的文本不整段解码计数，直接保留分页引用，避免大单行阻塞计数。已知窗口、输出预留和请求准入继续由现有容量模块负责。
+- 内联只发生一次并随消息写入 checkpoint，普通新回合保持前缀稳定。既有高水位摘要会保留已移除附件的精确路径、哈希及读取模式；不依靠模型重新编造文件引用。图片只在累计字节压力或模型能力变化时降级，当前回合不能安全装入时报告原因。
+- `file_read(view="image")` 经相同权限检查返回 SDK 标准图像块；图像字节不写进产品事件。OpenAI Chat Completions 的工具消息只接受文本，因此请求组装会将同一工具批次的视觉块附在其后的人类角色输入中并标明来源；不打断工具调用配对，不更改 checkpoint 或产品历史。Anthropic/Ollama 沿用 SDK 的原生工具内容转换，具体服务仍需行为验收。`file_read(sha256=...)` 对本次实际读取内容核对版本，再按现有字节游标分页；目录变化不会授权读取旧工作区文件。
+- 附件固定为快照，不随源文件变化。下面分别说明 PDF/DOCX、Office、页图/OCR 和附件授权；远程资产与持久解析缓存仍未交付，工作区文件或生成内容也不因来源而成为可信指令。
+
+- 补齐输入草稿边界（2026-10-31）：待上传/失败文件由对话草稿持有，切换时取消当前上传，返回后可显式重试；只保存在当前窗口内存，刷新不恢复本地 File 对象。服务端返回真实类型后再次检查数量/总量；异步发送与文件引用完成不能清空或覆盖后来编辑的草稿。
+- `file_read` 可按 `start_line` / `line_count` 读取 UTF-8 范围，沿用 64000 字节返回上限和 `next_offset`，超长单行不整段分词。图片回读携带实际 SHA-256，工作区内的结果引用会随压缩保留；源文件改变后拒绝将新内容当成旧版本。已知纯文本模型的看图调用返回可恢复工具失败，主任务和子 Agent 共用该检查。
+
+本增量的静态检查与行为验收分开记录，未运行模型或 GUI 行为测试。
+
+### PDF / DOCX 文档读取（2026-10-31）
+
+- 上传和引用先校验文档可解析，再保存原始快照；消息仅附带名称及带哈希的 file_read 读取参数。工具禁用或模型不能调用工具时拒绝文档请求，不生成无法解引用的句柄。
+- 扩展既有 file_read 的 document 模式，沿用权限检查、审批、只读子 Agent 和结果投影，不注册第二套文档执行工具。页/段落范围、内容截断及续读游标来自同一解析结果；压缩保留文件版本引用。
+- 使用 [pypdf](https://pypdf.readthedocs.io/en/stable/user/extract-text.html) 提取 PDF 文本层，使用 [python-docx](https://python-docx.readthedocs.io/en/latest/api/document.html) 按正文顺序读取段落和表格。PDF 保留物理页号；DOCX 没有可靠分页信息，使用段落/表格编号。当前不提取嵌套表格、修订区、页眉页脚、文本框、图片或版式，不能据此宣称完整读取了 Word/PDF 的视觉内容。
+- 解析通过已有 AnyIO 的 [to_process.run_sync](https://anyio.readthedocs.io/en/stable/subprocesses.html) 执行，cancellable=True；超时/根任务取消时由库结束当前工作进程。工作进程缓存有限份额且随进程退出释放，没有新增进程监督器、队列平台或跨进程恢复状态。相关限制见 API；进程隔离不等于文件/网络沙箱。
+- 侧栏使用相同解析结果，提供跳页、段落选择和长文本续读。仅渲染提取文字，沿用本机鉴权和工作区边界；不嵌入 PDF 脚本、Office 内容或自动加载远程图片。
+- 文档导航复用解析缓存：PDF 通过 [pypdf 的 outline / get_destination_page_number](https://pypdf.readthedocs.io/en/stable/modules/PdfReader.html) 定位真实书签，DOCX 读取 [内置 Heading 样式](https://python-docx.readthedocs.io/en/latest/user/styles-using.html)，不猜测标题。导航最初使用 text-v2；当前 Office 扩展后统一使用下节的 `text-v3`，不同解析版本不混用。
+- 关键词定位使用标准库的转义字面匹配，保留原文 Unicode 偏移；结果只给有限片段与续读位置，模型不必整本逐页读取。现有 file_read、只读子 Agent 和侧栏共用此能力；目录/搜索结果不写入新的状态表，模型读取结果继续沿用 ToolMessage 与版本引用。
+- 本节记录 PDF/DOCX 文本增量；后续 Office、页图/OCR 和授权边界如下，行为验收仍独立记录。
+
+### Office、页级视觉/OCR 与附件授权（2026-10-31）
+
+- XLSX 复用 openpyxl，保留坐标和公式文本，不计算公式、不加载外部链接；每 100 行形成一个读取单元，目录为工作表。PPTX 复用 python-pptx，逐张提取文本框、组合形状文字及表格，目录使用实际标题。图表、备注、动画、图片文字和 Office 版式不在文本提取范围，旧 XLS/PPT 不支持。解析缓存版本为 `text-v3`。
+- PDF 页图调用 [pypdfium2 官方 CLI](https://pypdfium2.readthedocs.io/en/stable/)，用线性单页渲染避免额外进程池；本地 OCR 调用 [Tesseract](https://tesseract-ocr.github.io/tessdoc/Command-Line-Usage.html)。使用 AnyIO 进程/任务作用域与临时目录，取消时等待子进程结束再清理文件，不自行实现进程调度或模型协议。图片识别前校正方向、白底合成透明区域并限制尺寸。没有硬 OS 内存配额，不宣称解析器就是安全沙箱。
+- 可用语言通过实际 `--list-langs` 查询；没有引擎或语言包则提示不可用，不自动下载。优先使用已安装的 eng/chi_sim；两者均无时使用首个可用语言。OCR/页图结果不做持久缓存，不把旧文字层搜索结果当成 OCR 搜索。
+- 原生不支持图片的模型，在本机 OCR 可用时可接收当前附件的文字；图片块在压缩/模型请求前移除，识别文字按原累计预算内联，超限保留 `file_read(view=ocr)` 回读参数。完成物化后由原 checkpoint 保存结果，不按固定回合数反复 OCR 或改写历史。未知模型能力不直接推定成纯文本。
+- 附件来源约束由 PermissionManager 决策、Repository 审计、ProductToolMiddleware 执行前重查；不增加第二个审批机制。当前会话/文件夹已提交的用户附件集合（path + sha256）形成摘要并绑定窄授权。新增版本后旧授权不匹配；审批提交和执行前均检查，驳回仍可完成。
+- 非完全访问模式中，显式附件上下文的写入、命令和外发需确认；允许复用仍绑定目录、argv 或站点，不开放跨站公共网页通用授权。没有附件的普通工作区操作保持现有模式，工作区文件内容不会因此成为可信指令。完全访问沿用用户显式开启的语义。
+- 此集合从持久消息推导，在附件提交时纳入，范围比“已经读过的字节”更保守。它不是全数据流污点追踪；未覆盖任意 MCP/网页/普通文件读取产生的外部内容，也不能证明阻断所有提示注入或外泄。聊天和文件 Markdown 继续阻止自动加载远程图片。
+- 本轮仅静态检查；真实文档、OCR 语言准确率、取消/重启和 Windows 仍需行为验收。没有增加 live 文件订阅、向量库、OCR 安装器或完整 Office 渲染引擎。

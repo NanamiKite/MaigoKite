@@ -23,7 +23,7 @@ import { copySubagentSettings } from '@/config/subagents'
 import { api, type ChatMessage, type PermissionMode } from '@/api/client'
 import UserMessage from '@/components/chat-area/UserMessage.vue'
 import GeneratedImages from '@/components/chat-area/GeneratedImages.vue'
-import type { ImageReference } from '@/api/images'
+import type { AttachmentReference } from '@/api/images'
 import AgentMessage from '@/components/chat-area/AgentMessage.vue'
 import MessageForkAction from '@/components/chat-area/MessageForkAction.vue'
 import ModelSwitchNotice from '@/components/chat-area/ModelSwitchNotice.vue'
@@ -302,14 +302,14 @@ onMounted(() => {
 async function send(
   content: string,
   intent: 'send' | 'guide' | 'later' = 'send',
-  images: ImageReference[] = [],
+  images: AttachmentReference[] = [],
 ) {
   if (sending.value) return
   sending.value = true
   let id = sessionId.value
   try {
     if (images.length && (intent !== 'send' || (id && session.runningTaskIds[id]?.length)))
-      throw new Error(t('请等待当前任务结束后再发送图片。'))
+      throw new Error(t('请等待当前任务结束后再发送附件。'))
     if (id && intent === 'guide') {
       await session.guideTask(id, content)
       resume()

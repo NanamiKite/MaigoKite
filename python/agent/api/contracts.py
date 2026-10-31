@@ -22,9 +22,10 @@ from agent.data_contracts import (
     approval_notice,
 )
 from agent.data_contracts import PermissionMode as ActivePermissionMode
+from agent.documents import DocumentFormat
 from agent.errors import ErrorParameter, UserFacingError
 from agent.event_contracts import WireEvent, wire_event
-from agent.media import ImageReference
+from agent.media import AttachmentReference
 from agent.structured_output import validate_output_schema
 
 if TYPE_CHECKING:
@@ -101,9 +102,29 @@ class ImageUpload(Input):
     data: str = Field(min_length=1, max_length=22369624)
 
 
+class AttachmentUpload(ImageUpload):
+    data: str = Field(max_length=22369624)
+    name: str = Field(min_length=1, max_length=255)
+
+
+class AttachmentSource(Input):
+    path: str = Field(min_length=1, max_length=4096)
+
+
+class InputCapabilities(BaseModel):
+    image_input: bool | None
+    image_fallback: Literal["ocr"] | None = None
+    ocr_languages: list[str] = Field(default_factory=list)
+    text_input: bool = True
+    document_inputs: list[DocumentFormat] = ["pdf", "docx", "xlsx", "pptx"]
+    max_attachments: int = 8
+    max_images: int = 4
+    max_bytes: int = 16 * 1024 * 1024
+
+
 class SendMessage(Input):
     content: str = Field(min_length=1, max_length=10000)
-    attachments: list[ImageReference] = Field(default_factory=list, max_length=4)
+    attachments: list[AttachmentReference] = Field(default_factory=list, max_length=8)
     output_schema: JSONObject | None = None
 
     @field_validator("output_schema")

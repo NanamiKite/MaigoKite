@@ -67,6 +67,10 @@ deadline
 
 当前版本没有独立的 `/me`、工作区 CRUD 或成员管理 REST。所有已注册资源都位于 `/workspaces/{workspace_id}` 下，受本地访问中间件与智能体核心成员关系检查共同约束。API 层当前固定映射到 `local-user`，这不构成远程设备认证。团队身份、工作区 CRUD 与成员管理已移出当前路线，不在本文保留未注册接口草案。
 
+`local-user` / owner 检查只决定产品数据归属，不证明调用者是桌面客户端。桌面模式先在 LocalBoundary 中校验本次启动的 `X-MaigoKite-Desktop-Token`，覆盖 HTTP、OPTIONS 和 WebSocket；认证发生在 CORS 与业务路由之前。凭据由 Electron 主进程附加，渲染页及公开 DTO 不持有它。`Origin: null` 必须同时通过凭据验证，`file://` 不放行；未验证的来源返回 403，来源合法但缺少桌面凭据返回 401 `LOCAL_AUTH_REQUIRED`，WebSocket 拒绝码为 1008。直接 peer 与 Host 必须仍为 loopback，不使用转发头认证。
+
+浏览器模式保留现有本机 HTTP / 无 Origin 原生调用，拒绝不透明页面来源；它尚不是完整的本机进程或设备认证。详见 [安全边界](../ops-security/Security.md#5-网络与-electron)。
+
 文件夹工作区位于既有个人数据范围内，不增加租户或身份系统：
 
 ```text
@@ -124,16 +128,32 @@ GET    /workspaces/{workspace_id}/conversations/{conversation_id}/snapshot
 
 `files / files/content / changes / changes/diff / runtime-status` 支持可选 `folder_id` 查询参数，API 通过 `core.conversations` 解析已登记目录，客户端不能直接传任意根目录。Runtime 权限校验与工具上下文使用会话所属目录，不变更共享全局根目录；MCP 进程启动目录和技能加载目录不因切换而变化。
 
-#### 图片输入、生成与文件预览（本机协议/GUI 已验收，SVG 符号预览已复验）
+#### 附件输入、图片生成与文件预览
 
-- `POST /workspaces/{workspace_id}/files/images?folder_id=...` 接受 `{data: "纯 Base64"}`，仅工作区所有者可上传。支持 PNG/JPEG/WebP/GIF，单张不超过 16 MiB；创建 `chat-images/` 下的独立文件，返回 `ImageReference`（type/path/folder_id/sha256/mime_type/size）。文件名由应用生成，不接受任意写入路径。仅此路由放宽请求体至 23 MiB，其余路由仍为 2 MiB。
-- 消息 `attachments` 接受上述引用，最多 4 张、总计 16 MiB。准入检查当前文件夹归属和内容哈希，再构造 LangChain `HumanMessage` 多模态内容；附件不是 URL 抓取入口。普通消息查询与 `task.started` 的 `attachments_json` 只含文件引用，图片快照保存在 LangGraph 消息状态供后续追问/恢复使用。
-- 未压缩的当前上下文图片总量也限制为 16 MiB；新附件与保留历史合计超限时明确拒绝。历史导入遇到文件缺失、变化、跨目录或大小限制时保留文字并告知模型图片缺失，不伪造视觉内容。当前 GUI 图片消息不支持执行中引导或新建排队发送。
+- `POST /workspaces/{workspace_id}/files/images?folder_id=...` 接受 `{data: "纯 Base64"}`，仅工作区所有者可上传。支持 PNG/JPEG/WebP/GIF，单张不超过 16 MiB；创建 `chat-images/` 下的独立文件，返回 `ImageReference`（type/path/folder_id/sha256/mime_type/size）。文件名由应用生成，不接受任意写入路径。该路由与 `/files/attachments` 上传路由的请求体上限为 23 MiB，其余路由仍为 2 MiB。
+- `POST /files/attachments?folder_id=...` 接受 `{name, data: "纯 Base64"}`；`POST /files/attachments/reference?folder_id=...` 接受 `{path}`，将当前工作区文件复制为快照。两个入口均要求 owner，拒绝越界、敏感路径、链接和非普通文件。文本支持 UTF-8（允许 BOM）；PDF、DOCX、XLSX、PPTX 经本地解析校验后保存原始快照。按内容识别，拒绝加密、损坏或超过处理限制的文档；不解析旧二进制 Office 格式或音视频。
+- 图片继续返回 `ImageReference`；文本返回 `TextReference`，包含 `type: "text" / name / path / folder_id / sha256 / mime_type: "text/plain" / size`。图片保存在 `chat-images/`，文本保存在 `chat-files/`，应用生成文件名，保留安全的扩展名以支持已有 Markdown/代码预览。上传文件保留在工作区，删除消息不会删除文件，不提供自动垃圾回收。
+- 文档返回 `DocumentReference`，包含 `type: "document" / name / path / folder_id / sha256 / size / format: "pdf" | "docx" | "xlsx" | "pptx"`，也保存在 `chat-files/`。原文不整段内联，而是通过已有 `file_read(view="document")` 按需读取。
+- 消息 `attachments` 接受图片、文本、文档三种引用，最多 8 个文件，其中图片最多 4 张，合计不超过 16 MiB。准入检查工作区归属、大小与哈希；消息查询、幂等指纹和 `task.started` 仍沿用 `attachments_json`，不改变纯文本及旧图片请求。
+- `GET /settings/model-inputs?model_id=...` 返回 `image_input: true/false/null`、文本支持、`document_inputs: ["pdf", "docx", "xlsx", "pptx"]` 及附件限制；缺省 model_id 使用默认模型。未知看图能力保持 null，不按名称猜测。GUI 允许先添加附件再换模型，已明确不支持图片且无本地 OCR 时阻止发送并保留草稿。`image_fallback=ocr` 表示可用本机文字识别，`ocr_languages` 返回已安装语言；原 `image_input` 仍只表示模型原生能力，不把 OCR 伪装成视觉。服务端准入检查后，在请求前转换当前图片并再次校验。
+- 文本在现有上下文中按累计预算内联；其余保留带哈希的 `file_read` 引用，读取工具不可用时明确拒绝，不返回无法使用的句柄。`file_read` 增加 `sha256` 校验及 `view: "text" | "image" | "document" | "ocr"`；文本复用 offset/next_offset 字节分页，也可用 start_line（从 1 起）和 line_count（默认 100，上限 1000）读取 UTF-8 选定行；按行与哈希读取上限为 16 MiB，每次内容仍以 64000 字节封顶，超长单行通过 next_offset 继续。图片以 SDK 标准图像内容回给模型，UI 事件仍只投影文件元数据。所有工具读取沿用现有权限和审计。
+- `GET /files/document?folder_id=...&path=...&sha256=...&unit=1&text_offset=0` 返回 `DocumentPage`。PDF 的 unit 为原文件物理页号；DOCX 为正文顶层段落/表格顺序编号，不冒充 Word 页码；XLSX 按工作表每 100 行分段，保留单元格坐标及公式文本，PPTX 按幻灯片提取文字和表格。响应含 format/sha256/parser_version/mode/unit/end_unit/total_units/kind/text/text_offset/next_offset/next_unit。侧栏按此接口查看提取文字；后续翻页携带首响应哈希，源文件变化返回 409，不混用版本。文本以普通文本渲染，不执行文档脚本或外部资源。
+- 模型通过 `file_read(view="document", unit=1, unit_count=5, text_offset=0, sha256=...)` 读取；unit_count 最大 10，返回字节上限仍为 64000。长内容先在相同 unit/unit_count 下续用 next_offset；完成后再推进 next_unit。没有可提取文字的页面保留空文本，不将其解释为没有图片/图纸；不会自动调用视觉/OCR。
+- `GET /files/document/navigation?folder_id=...&path=...&sha256=...&action=outline|search&query=...&offset=0&ignore_case=true` 返回 `DocumentNavigation`，复用文件预览的鉴权、路径及哈希检查。outline 读取真实 PDF 书签、DOCX 内置 Heading 1–9、工作表或幻灯片标题，不根据正文猜目录；search 为 1–200 字符的字面匹配，默认忽略大小写，不接受正则。只覆盖已提取文字，不搜索图片或省略的 Word 结构。
+- 文档导航返回 `items[{unit,kind,text,text_offset,level}]`，单次最多 20 项，`next_offset` 为下一组目录项/匹配项游标，不是文件字节偏移；响应保留 format/sha256/parser_version/total_units/empty_text_units。空文本单元不等于空白页面；没有匹配不证明图片中没有目标内容。PDF 目录最多保留 1000 个有效目标，超限时 `outline_truncated=true`。
+- `file_read` 的 document 模式新增 `document_action=outline|search`，搜索携带 query，可用 lookup_offset/ignore_case 控制分页和大小写；默认 read 保持原接口。模型先取目录或定位关键词，再用 `document_action=read, unit_count=1, unit=结果.unit, text_offset=结果.text_offset` 回读，并沿用响应 sha256。文档附件的初始读取提示指向 outline，不额外调用模型生成摘要。
+- `GET /files/document/page?folder_id=...&path=...&sha256=...&unit=1` 返回该 PDF 页的 PNG；复用路径、敏感项、版本及登录检查。PDFium 独立子进程按页栅格化，不嵌入 PDF 脚本；目标像素至多约 400 万、最长边 4096，输出不超过 16 MiB，20 秒超时。
+- `GET /files/document/ocr-languages` 返回本机 Tesseract 可用语言列表；空列表不表示已安装。`GET /files/document?...&mode=ocr` 对选定 PDF 页识别文字，返回 `mode=ocr` 的 DocumentPage，仍按 text_offset 续读。整条页 OCR 请求 25 秒上限；不自动 OCR 整本文件，也不将识别结果混进原文关键词检索。
+- 工具使用 `file_read(view=document, document_action=render|ocr, unit=...)` 查看同一页，或 `file_read(view=ocr, path=..., sha256=..., text_offset=...)` 识别栅格图片文字。页图经标准图片块回给视觉模型；已知纯文本模型不能接收页图，可选择 OCR。OCR 不具备图表理解能力。
+- 文字提取、目录和查找共用 pypdf/python-docx/openpyxl/python-pptx 和 AnyIO 可取消工作进程，最多并发 2 项，20 秒超时；页图/OCR 另有 2 项并发上限。单文件 16 MiB；PDF 至多 200 页、单页展开内容流上限 4 MiB；Office 至多 3000 ZIP 成员、展开总量 64 MiB、单 XML 8 MiB；提取文字总量 100 万字符；XLSX 至多 100 个工作表、每表 10000 行/200 列，PPTX 至多 200 张幻灯片。内容流大小检查发生在第三方解码后，因此不是硬内存配额或 OS 沙箱。进程内缓存最多 4 份，键含原字节、格式和 parser_version；没有持久解析缓存。
+- 不按固定回合数衰减附件；同一内容只物化一次。旧图片仅在总量超过 16 MiB 或切换到已知不支持看图的模型时移除视觉块并保留引用；当前回合原生不支持时仅在本机 OCR 可用后降级文字，否则拒绝；原生图片总量仍超限时明确拒绝。历史文件缺失/变化时说明不可用，不伪造内容；跨目录不重新读取旧目录附件。GUI 附件消息仍需等当前任务结束后发送。
 - `GET /workspaces/{workspace_id}/settings/image-generation` 和 `PUT` 使用已声明的响应契约。PUT 为 `{settings, api_key?, clear_api_key?}`；settings 包含 enabled/protocol/base_url/model/size/response_format/timeout_seconds。凭证引用按端点绑定，`credential_required` 由服务端管理，换地址不沿用旧密钥。
 - protocol 为 `images` 时复用 OpenAI SDK `images.generate`，一次请求一张图片；`responses` 时调用官方 Responses `image_generation` 工具，限制一次工具调用并设置 `store=false`。不按端口或模型名猜协议、不自动换接口、不自动重试；兼容服务必须实际实现所选接口。
 - `image_generate` 走现有权限审批与审计，L5 单次授权；显式完全访问沿用既有放行语义。审批哈希绑定当前配置摘要。请求前使用工具调用 ID 原子写入审计意图，同一 ID 的崩溃重放不再请求服务；结果不确定时提示先检查产物，再显式发起新的调用。成功结果 `images` 只含工作区文件信息，保存到 `generated-images/`，并沿现有 `file.changed` 通知文件变化。取消不能保证远端停止或未计费；不提供跨崩溃 exactly-once 保证。
-- `GET /files/content` 增加 mime_type/data_url。文本上限 512 KiB，受支持栅格图片上限 16 MiB，超限不返回截断 Base64。Markdown 由前端净化后渲染；HTML 为无脚本、无网络、无同源权限的静态 iframe。SVG 沿用文本接口，由前端 XML 解析与 DOMPurify 净化后作为 `<img>` 图片预览，不作为内联 DOM 或可执行文档；外部引用、脚本与嵌入网页不可用，保留本地片段引用和内嵌栅格图片。截断、畸形或含自定义实体的 SVG 不渲染，保留源码入口。
+- `GET /files/content` 返回 mime_type/data_url，可带 `sha256` 核对附件快照。哈希不符返回 `409 ATTACHMENT_CHANGED`；聊天缩略图与附件预览均携带哈希，不展示被替换后的内容作为原附件。文本上限 512 KiB，受支持栅格图片上限 16 MiB，超限不返回截断 Base64。Markdown 由前端净化后渲染；HTML 为无脚本、无网络、无同源权限的静态 iframe。SVG 沿用文本接口，由前端 XML 解析与 DOMPurify 净化后作为 `<img>` 图片预览，不作为内联 DOM 或可执行文档；外部引用、脚本与嵌入网页不可用，保留本地片段引用和内嵌栅格图片。截断、畸形或含自定义实体的 SVG 不渲染，保留源码入口。
 - `GET /files/download?folder_id=...&path=...` 使用相同工作区前缀与认证，额外要求 owner；只读注册目录内的非敏感普通文件，安全句柄读取拒绝链接/越界，最多 48 MiB。返回 `application/octet-stream`、安全 `Content-Disposition: attachment`、`no-store/nosniff`；超限为 `413 FILE_DOWNLOAD_TOO_LARGE`。前端使用携带认证的 Blob 下载，不把带凭证 URL 交给浏览器。它不解压 ZIP，也不要求文件可预览。
+
+2026-10-28 的文本附件、预算物化和回读增量尚未进行行为验收；不沿用下面旧图片路径的测试结论。
 
 上面的路径仍受既有本机访问和工作区授权边界约束。不新增多模态 Runtime，不表示所有模型均支持图片输入，也不包含任意厂商原生图片输出、图生图/蒙版编辑、视频或音频。
 
@@ -261,7 +281,7 @@ PUT 完整替换 `config`（2 MiB 上限）：`revision / mcp_servers / skill_di
 
 `request_timeout_seconds` 默认 30，允许 1～660 秒，只控制工具调用；资源导入仍限 30 秒。修改后须应用扩展配置，不会热改活动调用。
 
-`result_adapter` 为 `none | antenna_design`，缺省为 `none`。显式选择天线适配后，`antenna.solve / get_result / render` 使用计算回执，`antenna.design / export / get_delivery` 使用候选包回执。现有审批通过后，宿主校验 `schema_version=1` 和调用身份，通过同一个 SDK 连接读取固定资源，再写入当前对话目录；不接受任意 URL，不改变 MCP 风险等级。
+`result_adapter` 为 `none | antenna_design`，缺省为 `none`。显式选择天线适配后，`antenna.solve / get_result / render` 使用 v1 计算回执，`antenna.design / export / get_delivery` 使用候选包回执（当前 v2，兼容读取 v1）。现有审批通过后，宿主按回执类型校验 schema_version 和调用身份，通过同一个 SDK 连接读取固定资源，再写入当前对话目录；不接受任意 URL，不改变 MCP 风险等级。事件信封的 schema_version 独立于天线回执版本，不能一并升级。
 
 投影沿用 `tool.completed.data`：计算结果使用 `antenna_result`，候选包使用 `antenna_delivery`；共享 `output_directory / images / files / import_complete / import_warning / import_warning_code / import_warning_params`。图片复用 `ImageReference`，文件下载沿用既有鉴权接口，ZIP 不在宿主解压。导入失败保留计算或交付原件，不自动重算；无效回执返回 `ANTENNA_RESULT_INVALID`，不读取文件。
 

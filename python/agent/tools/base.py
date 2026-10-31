@@ -11,10 +11,11 @@ from typing import TYPE_CHECKING, Any, cast
 
 from langchain.tools import ToolRuntime
 from langchain_core.messages import ToolMessage
+from langchain_core.messages.content import ImageContentBlock
 from langchain_core.tools import StructuredTool
 from langchain_core.utils.pydantic import model_json_schema
 
-from agent.errors import public_error
+from agent.errors import UserFacingError, public_error
 from agent.tools.execution_context import ExecutionMetadata
 from agent.tools.validator import ToolValidator
 
@@ -93,7 +94,8 @@ class BaseTool(ABC):
                     result = await result.collect()
             except (OSError, ValueError) as exc:
                 result = ToolResult.failure(
-                    {}, public_error(exc), error_code="TOOL_EXECUTION_FAILED",
+                    {}, public_error(exc),
+                    error_code=(exc.code if isinstance(exc, UserFacingError) and exc.code else "TOOL_EXECUTION_FAILED"),
                 )
             payload = {
                 "data": result.data,
@@ -109,7 +111,13 @@ class BaseTool(ABC):
             if result.data:
                 model_payload.pop("raw", None)
             return ToolMessage(
-                content=json.dumps(model_payload, ensure_ascii=False, default=str),
+                content=[{"type": "text", "text": json.dumps(model_payload, ensure_ascii=False)},
+                         *[dict(block) for block in result.model_content]]
+                if result.model_content is not None else json.dumps(model_payload, ensure_ascii=False, default=str),
+                additional_kwargs={
+                    key: result.metadata[key] for key in ("image_bytes", "image_folder", "attachment_refs")
+                    if key in result.metadata
+                },
                 # UI evidence is retained as an artifact, not duplicated in
                 # model context. It is never a trusted authorization input.
                 artifact={**payload, "file_change": result.metadata.get("file_change")},
@@ -135,6 +143,7 @@ class ToolResult:
     error_code: str | None
     user_hint: str | None
     action: dict[str, str] | None
+    model_content: list[ImageContentBlock] | None
 
     def __init__(
         self,
@@ -143,11 +152,13 @@ class ToolResult:
         raw: str | bytes | None = None,
         metadata: dict[str, Any] | None = None,
         *,
+        model_content: list[ImageContentBlock] | None = None,
         success: bool = True,
         error_code: str | None = None,
         user_hint: str | None = None,
         action: dict[str, str] | None = None,
     ) -> None:
+        self.model_content = model_content
         self.data = data
         self.summary = summary
         self.raw = raw

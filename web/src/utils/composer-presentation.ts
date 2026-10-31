@@ -1,6 +1,6 @@
 import type { PermissionMode } from '@/api/client'
 import type { ModelOption } from '@/config/model-groups'
-import type { ImageReference } from '@/api/images'
+import type { AttachmentReference } from '@/api/images'
 export function menuSelectionIndex(key: string, current: number, count: number): number | null {
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End', 'PageDown', 'PageUp'].includes(key)) return null
   if (!count) return -1
@@ -29,7 +29,7 @@ export interface ComposerProps {
   submit?: (
     content: string,
     intent: 'send' | 'guide' | 'later',
-    images?: ImageReference[],
+    images?: AttachmentReference[],
   ) => Promise<void>
 }
 export const composerDefaults = {

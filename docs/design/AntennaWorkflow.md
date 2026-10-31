@@ -156,7 +156,7 @@ MaigoKite adapter                      对应的薄 adapter
 
 同仓库的 `extensions/antenna_design/` 已建立独立 Python distribution：自有 `pyproject.toml`、`uv.lock`、LICENSE、README、输入示例和 `src/antenna_workflow/`。基础安装只含 Pydantic，求解/绘图放在 `engineering` extra，官方 MCP SDK 放在 `mcp` extra，不进入普通聊天默认安装。当前工程 CLI 与可选 MCP stdio 入口共用 worker；没有创建尚未实现的领域阶段、持久化或执行框架空壳。MaigoKite 结果 adapter 已位于主应用集成层，只按版本化 MCP 传输回执接线。
 
-MCP 当前注册 16 个高层工具，完整清单和参数只在[独立包说明](../../extensions/antenna_design/README.md#高层工具)维护。`solve` 一次只做一次数值计算；`optimize / design` 可在项目限额内执行多个候选和频点。单实例只有一个计算槽，默认 worker 时限 20 秒，宿主工具时限默认 30 秒，可分别配置。
+MCP 当前注册 17 个高层工具，包括新增的 `get_design_state`；完整清单和参数只在[独立包说明](../../extensions/antenna_design/README.md#高层工具)维护。`solve` 一次只做一次数值计算；`optimize / design` 可在项目限额内执行多个候选和频点。单实例只有一个计算槽，默认 worker 时限 20 秒，宿主工具时限默认 30 秒，可分别配置。
 
 `get_result` 取回原 run_id，不需原始输入；`render` 将核验过的数值复制到新 output_run_id 后补画，不调用 solver、不改旧目录。数值完整但图片不完整时可先发布数值，缺图不进入资源清单。`cancel` 按运行编号和可选调用身份停止 worker，清理后才确认；活跃状态来自进程所有权，历史结果来自磁盘校验。Linux 已有真实 MCP/solver 和生产 Core 显式工具记录，不等于自然语言、GUI 或跨平台验收，也没有注册主应用专用天线模式。
 
@@ -200,7 +200,7 @@ LangGraph 依赖只存在于外部执行适配器，其 `thread_id`、interrupt�
 
 ### 3.3 状态与事务所有权
 
-下表约定各类数据的所有者。当前项目库保存身份、求解准入与限额修改，不保存完整 Brief、设计阶段或模型调用预算；这些目标记录不能写成已有数据库能力。
+下表约定各类数据的所有者。当前项目库已保存身份、求解准入、限额修改和有限设计作业的证据里程碑；完整 Brief、DISCOVERY/CONCEPT 等需求阶段及模型调用预算尚未实现，不能与已提交里程碑混为一谈。
 
 | 数据 | 权威所有者 | 其他层持有什么 |
 | --- | --- | --- |
@@ -211,7 +211,7 @@ LangGraph 依赖只存在于外部执行适配器，其 `thread_id`、interrupt�
 | solver 进程与计算任务 | MCP Server 的本次计算资源 | Agent 只持有受作用域约束的 job ID |
 | oracle、兼容 profile 与差异报告 | 开发验证资源及版本化报告 | 生产只使用明确覆盖范围的 profile，不调用 GUI |
 
-当前 `project_store` 直接使用标准 SQLite 的事务保存求解准入，不借用主应用 Repository。预算提交先于目录创建和 worker 启动；调用期间不持有事务，提交后中断保守占用额度，缺少证据不自动重放。它不保存 Brief/阶段，不定义通用仓储框架或 event sourcing，也不承诺通用 exactly-once。未来领域 revision 与模型预算继续遵循同一权威所有权，而不是在宿主另存可编辑账本。
+`project_store` 使用标准 SQLite 事务保存求解准入与带 revision 的 `WorkflowState`，不借用主应用 Repository。预算提交先于目录创建和 worker 启动；计算期间不持有事务，中断保守占用额度，缺少证据不自动重放。`DESIGN_READY / SEARCH_RECORDED / VALIDATION_RECORDED / DELIVERED` 只表示最后提交的证据，不保存完整 Brief、运行进程或可恢复的优化种群，也不提供通用 exactly-once。后续模型预算仍由领域项目管理，不在宿主另存可编辑账本。
 
 若宿主选择 LangGraph，直接使用官方 checkpointer，不自行序列化 continuation，也不把 checkpoint 变成核心恢复格式。恢复应核对领域操作是否已提交，避免执行快照滞后导致重复计量或重复优化；UI 投影失败不成为重跑 solver 的理由。实现这种桥接须等兼容性路线成立后再做。[LangGraph 持久化边界](https://docs.langchain.com/oss/python/langgraph/persistence)
 

@@ -7,6 +7,7 @@ import binascii
 import codecs
 import contextlib
 import errno
+import hashlib
 import os
 import re
 import subprocess
@@ -15,16 +16,26 @@ import uuid
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, TypedDict, cast
 from urllib.parse import quote
 
 from anyio import to_thread
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 
 from agent.api import contracts as dto
 from agent.api.sessions import owner
 from agent.api.workspace_fs import create_entry, read_file
-from agent.media import IMAGE_LIMIT, IMAGE_SUFFIXES, ImageReference, image_mime, save_image
+from agent.document_visuals import ocr_languages, read_document_ocr, render_document_page
+from agent.documents import DocumentNavigation, DocumentPage, document_format, navigate_document, read_document
+from agent.media import (
+    IMAGE_LIMIT,
+    IMAGE_SUFFIXES,
+    AttachmentReference,
+    ImageReference,
+    image_mime,
+    save_attachment,
+    save_image,
+)
 from agent.security.sensitive_paths import is_sensitive_path, validate_windows_path
 from agent.tools.native.file_search import file_search_status
 from agent.utils.sandbox import process_sandbox_status
@@ -108,10 +119,12 @@ def list_files(root: Path, relative: str) -> dict[str, object]:
     return {"path": relative, "entries": entries, "truncated": truncated}
 
 
-def preview(root: Path, relative: str, limit: int = PREVIEW_LIMIT) -> FilePreview:
+def preview(root: Path, relative: str, limit: int = PREVIEW_LIMIT, *, sha256: str = "") -> FilePreview:
     path = resolve(root, relative)
-    read_limit = IMAGE_LIMIT if path.suffix.lower() in IMAGE_SUFFIXES else limit
+    read_limit = IMAGE_LIMIT if sha256 or path.suffix.lower() in IMAGE_SUFFIXES else limit
     data, info = read_file(root, str(path.relative_to(root)), read_limit)
+    if sha256 and hashlib.sha256(data).hexdigest() != sha256:
+        raise dto.APIError(409, "ATTACHMENT_CHANGED", "附件内容已改变，请重新添加后发送。")
     mime_type = image_mime(data)
     if mime_type:
         truncated = len(data) > read_limit
@@ -328,8 +341,65 @@ def routes(core: AgentCore, execution: Execution) -> APIRouter:
         return await to_thread.run_sync(partial(list_files, await root(workspace_id, folder_id), path))
 
     @router.get("/files/content", response_model=dto.WorkspaceFileResponse)
-    async def content(workspace_id: str, folder_id: str = "", path: str = "") -> FilePreview:
-        return await to_thread.run_sync(partial(preview, await root(workspace_id, folder_id), path))
+    async def content(
+        workspace_id: str, folder_id: str = "", path: str = "",
+        sha256: str = Query(default="", pattern=r"^$|^[0-9a-f]{64}$"),
+    ) -> FilePreview:
+        return await to_thread.run_sync(partial(preview, await root(workspace_id, folder_id), path, sha256=sha256))
+
+    @router.get("/files/document", response_model=DocumentPage)
+    async def document_content(
+        workspace_id: str, folder_id: str = "", path: str = "",
+        sha256: str = Query(default="", pattern=r"^$|^[0-9a-f]{64}$"),
+        unit: int = Query(default=1, ge=1), text_offset: int = Query(default=0, ge=0),
+        mode: Literal["text_layer", "ocr"] = "text_layer",
+    ) -> DocumentPage:
+        directory = await root(workspace_id, folder_id)
+        target = resolve(directory, path)
+        if is_sensitive_path(target):
+            raise dto.APIError(403, "ATTACHMENT_ACCESS_DENIED", "此文件不能作为附件读取。")
+        data, _ = await to_thread.run_sync(read_file, directory, path, IMAGE_LIMIT)
+        if sha256 and hashlib.sha256(data).hexdigest() != sha256:
+            raise dto.APIError(409, "ATTACHMENT_CHANGED", "附件内容已改变，请重新添加后发送。")
+        if mode == "ocr":
+            return await read_document_ocr(data, unit, text_offset)
+        return await read_document(data, unit=unit, text_offset=text_offset)
+
+    @router.get("/files/document/ocr-languages", response_model=list[str])
+    async def document_languages(workspace_id: str) -> list[str]:
+        return await ocr_languages()
+
+    @router.get("/files/document/page", response_model=None)
+    async def document_page_image(
+        workspace_id: str, folder_id: str = "", path: str = "",
+        sha256: str = Query(default="", pattern=r"^$|^[0-9a-f]{64}$"),
+        unit: int = Query(default=1, ge=1),
+    ) -> Response:
+        directory = await root(workspace_id, folder_id)
+        target = resolve(directory, path)
+        if is_sensitive_path(target):
+            raise dto.APIError(403, "ATTACHMENT_ACCESS_DENIED", "此文件不能作为附件读取。")
+        data, _ = await to_thread.run_sync(read_file, directory, path, IMAGE_LIMIT)
+        if sha256 and hashlib.sha256(data).hexdigest() != sha256:
+            raise dto.APIError(409, "ATTACHMENT_CHANGED", "附件内容已改变，请重新添加后发送。")
+        return Response(await render_document_page(data, unit), media_type="image/png",
+                        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+    @router.get("/files/document/navigation", response_model=DocumentNavigation)
+    async def document_navigation(
+        workspace_id: str, action: Literal["outline", "search"], folder_id: str = "", path: str = "",
+        sha256: str = Query(default="", pattern=r"^$|^[0-9a-f]{64}$"),
+        query: str = Query(default="", max_length=200), offset: int = Query(default=0, ge=0, le=1_000_000),
+        ignore_case: bool = True,
+    ) -> DocumentNavigation:
+        directory = await root(workspace_id, folder_id)
+        target = resolve(directory, path)
+        if is_sensitive_path(target):
+            raise dto.APIError(403, "ATTACHMENT_ACCESS_DENIED", "此文件不能作为附件读取。")
+        data, _ = await to_thread.run_sync(read_file, directory, path, IMAGE_LIMIT)
+        if sha256 and hashlib.sha256(data).hexdigest() != sha256:
+            raise dto.APIError(409, "ATTACHMENT_CHANGED", "附件内容已改变，请重新添加后发送。")
+        return await navigate_document(data, action=action, query=query, offset=offset, ignore_case=ignore_case)
 
     @router.get("/files/download", dependencies=[Depends(owner)], response_model=None)
     async def download_file(workspace_id: str, folder_id: str = "", path: str = "") -> Response:
@@ -349,6 +419,37 @@ def routes(core: AgentCore, execution: Execution) -> APIRouter:
         return await to_thread.run_sync(
             partial(save_image, await root(workspace_id, folder_id), "chat-images", uuid.uuid4().hex, data, folder_id),
         )
+
+    @router.post("/files/attachments", status_code=201, dependencies=[Depends(owner)],
+                 response_model=AttachmentReference)
+    async def upload_attachment(
+        workspace_id: str, body: dto.AttachmentUpload, folder_id: str = "",
+    ) -> AttachmentReference:
+        try:
+            data = base64.b64decode(body.data, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise dto.APIError(400, "ATTACHMENT_ENCODING_INVALID", "文件编码无效。") from exc
+        if await to_thread.run_sync(document_format, data) is not None:
+            await read_document(data)
+        return await to_thread.run_sync(partial(
+            save_attachment, await root(workspace_id, folder_id), body.name, data, folder_id, uuid.uuid4().hex,
+        ))
+
+    @router.post("/files/attachments/reference", status_code=201, dependencies=[Depends(owner)],
+                 response_model=AttachmentReference)
+    async def reference_attachment(
+        workspace_id: str, body: dto.AttachmentSource, folder_id: str = "",
+    ) -> AttachmentReference:
+        directory = await root(workspace_id, folder_id)
+        path = resolve(directory, body.path)
+        if is_sensitive_path(path):
+            raise dto.APIError(403, "ATTACHMENT_ACCESS_DENIED", "此文件不能作为附件读取。")
+        data, _ = await to_thread.run_sync(read_file, directory, body.path, IMAGE_LIMIT)
+        if await to_thread.run_sync(document_format, data) is not None:
+            await read_document(data)
+        return await to_thread.run_sync(partial(
+            save_attachment, directory, path.name, data, folder_id, uuid.uuid4().hex,
+        ))
 
     @router.post("/files", status_code=201, dependencies=[Depends(owner)], response_model=None)
     async def create(

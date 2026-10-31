@@ -13,7 +13,7 @@ import {
   type TaskInput,
 } from '@/api/client'
 import { GatewayError } from '@/api/http'
-import type { ImageReference } from '@/api/images'
+import type { AttachmentReference } from '@/api/images'
 import { EventSocket } from '@/api/socket'
 import { mapGatewayEvent } from '@/api/event-adapter'
 import { useRunStore } from './run'
@@ -33,7 +33,7 @@ export const useSessionStore = defineStore('session', () => {
   const runningTaskIds = ref<Record<string, string[]>>({}),
     approvals = ref<Record<string, Approval[]>>({})
   const queuedMessages = ref<
-    Record<string, { id: string; content: string; attachments?: ImageReference[] }[]>
+    Record<string, { id: string; content: string; attachments?: AttachmentReference[] }[]>
   >({})
   const queuedPaused = ref<Record<string, boolean>>({})
   const stoppingTaskIds = ref<string[]>([])
@@ -50,7 +50,7 @@ export const useSessionStore = defineStore('session', () => {
         key: string
         content: string
         uncertain: boolean
-        attachments: ImageReference[]
+        attachments: AttachmentReference[]
         inputOrigin?: { taskId: string; inputId: string }
       }
     >
@@ -555,7 +555,7 @@ export const useSessionStore = defineStore('session', () => {
   async function guideQueued(id: string, entryId: string) {
     const item = queuedMessages.value[id]?.find((entry) => entry.id === entryId)
     if (!item) return
-    if (item.attachments?.length) throw new Error(t('请等待当前任务结束后再发送图片。'))
+    if (item.attachments?.length) throw new Error(t('请等待当前任务结束后再发送附件。'))
     await guideTask(id, item.content)
     const index = queuedMessages.value[id]?.findIndex((entry) => entry.id === entryId) ?? -1
     if (index >= 0) removeQueued(id, index)
@@ -654,7 +654,7 @@ export const useSessionStore = defineStore('session', () => {
     id: string,
     content: string,
     inputOrigin?: { taskId: string; inputId: string },
-    attachments: ImageReference[] = [],
+    attachments: AttachmentReference[] = [],
   ) {
     const previous = submissions.value[id]
     if (!previous && sessions.value.find((item) => item.id === id)?.archived)

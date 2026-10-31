@@ -62,6 +62,8 @@ SQLite 是当前唯一业务库，领域写入由 Python Repository 管理。敏
 
 请求必须依次经过本机来源/工作区归属检查、Python ToolPolicy、实际资源边界与 hard-deny。API 允许不能跳过工具策略，技能也不能扩大授权。风险与模式的唯一矩阵见 [工具权限](../agent-capabilities/security/tool-permission.md)。
 
+桌面请求还需通过 Electron 每次启动生成的凭据验证；仅来自 loopback 或声明 `Origin: null` 不足以获得访问权。浏览器模式与受管桌面模式的具体区别见 [后端访问边界](BackendDesign.md#3-凭证与访问边界)，该凭据不提供手机远程认证。
+
 ## 5. 本地运行与关闭
 
 桌面模式为 Electron + 单 Python 后端，默认只监听 127.0.0.1:8080；Web 构建版由同一后端提供静态页面，开发版另外启动 Vite。MCP 子进程由核心服务持有。源码启动器和 Electron 协调退出，核心服务等待活动运行实例清理后关闭依赖；不能先标记 cancelled 再遗留后台执行。CLI 可指定 loopback 端口，成套入口与前端代理约定使用 8080。

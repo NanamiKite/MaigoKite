@@ -90,7 +90,12 @@ export const useUIStore = defineStore('ui', () => {
   const layout = useLayoutStore()
   const drawerOpen = ref(false)
   const drawerTab = ref<'changes' | 'jobs' | 'plan' | 'files' | 'pending'>('changes')
-  const filePreviewRequest = ref<{ path: string; folderId: string; serial: number } | null>(null)
+  const filePreviewRequest = ref<{
+    path: string
+    folderId: string
+    serial: number
+    sha256?: string
+  } | null>(null)
   let filePreviewSerial = 0
   const chatTurnRequest = ref<{ sessionId: string; turnId: string; serial: number } | null>(null)
   let chatTurnSerial = 0
@@ -117,8 +122,8 @@ export const useUIStore = defineStore('ui', () => {
     drawerOpen.value = true
   }
   // A presentation request, not file contents or a second workspace authority.
-  function openFilePreview(path: string, folderId: string) {
-    filePreviewRequest.value = { path, folderId, serial: ++filePreviewSerial }
+  function openFilePreview(path: string, folderId: string, sha256?: string) {
+    filePreviewRequest.value = { path, folderId, sha256, serial: ++filePreviewSerial }
     openDrawer('files')
   }
   // One-shot navigation intent only; no task or conversation state is copied here.

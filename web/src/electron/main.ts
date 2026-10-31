@@ -5,11 +5,13 @@ import {
   globalShortcut,
   Menu,
   screen,
+  session,
   shell,
   Tray,
   type WebPreferences,
 } from 'electron'
 import { spawn, type ChildProcess } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { createServer } from 'node:net'
@@ -17,6 +19,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { createRuntimeEnvironment } from './runtime-env'
 import { resolveCorePython } from './python-runtime'
+import { authorizeDesktopRequests, backendURL, desktopHeaders } from './desktop-access'
 import { registerIPC } from './ipc'
 import { registeredWorkspaceRoot } from './workspace'
 import { appearanceValue } from './contracts'
@@ -99,6 +102,12 @@ let runtimeFailure = '',
 const indexPath = path.resolve(__dirname, '../dist/index.html')
 const builtUI = app.isPackaged || process.env.MAIGOKITE_DESKTOP_BUILT === '1'
 const developmentURL = 'http://127.0.0.1:5173'
+const externalRuntime =
+  process.env.MAIGOKITE_EXTERNAL_RUNTIME === '1' || process.env.VITE_MOCK === '1'
+const desktopToken = externalRuntime
+  ? process.env.MAIGOKITE_DESKTOP_TOKEN || ''
+  : randomBytes(32).toString('hex')
+delete process.env.MAIGOKITE_DESKTOP_TOKEN
 const appIconPath = path.resolve(
   __dirname,
   app.isPackaged
@@ -160,6 +169,7 @@ function startProcess(
     env.MAIGOKITE_WORKSPACE_ROOT = absoluteHostPath(env.MAIGOKITE_WORKSPACE_ROOT)
   if (configPath) env.MAIGOKITE_CONFIG = configPath
   env.MAIGOKITE_PARENT_PIPE = '1'
+  env.MAIGOKITE_DESKTOP_TOKEN = desktopToken
   console.info(`[MaigoKite] Starting ${name}`)
   // The process group includes subprocesses launched by the backend's tools.
   const child = spawn(command, args, {
@@ -199,8 +209,10 @@ async function waitForService(service: 'Backend' | 'Web') {
     // A listening socket alone does not mean recovery or Vite initialization has finished.
     let ready = false
     try {
-      const response = await fetch(backend ? 'http://127.0.0.1:8080/health' : developmentURL, {
+      const target = backend ? `${backendURL}/health` : developmentURL
+      const response = await fetch(target, {
         method: backend ? 'GET' : 'HEAD',
+        headers: desktopHeaders(target, desktopToken),
         redirect: 'error',
         signal: AbortSignal.any([signal, AbortSignal.timeout(1_000)]),
       })
@@ -215,7 +227,7 @@ async function waitForService(service: 'Backend' | 'Web') {
   throw new Error(t('{0} 启动超时（端口 {1}）。请查看终端日志。', [service, port]))
 }
 async function startRuntime() {
-  if (process.env.MAIGOKITE_EXTERNAL_RUNTIME === '1' || process.env.VITE_MOCK === '1') return
+  if (externalRuntime) return
   // Do not attach to a previous instance's open TCP port or mutate its database.
   for (const port of [8080])
     await new Promise<void>((resolve, reject) => {
@@ -463,11 +475,28 @@ app
     if (!singleInstance || quitting) return
     if (process.platform === 'darwin') app.dock?.setIcon(appIconPath)
     i18n.global.locale.value = resolveLanguage(appearance?.language, app.getLocale())
+    authorizeDesktopRequests(
+      session.defaultSession,
+      desktopToken,
+      (details) => {
+        const window = [mainWindow, capsuleWindow].find(
+          (item) => item && !item.isDestroyed() && item.webContents.id === details.webContentsId,
+        )
+        const contents = window?.webContents
+        return Boolean(
+          contents &&
+          !contents.isDestroyed() &&
+          details.frame === contents.mainFrame &&
+          isAllowedNavigation(contents.mainFrame.url, !builtUI),
+        )
+      },
+      builtUI ? undefined : developmentURL,
+    )
     registerIPC({
       main: () => mainWindow,
       capsule: () => capsuleWindow,
       allowed: (url) => isAllowedNavigation(url, !builtUI),
-      workspace: (folderId = '') => registeredWorkspaceRoot(folderId),
+      workspace: (folderId = '') => registeredWorkspaceRoot(folderId, desktopToken),
       appearance: () => appearance,
       setAppearance,
       pulse: setPulse,

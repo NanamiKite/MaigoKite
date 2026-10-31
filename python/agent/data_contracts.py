@@ -236,11 +236,12 @@ def available_approval_scopes(resource: JSONObject | None) -> list[ApprovalScope
     checks. Old task/session grants retain their engine/origin boundaries.
     """
     scopes: list[ApprovalScope] = ["once"]
-    if not resource:
+    if not resource or resource.get("one_time_only"):
         return scopes
     scopes.extend(["task", "session"])
     if (
-        resource.get("policy_version") == 2
+        not resource.get("attachment_sources")
+        and resource.get("policy_version") == 2
         and resource.get("risk") == "L3"
         and resource.get("tool") in ("web_search", "web_fetch")
         and resource.get("mode") in ("read_only", "workspace", "workspace_auto", "danger_full_access")

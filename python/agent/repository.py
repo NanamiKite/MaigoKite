@@ -1656,6 +1656,26 @@ class SQLiteRepository:
         async with self._lock:
             return self._list_authorizations(workspace_id, conversation_id, principal_id, task_id)
 
+    def _attachment_sources_hash(self, workspace_id: str, conversation_id: str) -> str:
+        # Persisted user attachments are the authority; model arguments cannot claim a trusted origin.
+        rows = self._db().execute(
+            """SELECT DISTINCT json_extract(a.value,'$.path') AS path,
+                       json_extract(a.value,'$.sha256') AS hash
+                FROM messages m JOIN conversations c ON c.id=m.conversation_id,
+                     json_each(m.attachments_json) a
+                WHERE c.workspace_id=? AND c.id=? AND m.role='user'
+                  AND COALESCE(json_extract(a.value,'$.folder_id'),'')=c.folder_id
+                ORDER BY path,hash""", (workspace_id, conversation_id),
+        ).fetchall()
+        if not rows:
+            return ""
+        values = [(str(row["path"]), str(row["hash"])) for row in rows]
+        return hashlib.sha256(json.dumps(values, ensure_ascii=False).encode()).hexdigest()
+
+    async def attachment_sources_hash(self, workspace_id: str, conversation_id: str) -> str:
+        async with self._lock:
+            return self._attachment_sources_hash(workspace_id, conversation_id)
+
     async def execution_authority(
         self, workspace_id: str, conversation_id: str, principal_id: str, task_id: str,
     ) -> tuple[PermissionMode, list[AuthorizationRecord]]:
@@ -1838,6 +1858,9 @@ class SQLiteRepository:
             if int(item["version"]) != version:
                 raise ValueError("approval version conflict")
             reuse = JSON_OBJECT.validate_json(item["reuse_scope_json"])
+            source_hash = self._attachment_sources_hash(workspace_id, str(item["conversation_id"]))
+            if decision == "allow" and reuse.get("attachment_sources", "") != source_hash:
+                raise PermissionError("conversation attachments changed; refresh the approval")
             if scope not in available_approval_scopes(reuse):
                 raise ValueError("scope is not available for this approval")
             if scope != "once":

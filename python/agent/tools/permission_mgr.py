@@ -131,6 +131,7 @@ class PermissionManager:
         approved: bool = False,
         risk_override: int | None = None,
         mode: str | None = None,
+        attachment_sources: str = "",
     ) -> PolicyDecision:
         try:
             effective_mode = self.normalize_mode(mode or self.mode)
@@ -391,17 +392,25 @@ class PermissionManager:
             auto = False
         if outside_workspace or escalate or (allow_network and tool_name in {"bash", "exec_command"}):
             auto = False
+        source_review = bool(attachment_sources) and tool_name not in {
+            "file_read", "glob", "grep", "skill", "sleep", "todo_write",
+        } and not (tool_name == "browser" and normalized.get("action") in {"snapshot", "close"})
+        if source_review:
+            auto = False
         if unrestricted:
             auto = True
         sandbox_mode: PermissionMode = (
             "danger_full_access" if unrestricted or outside_workspace or escalate else "workspace"
         )
         reuse = self._reuse_scope(tool_name, normalized, risk, effective_mode)
+        if attachment_sources:
+            reuse = {**(reuse or {"one_time_only": True}), "attachment_sources": attachment_sources}
         if approved or auto:
             return PolicyDecision("allow", risk, "allowed by policy", normalized, resource_scope, reuse,
                                   sandbox_mode=sandbox_mode, allow_network=allow_network)
         reason = (
-            "operation crosses the workspace boundary"
+            "operation uses context containing attachments; confirm this target and action"
+            if source_review else "operation crosses the workspace boundary"
             if outside_workspace or escalate
             else "explicit approval required"
         )
@@ -424,7 +433,7 @@ class PermissionManager:
             and "session_public_web" in available_approval_scopes(resource)
             and all(
                 granted.get(key) == resource.get(key)
-                for key in ("policy_version", "workspace_root", "mode", "risk")
+                for key in ("policy_version", "workspace_root", "mode", "risk", "attachment_sources")
             )
         )
 

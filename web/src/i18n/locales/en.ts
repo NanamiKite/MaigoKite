@@ -1,4 +1,99 @@
 const en: Record<string, string> = {
+  '无法验证桌面连接，请退出并重新启动应用。':
+    'Unable to verify the desktop connection. Quit and restart the app.',
+  '请选择 PDF、DOCX、XLSX 或 PPTX 文档。': 'Choose a PDF, DOCX, XLSX or PPTX document.',
+  '请选择 UTF-8 文本、PDF、DOCX、XLSX、PPTX，或 PNG、JPEG、WebP、GIF 图片。':
+    'Choose UTF-8 text, PDF, DOCX, XLSX, PPTX, or a PNG, JPEG, WebP or GIF image.',
+  '本次授权仅适用于当前附件；添加新附件后需重新确认。':
+    'This grant applies to the current attachments. New attachments require confirmation again.',
+  '将识别图片中的文字，无法理解图形细节。':
+    'Image text will be recognized; visual details cannot be understood.',
+  工作表分段: 'Sheet section',
+  幻灯片: 'Slide',
+  查看方式: 'View',
+  页面图像: 'Page image',
+  识别文字: 'Recognize text',
+  文档页面: 'Document page',
+  '识别结果可能有误，请对照原图。':
+    'Recognition may contain errors. Check against the original image.',
+  '此处没有可提取的文字。': 'No extractable text here.',
+  '可查看页面图像；识别文字需要安装 Tesseract 和语言包。':
+    'You can view the page image. Text recognition requires Tesseract and language packs.',
+  '请安装 Tesseract 和所需语言包，或切换到支持图片的模型。':
+    'Install Tesseract and the required language packs, or switch to a vision model.',
+  '文字识别失败，请检查图片和语言包。':
+    'Text recognition failed. Check the image and language packs.',
+  '文字识别超时，请裁剪图片后重试。': 'Text recognition timed out. Crop the image and retry.',
+  '页面无法显示，请检查文档。': 'The page could not be displayed. Check the document.',
+  '请输入 1 至 200 个字符的搜索内容。': 'Enter 1 to 200 characters to search.',
+  '目录和搜索仅支持文档模式。': 'Use document mode to browse headings or search.',
+  在文档中查找: 'Find in document',
+  输入关键词: 'Enter keywords',
+  查找: 'Find',
+  目录: 'Contents',
+  文档定位结果: 'Document locations',
+  '文档没有可用目录。': 'This document has no available outline.',
+  '未找到匹配文字。': 'No matching text found.',
+  '查找仅覆盖可提取的文字。': 'Search covers extractable text only.',
+  '目录过长，仅显示部分条目。': 'The outline is too long; only part is available.',
+  上一组: 'Previous results',
+  下一组: 'Next results',
+  '文档已损坏，无法读取。': 'The document is damaged and cannot be read.',
+  '请先解密文档后再添加。': 'Decrypt the document before adding it.',
+  '文档超过处理上限，请拆分后再添加。': 'Split the document into smaller files before adding it.',
+  '请选择 PDF 或 DOCX 文档。': 'Choose a PDF or DOCX document.',
+  '页码或段落编号超出文档范围。': 'The page or paragraph is outside the document.',
+  '文档处理超时，请拆分后重试。': 'Document processing timed out. Split it and try again.',
+  '文档处理失败，请检查文档或拆分后重试。':
+    'Document processing failed. Check the file or split it and try again.',
+  上一项: 'Previous',
+  下一项: 'Next',
+  页码: 'Page',
+  段落或表格: 'Paragraph or table',
+  提取文字: 'Extracted text',
+  '此处没有可提取的文字，图片内容请上传截图查看。':
+    'No text could be extracted here. Upload a screenshot to inspect image content.',
+  从头查看: 'Read from start',
+  继续读取: 'Continue reading',
+  '包含 {0} 个附件': 'Contains {0} attachments',
+  '请选择 UTF-8 文本文件，或 PNG、JPEG、WebP、GIF 图片。':
+    'Choose a UTF-8 text file or a PNG, JPEG, WebP or GIF image.',
+  '请选择 UTF-8 文本、PDF、DOCX，或 PNG、JPEG、WebP、GIF 图片。':
+    'Choose UTF-8 text, PDF, DOCX, or a PNG, JPEG, WebP or GIF image.',
+  '文件编码无效。': 'Invalid file encoding.',
+  添加附件: 'Add attachments',
+  文件读取失败: 'Could not read the file',
+  暂时无法添加附件: 'Attachments cannot be added right now',
+  '每条消息最多附带 8 个文件，其中图片最多 4 张，总计不能超过 16 MiB。':
+    'Attach up to 8 files per message, including up to 4 images, with a combined limit of 16 MiB.',
+  松开以添加附件: 'Drop to add attachments',
+  '移除附件 {0}': 'Remove attachment {0}',
+  '正在添加附件…': 'Adding attachments\u2026',
+  附件尚未上传: 'Attachments have not been uploaded',
+  '请查看这些附件。': 'Please review these attachments.',
+  '请等待当前任务结束后再发送附件。':
+    'Wait for the current task to finish before sending attachments.',
+  '未能确认看图能力；发送时会再次检查。':
+    'Image support could not be confirmed. It will be checked again when you send.',
+  '正在确认看图能力…': 'Checking image support\u2026',
+  '当前模型不支持图片，请切换模型后发送。':
+    'This model does not support images. Switch models before sending.',
+  '文件不能超过 16 MiB。': 'Files must not exceed 16 MiB.',
+  '附件内容已改变，请重新添加后发送。': 'The attachment has changed. Add it again before sending.',
+  '附件必须位于当前工作区内。': 'Attachments must be inside the current workspace.',
+  '此文件不能作为附件读取。': 'This file cannot be read as an attachment.',
+  '附件需要分段读取，请启用文件读取工具后发送。':
+    'This attachment needs paged reading. Enable the file reading tool before sending.',
+  '附件超出当前可用输入预算，请减少附件或启用文件读取工具。':
+    'Attachments exceed the available input budget. Remove some or enable file reading.',
+  '附件所属工作区与当前对话不一致，请在当前工作区重新添加。':
+    'The attachment belongs to another workspace. Add it again in this workspace.',
+  '请使用普通聊天消息发送附件；直接工具指令不会读取附件。':
+    'Send attachments in a chat message. Direct tool commands do not read them.',
+  '当前模型不支持图片输入，请切换模型后发送。':
+    'This model does not support image input. Switch models before sending.',
+  '当前回合的图片总量超过 16 MiB，请减少图片或分次读取。':
+    'Images in this turn exceed 16 MiB. Use fewer images or read them in separate turns.',
   '模型设置已更改，请重新打开编辑页面。': 'Model settings have changed. Please reopen the editor.',
   '模型编辑内容无效，请重新选择模型后保存。':
     'Invalid model changes. Please select your models again and save.',

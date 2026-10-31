@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, StrictBool
 from agent.api import contracts as dto
 from agent.api.model_profiles import ModelProfiles
 from agent.api.sessions import owner
+from agent.document_visuals import ocr_languages
 from agent.errors import UserFacingError, error_location, public_error
 from agent.models.discovery import discover_models
 from agent.models.image_generation import IMAGE_SETTING_KEY, ImageSettings
@@ -108,6 +109,16 @@ def routes(core: AgentCore, credentials: Credentials) -> APIRouter:
     @router.post("/models/actions/batch", dependencies=owner_only, response_model=dto.ModelBatchResponse)
     async def update_models(workspace_id: str, body: dto.ModelBatchInput) -> dto.ModelBatchResponse:
         return await profiles.apply(workspace_id, body)
+
+    @router.get("/settings/model-inputs", response_model=dto.InputCapabilities)
+    async def inputs(workspace_id: str, model_id: str = "") -> dto.InputCapabilities:
+        async with asyncio.timeout(12):
+            await credentials.restore_model(workspace_id, model_id)
+            _, model = await core.models.get_langchain_model(workspace_id, model_id)
+            image_input = (model.profile or {}).get("image_inputs")
+            languages = await ocr_languages()
+            return dto.InputCapabilities(image_input=image_input, ocr_languages=languages,
+                                         image_fallback="ocr" if image_input is False and languages else None)
 
     @router.get("/models/{model_id}/thinking", response_model=None)
     async def thinking(workspace_id: str, model_id: str) -> dict[str, object]:

@@ -1,22 +1,33 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { uploadImage, type ImageReference } from '@/api/images'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import {
+  uploadImage,
+  uploadAttachment,
+  referenceAttachment,
+  type AttachmentReference,
+} from '@/api/images'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { t } from '@/i18n'
-import WorkspaceImage from '@/components/chat-area/WorkspaceImage.vue'
+import WorkspaceAttachment from '@/components/chat-area/WorkspaceAttachment.vue'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import InkLoader from '@/components/common/InkLoader.vue'
 
-const props = defineProps<{ modelValue: ImageReference[]; disabled?: boolean }>()
+const imageTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+const props = defineProps<{
+  modelValue: AttachmentReference[]
+  pendingFiles: File[]
+  disabled?: boolean
+}>()
 const emit = defineEmits<{
-  'update:modelValue': [images: ImageReference[]]
+  'update:modelValue': [images: AttachmentReference[]]
+  'update:pendingFiles': [files: File[]]
   busy: [value: boolean]
 }>()
 const workspace = useWorkspaceStore()
 const input = ref<HTMLInputElement | null>(null),
   busy = ref(false),
   error = ref('')
-const pending = ref<File[]>([]),
+const pending = computed(() => props.pendingFiles),
   dragDepth = ref(0)
 const hasPending = computed(() => pending.value.length > 0)
 let controller: AbortController | undefined, reader: FileReader | undefined
@@ -37,14 +48,24 @@ function read(file: File): Promise<string> {
     current.onload = () =>
       typeof current.result === 'string'
         ? resolve(current.result.slice(current.result.indexOf(',') + 1))
-        : reject(new Error(t('图片读取失败')))
-    current.onerror = () => reject(new Error(t('图片读取失败')))
+        : reject(new Error(t('文件读取失败')))
+    current.onerror = () => reject(new Error(t('文件读取失败')))
     current.onabort = () => reject(new Error(t('已取消')))
     current.readAsDataURL(file)
   })
 }
-async function upload() {
-  if (props.disabled || busy.value || !pending.value.length) return
+function append(attachment: AttachmentReference) {
+  const next = [...props.modelValue, attachment]
+  if (
+    next.length > 8 ||
+    next.filter((item) => item.type === 'image').length > 4 ||
+    next.reduce((sum, item) => sum + item.size, 0) > 16 * 1024 * 1024
+  )
+    throw new Error(t('每条消息最多附带 8 个文件，其中图片最多 4 张，总计不能超过 16 MiB。'))
+  emit('update:modelValue', next)
+}
+async function upload(batch: File[] = pending.value) {
+  if (props.disabled || busy.value || !batch.length) return
   const request = new AbortController(),
     folderId = workspace.selectedId
   controller = request
@@ -53,13 +74,18 @@ async function upload() {
   emit('busy', true)
   try {
     // Keep pick order and retain failed files for retry under one upload owner.
-    for (const file of [...pending.value]) {
+    for (const [index, file] of batch.entries()) {
+      if (request.signal.aborted) return
       const data = await read(file)
       if (request.signal.aborted) return
-      const image = await uploadImage(data, folderId, request.signal)
+      const image = imageTypes.includes(file.type)
+        ? await uploadImage(data, folderId, request.signal)
+        : await uploadAttachment(file.name, data, folderId, request.signal)
       if (request.signal.aborted) return
-      emit('update:modelValue', [...props.modelValue, image])
-      pending.value.shift()
+      // The server recognizes bytes; a browser MIME label cannot enforce image limits.
+      append(image)
+      emit('update:pendingFiles', batch.slice(index + 1))
+      await nextTick()
     }
   } catch (reason) {
     if (!request.signal.aborted)
@@ -75,25 +101,23 @@ async function upload() {
 function add(files: File[]) {
   if (!files.length) return
   if (props.disabled || busy.value) {
-    error.value = t('暂时无法添加图片')
+    error.value = t('暂时无法添加附件')
     return
   }
   const batch = [...pending.value, ...files]
-  if (
-    batch.some(
-      (file) => !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type),
-    )
-  ) {
-    error.value = t('请选择 PNG、JPEG、WebP 或 GIF 图片。')
-    return
-  }
   const bytes = [...props.modelValue, ...batch].reduce((sum, file) => sum + file.size, 0)
-  if (props.modelValue.length + batch.length > 4 || bytes > 16 * 1024 * 1024) {
-    error.value = t('每条消息最多附带 4 张图片，总计不能超过 16 MiB。')
+  if (
+    props.modelValue.length + batch.length > 8 ||
+    bytes > 16 * 1024 * 1024 ||
+    props.modelValue.filter((item) => item.type === 'image').length +
+      batch.filter((file) => imageTypes.includes(file.type)).length >
+      4
+  ) {
+    error.value = t('每条消息最多附带 8 个文件，其中图片最多 4 张，总计不能超过 16 MiB。')
     return
   }
-  pending.value = batch
-  void upload()
+  emit('update:pendingFiles', batch)
+  void upload(batch)
 }
 function picked(event: Event) {
   const target = event.target as HTMLInputElement
@@ -132,8 +156,34 @@ function drop(event: DragEvent) {
   add(Array.from(event.dataTransfer?.files || []))
 }
 function removePending(index: number) {
-  pending.value.splice(index, 1)
-  if (!pending.value.length) error.value = ''
+  const next = pending.value.filter((_, itemIndex) => itemIndex !== index)
+  emit('update:pendingFiles', next)
+  if (!next.length) error.value = ''
+}
+async function reference(path: string): Promise<boolean> {
+  if (props.disabled || busy.value || hasPending.value) return false
+  const request = new AbortController(),
+    folderId = workspace.selectedId
+  controller = request
+  busy.value = true
+  error.value = ''
+  emit('busy', true)
+  try {
+    const attachment = await referenceAttachment(path, folderId, request.signal)
+    if (request.signal.aborted) return false
+    append(attachment)
+    return true
+  } catch (reason) {
+    if (!request.signal.aborted)
+      error.value = reason instanceof Error ? reason.message : String(reason)
+    return false
+  } finally {
+    if (controller === request) {
+      controller = undefined
+      busy.value = false
+      emit('busy', false)
+    }
+  }
 }
 onBeforeUnmount(() => {
   cancel()
@@ -141,6 +191,7 @@ onBeforeUnmount(() => {
   emit('busy', false)
 })
 defineExpose({
+  reference,
   hasPending,
   paste,
   dragEnter,
@@ -158,7 +209,6 @@ defineExpose({
     type="file"
     multiple
     hidden
-    accept="image/png,image/jpeg,image/webp,image/gif"
     :disabled="disabled || busy"
     @change="picked"
   />
@@ -172,28 +222,28 @@ defineExpose({
       name="image"
       :size="24"
     />
-    {{ disabled || busy ? $t('暂时无法添加图片') : $t('松开以添加图片') }}
+    {{ disabled || busy ? $t('暂时无法添加附件') : $t('松开以添加附件') }}
   </div>
   <div
     v-if="modelValue.length || pending.length"
     class="image-attachments"
     role="group"
-    :aria-label="$t('图片附件')"
+    :aria-label="$t('附件')"
   >
     <div
       v-for="(image, index) in modelValue"
       :key="image.path"
       class="image-chip"
     >
-      <WorkspaceImage
-        :image="image"
+      <WorkspaceAttachment
+        :attachment="image"
         compact
       />
       <button
         class="image-remove"
         type="button"
         :disabled="disabled || busy"
-        :aria-label="$t('移除图片 {0}', [index + 1])"
+        :aria-label="$t('移除附件 {0}', [index + 1])"
         @click="
           emit(
             'update:modelValue',
@@ -224,7 +274,7 @@ defineExpose({
         class="image-remove"
         type="button"
         :disabled="disabled || busy"
-        :aria-label="$t('移除图片 {0}', [modelValue.length + index + 1])"
+        :aria-label="$t('移除附件 {0}', [modelValue.length + index + 1])"
         @click="removePending(index)"
       >
         <IconSymbol
@@ -239,19 +289,19 @@ defineExpose({
     class="attachment-status"
     role="status"
   >
-    {{ $t('正在添加图片…') }}
+    {{ $t('正在添加附件…') }}
   </p>
   <p
     v-else-if="error || hasPending"
     class="attachment-status"
     role="alert"
   >
-    {{ error || $t('图片尚未上传') }}
+    {{ error || $t('附件尚未上传') }}
     <button
       v-if="hasPending"
       type="button"
       :disabled="disabled"
-      @click="upload"
+      @click="upload()"
     >
       {{ $t('重试') }}
     </button>

@@ -24,7 +24,9 @@ MaigoKite 是一个运行在你电脑上的个人 Agent，用来处理文件、�
 
 浏览器工具使用 Playwright，需要配置 Chromium，不会自动继承日常浏览器的登录状态。
 
-看图使用支持图片输入的聊天模型；生图需在工具设置中单独配置 Images 或 Responses 服务，不会自动借用聊天密钥。操作步骤见 [看图、生图与文件预览](docs/user-guide/Configuration.md#12-看图生图与文件预览)。
+聊天可添加文本、PDF、DOCX、XLSX、PPTX，或引用工作区文件快照；文档可按页或结构读取、查找和预览。图片可交给支持看图的模型，本机安装 Tesseract 后也可只识别其中的文字，但不能代替图表理解。文档、页图和 OCR 是新接入能力，尚待实际使用验证，步骤与限制见 [文件与文档](docs/user-guide/Configuration.md#12-看图生图与文件预览)。
+
+生图需在工具设置中单独配置 Images 或 Responses 服务，不会自动借用聊天密钥。
 
 侧栏“扩展”用于管理本地 `SKILL.md` 和 stdio MCP Server。Skill 提供任务指令，本身不执行代码；MCP 接入外部工具。保存后点击应用；有运行或待处理交互时，先完成或取消任务。
 

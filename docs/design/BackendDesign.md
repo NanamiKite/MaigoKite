@@ -28,6 +28,8 @@ Vue Web / Electron Renderer
 | `api/settings.py` | 模型、偏好、权限、工具、Memory、MCP/Skill 配置接口 |
 | `api/credentials.py` | OS keyring 引用与 Core 内存凭证准备；不接管审批策略 |
 | `api/workspace.py` / `workspace_fs.py` | 已登记目录的浏览、预览、空文件创建、系统文件夹打开和只读 Git 查询 |
+| `documents.py` | PDF/Office 的有界文字提取、真实目录、字面查找和分页；上传校验、工具与侧栏共用解析结果 |
+| `document_visuals.py` | PDF 单页渲染和本机 OCR；管理子进程、时间/像素/输出限制及临时目录，不执行文档脚本 |
 | `models/discovery.py` | 有时间、分页与大小上限的服务端模型目录查询 |
 | `conversations.py` | 会话、工作区登记、默认权限与设置校验；复用 Repository 事务，不持有 Runtime |
 
@@ -51,7 +53,9 @@ API 调用的业务对象分工如下。它们共享同一个 Repository，不�
 
 ## 3. 凭证与访问边界
 
-HTTP 与 WebSocket 均检查直接连接的 loopback 地址、Host 和浏览器 Origin，不信任代理头。客户端不能覆盖 `local-user` 主体；工作区归属来自 Repository。精确的 `null` / `file://` 来源只在本机连接时接受。这不是设备认证，远程配对仍未实现。
+HTTP 与 WebSocket 先检查直接连接的 loopback 地址、Host 和浏览器 Origin，不信任代理头。浏览器模式接受符合规则的本机 HTTP 页面及无 Origin 的本机调用，拒绝 `null / file://` 来源；Origin 本身不是桌面身份。客户端不能覆盖 `local-user` 主体，工作区归属仍从 Repository 查询。
+
+Electron 受管模式另要求每次启动生成的随机凭据，HTTP、预检和 WebSocket 都在 CORS 与业务处理之前验证；不能用 localhost Origin 或无 Origin 绕过。主进程只向允许窗口的主 frame 发往自有 API 的请求附加凭据，重定向到其他地址时移除。凭据由后端消费，不交给 renderer/preload，不进 URL、日志、配置或工具环境。已认证桌面请求才可使用 null CORS，字面的 `file://` 来源仍不放行。这不是手机配对，也不能隔离恶意本机进程；开发连接要求见 [开发指南](../development/DevelopmentGuide.md#生命周期)。
 
 凭证通过 `keyring` 的系统后端保存，不允许明文 fallback。沿用原 `MaigoKite/{kind}/{workspace}` 与 account 命名：Linux 读取原 login collection；macOS 读取原服务/账号；Windows 兼容读取旧 Go 目标与 UTF-8 blob，写入新后端并读回确认后才删除旧项。平台迁移代码未完成实机验收。
 
@@ -84,6 +88,8 @@ WebSocket 先排入无业务序号的 `stream.ready`，再开放实时订阅。�
 文件 API 只操作 Core 解析的已登记目录，不接受任意根目录。POSIX 使用目录句柄与 no-follow，Windows 锁住祖先目录并拒绝 reparse point，创建只允许单个空文件/目录且不覆盖。Git 使用固定参数、禁用外部 diff/textconv/fsmonitor，限制时间和输出，不继承模型凭证环境。
 
 API/ASGI 复用 FastAPI、Uvicorn 和 AnyIO，系统凭证复用 keyring；MCP、浏览器、模型与 LangGraph 依赖继续由现有模块管理。同步系统 I/O 在工作线程中执行，线程不能被强杀；不实现自研线程取消框架。
+
+文档解析复用 pypdf、python-docx、openpyxl 和 python-pptx，由 AnyIO 工作进程执行；PDFium CLI 和可选 Tesseract 分别负责页图与 OCR。它们不建立文档服务、资产数据库或新的 Agent Runtime。大小、页数、单元与时间限制见 [API](API.md#附件输入图片生成与文件预览)；进程内解析缓存不是持久索引，解码后的检查也不是 OS 硬内存隔离。
 
 Web 与 Electron 继续共用相对路径构建产物。HTTP 返回的入口 HTML 补充 `<base href="/">`，让直接打开 `/chat/<id>` 时资源仍从站点根目录加载；磁盘文件不改写，Electron `file://` 保持相对路径。不存在的资源与 API（含 HEAD 请求）不回退为 SPA 页面。Windows 构建参数与共享脚本一致，不再接受 `go` 目标。
 

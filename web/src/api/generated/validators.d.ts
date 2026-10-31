@@ -18,6 +18,11 @@ export function validateSnapshotResponse(value: unknown): value is components['s
 export function validateQuestionsResponse(value: unknown): value is components['schemas']['QuestionsResponse'];
 export function validateQuestionResponse(value: unknown): value is components['schemas']['QuestionResponse'];
 export function validateImageReference(value: unknown): value is components['schemas']['ImageReference'];
+export function validateTextReference(value: unknown): value is components['schemas']['TextReference'];
+export function validateDocumentReference(value: unknown): value is components['schemas']['DocumentReference'];
+export function validateDocumentPage(value: unknown): value is components['schemas']['DocumentPage'];
+export function validateDocumentNavigation(value: unknown): value is components['schemas']['DocumentNavigation'];
+export function validateInputCapabilities(value: unknown): value is components['schemas']['InputCapabilities'];
 export function validateImageSettingsResponse(value: unknown): value is components['schemas']['ImageSettingsResponse'];
 export function validateWorkspaceFileResponse(value: unknown): value is components['schemas']['WorkspaceFileResponse'];
 export function validateModelCatalogResponse(value: unknown): value is components['schemas']['ModelCatalogResponse'];

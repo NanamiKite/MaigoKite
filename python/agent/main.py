@@ -60,6 +60,8 @@ def run(prompt: str | None, config: str | None, host: str, port: int, web_dir: P
 
 async def start_agent(prompt: str | None, config_path: str | None, host: str, port: int,
                       interactive: bool, web_dir: Path | None = None) -> None:
+    # Consume before Core creates tools or child processes; never inherit desktop authentication into them.
+    desktop_token = os.environ.pop("MAIGOKITE_DESKTOP_TOKEN", "")
     config = ConfigManager(config_path or os.getenv("MAIGOKITE_CONFIG"))
     await config.load()
     observability = Observability()
@@ -72,7 +74,7 @@ async def start_agent(prompt: str | None, config_path: str | None, host: str, po
         finally:
             await core.shutdown()
         return
-    server = uvicorn.Server(uvicorn.Config(create_app(core, web_dir), host=host, port=port,
+    server = uvicorn.Server(uvicorn.Config(create_app(core, web_dir, desktop_token=desktop_token), host=host, port=port,
                             workers=1, proxy_headers=False, access_log=False,
                             timeout_graceful_shutdown=8, ws_max_size=65536, ws_max_queue=16))
     loop = asyncio.get_running_loop()

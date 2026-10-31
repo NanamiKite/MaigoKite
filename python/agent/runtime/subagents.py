@@ -226,7 +226,7 @@ def create_readonly_agent(
     middleware: list[AgentMiddleware[Any, Any, Any]] = [
         ModelCallLimitMiddleware(thread_limit=min(4, max_calls), exit_behavior="error"),
         _ReadOnlyTools(evaluate_tool, execution_metadata),
-        ContextBudgetMiddleware[ChildContext](input_budget),
+        ContextBudgetMiddleware[ChildContext](input_budget, model=model),
     ]
     if isinstance(model, ChatAnthropic):
         middleware.append(AnthropicPromptCachingMiddleware())

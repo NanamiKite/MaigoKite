@@ -164,6 +164,8 @@ setup 检查 `ELECTRON_INSTALL_PLATFORM` / `ELECTRON_INSTALL_ARCH` 及对应 npm
 - `scripts/dev.sh` 是 `start web dev` 的兼容快捷方式。在 web 目录执行 `npm run electron:dev`，也会调用成套桌面入口。
 - 成套入口拒绝 `VITE_MOCK=1` / `MAIGOKITE_EXTERNAL_RUNTIME=1`。UI 单独联调可在 web 目录运行 Vite 和显式 `npx electron .`；这些外部服务仍由各自启动者负责。
 
+Electron 成套启动会为其后端生成一次性随机凭据，不需要用户配置。独立调试 built `file://` 页面与外部后端时，必须在启动两者前提供相同的 `MAIGOKITE_DESKTOP_TOKEN`（32 字节随机值的 64 位小写十六进制编码）；不持久保存或打印该值。后端会消费并移除环境项，不向工具继承。没有凭据时不允许通过 `Origin: null` 连入，不能通过恢复 CORS 的无条件 null/file 放行来兼容旧客户端。`VITE_MOCK=1` 的纯 UI 调试不调用真实 API，不需要这个凭据。
+
 PowerShell 禁止执行脚本时，确认源码可信后可使用进程级 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start.ps1 web`；脚本不更改全局执行策略。
 这些脚本不自动运行软件测试。脚本与调用链已做静态核对，但 Windows 实机运行和整套退出仍待验收；静态检查不能代替启动验证或安装包验收。
 

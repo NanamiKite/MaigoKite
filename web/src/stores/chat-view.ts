@@ -1,10 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { ImageReference } from '@/api/images'
+import type { AttachmentReference } from '@/api/images'
 
 export interface ChatDraft {
   text: string
-  images: ImageReference[]
+  images: AttachmentReference[]
+  pendingFiles: File[]
   mode: 'ask' | 'plan' | 'auto'
 }
 export interface ChatPosition {

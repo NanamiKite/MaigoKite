@@ -13,7 +13,7 @@
 
 当前以本地个人主体和工作区访问检查为主；外部请求不得自行声明可信 principal。保留成员关系兼容结构，不建设团队邀请/角色平台。
 
-loopback/Origin 限制不是完整设备认证。当前未完成本次启动的本地认证材料与设备配对；OIDC/JWT、Vault/KMS 不应写成已接线能力。内部 gRPC 已移除，不得公开业务库或现有免设备认证的 Python API。
+loopback/Origin 限制不是完整设备认证。Electron 管理的后端现在要求每次启动的随机凭据；浏览器模式仍是本机来源限制，没有登录、设备配对或对恶意本机进程的隔离。OIDC/JWT、Vault/KMS 不应写成已接线能力。内部 gRPC 已移除，不得公开业务库或将 Python API 直接暴露到远程。
 
 手机会话、配对、撤销与 HTTPS 信任边界按 [手机远程访问](../design/RemoteAccess.md) 单独设计，不把反向代理到 loopback 当作本地免认证依据。
 
@@ -54,7 +54,13 @@ Windows 原生后端只通过公开 SDK 接入，普通安装依赖不修改系�
 
 ## 5. 网络与 Electron
 
-Python API 的 HTTP 来源边界与 WebSocket 升级校验均允许本机回环连接使用精确的 `null` 或 `file://` 来源，兼容 Electron 从本地 HTML 加载的渲染进程。判断依据是 ASGI 的直接连接地址与 Host，不信任转发头；不允许远程连接凭借这两种来源访问，也不接受任意 `file:` 地址。该兼容规则不是桌面身份认证，远程接入仍需独立设备认证。
+`Origin: null` 不表示 Electron 身份，本地 HTML、data URL 或 sandbox 页面也可能具有该来源。浏览器模式拒绝 `null`、`file://` 和其他非本机 HTTP 来源，保留本机 HTTP 页面和无 Origin 原生调用的现有边界；这仍不区分任意本机 HTTP 服务或原生进程。
+
+Electron 主进程用 Node `crypto.randomBytes(32)` 为本次启动生成随机凭据，仅通过子进程环境 `MAIGOKITE_DESKTOP_TOKEN` 交给其后端。后端在初始化 Core 前从环境移除该值，使用内存中的凭据核对 `X-MaigoKite-Desktop-Token`，避免向工具/MCP 子进程继承。凭据不进入前端配置、preload IPC、URL、数据库或日志；重启产生新值。
+
+桌面模式的 HTTP、预检和 WebSocket 请求都必须通过该验证，不能通过伪造 localhost Origin 或省略 Origin 降级绕过。LocalBoundary 位于 CORS 外侧，校验 ASGI 直接连接地址、Host、来源和凭据后才进入 CORS 或业务路由；比较使用 `secrets.compare_digest`。只有已验证的桌面请求才可获得 `Access-Control-Allow-Origin: null`，无凭据的 `null` 请求返回 403，WebSocket 在接受前以 1008 拒绝；精确 `file://` 字符串也不作为可信来源。
+
+主进程复用 Electron `webRequest.onBeforeSendHeaders`，仅对主窗口/胶囊窗口的已允许主 frame，以及自有后端或开发代理的 API/health 地址附加凭据；子 frame 和未知窗口不授权。每个目标重新计算请求头，跨地址重定向不保留凭据。主进程健康探测与工作区查询显式携带相同凭据。该机制不能防止已攻陷的应用主 frame、同 OS 用户的恶意程序或调试器读取进程内存，也不替代远程设备认证。
 
 浏览器当前公开 HTTP(S)/地址检查是应用防护，不保证 Chromium 所有出站请求都隔离；DNS 重绑定、重定向、下载和资源访问需实测及主机/容器出口策略。不能把 URL 检查写成完整 SSRF 沙箱。
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import re
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -50,8 +52,11 @@ def loopback(host: str) -> bool:
 
 class LocalBoundary:
     """Reject remote peers, DNS rebinding and foreign browser origins before any API action."""
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, *, desktop_token: str = "") -> None:
+        if desktop_token and re.fullmatch(r"[0-9a-f]{64}", desktop_token) is None:
+            raise ValueError("Desktop access token must be 32 random bytes encoded as lowercase hex")
         self.app = app
+        self.desktop_token = desktop_token.encode("ascii")
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] not in {"http", "websocket"}:
@@ -59,10 +64,13 @@ class LocalBoundary:
             return
         headers = {key.lower(): value.decode("latin-1") for key, value in scope["headers"]}
         origin = headers.get(b"origin", "")
+        desktop_authenticated = bool(self.desktop_token) and secrets.compare_digest(
+            headers.get(b"x-maigokite-desktop-token", "").encode("latin-1"), self.desktop_token,
+        )
         try:
             host = urlsplit("//" + headers.get(b"host", "")).hostname or ""
             source = urlsplit(origin)
-            trusted_origin = origin in {"", "null", "file://"} or (
+            trusted_origin = origin == "" or (origin == "null" and desktop_authenticated) or (
                 source.scheme == "http" and loopback(source.hostname or "")
                 and source.username is None and source.password is None and not source.path
                 and not source.query and not source.fragment
@@ -80,6 +88,10 @@ class LocalBoundary:
 
         if not loopback(peer) or not loopback(host) or not trusted_origin:
             await reject(403, "LOCAL_ACCESS_ONLY", "应用仅接受本机页面与桌面客户端访问。")
+            return
+        # Desktop mode never falls back to Origin/Host as identity, including preflight and native requests.
+        if self.desktop_token and not desktop_authenticated:
+            await reject(401, "LOCAL_AUTH_REQUIRED", "无法验证桌面连接，请退出并重新启动应用。")
             return
         if scope["type"] == "websocket":
             try:
@@ -102,9 +114,10 @@ class LocalBoundary:
 
         # Bound even chunked input before JSON parsing; forwarded headers never establish local identity.
         body = bytearray()
-        # Image upload is the only large JSON input. Keep ordinary chat/settings
+        # Attachment uploads carry Base64. Keep ordinary chat/settings
         # requests on the existing small bound.
-        limit = 23 * 1024 * 1024 if scope["path"].endswith("/files/images") else 2 * 1024 * 1024
+        upload = scope["path"].endswith(("/files/images", "/files/attachments"))
+        limit = (23 if upload else 2) * 1024 * 1024
         while True:
             message = await receive()
             if message["type"] == "http.disconnect":
@@ -158,7 +171,7 @@ class WebUI(StaticFiles):
             raise
 
 
-def create_app(core: AgentCore, web_dir: Path | None = None) -> FastAPI:
+def create_app(core: AgentCore, web_dir: Path | None = None, *, desktop_token: str = "") -> FastAPI:
     execution = Execution(core)
     credentials = Credentials(core)
     async def safety_credential(workspace: str) -> str:
@@ -195,12 +208,12 @@ def create_app(core: AgentCore, web_dir: Path | None = None) -> FastAPI:
         responses={"default": {"model": ErrorResponse}},
     )
     app.state.core = core
-    app.add_middleware(LocalBoundary)
-    # Starlette owns preflight and response headers; LocalBoundary still guards every API/WS action.
-    app.add_middleware(CORSMiddleware, allow_origins=["null", "file://"],
+    # Null CORS is only reachable after the outer boundary verifies the desktop credential.
+    app.add_middleware(CORSMiddleware, allow_origins=["null"] if desktop_token else [],
                        allow_origin_regex=r"http://(?:localhost|127(?:\.[0-9]{1,3}){3}|\[::1\])(?::[0-9]+)?",
                        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
                        allow_headers=["Content-Type", "Idempotency-Key"], expose_headers=["Idempotency-Replayed"])
+    app.add_middleware(LocalBoundary, desktop_token=desktop_token)
 
     @overload
     async def failure(connection: Request, error: Exception) -> Response: ...

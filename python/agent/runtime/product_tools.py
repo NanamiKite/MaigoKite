@@ -126,8 +126,7 @@ class ProductToolMiddleware(AgentMiddleware[AgentState[object], RunContext]):
             )
         profile = request.model.profile or {}
         if profile.get("image_inputs") is False and any(
-            isinstance(message, HumanMessage)
-            and isinstance(message.content, list)
+            isinstance(message.content, list)
             and any(
                 isinstance(block, dict) and block.get("type") in {"image", "image_url"} for block in message.content
             )
@@ -230,6 +229,7 @@ class ProductToolMiddleware(AgentMiddleware[AgentState[object], RunContext]):
             clean,
             approved=approved,
             risk_override=getattr(spec, "risk_level", None),
+            attachment_sources=context.execution_metadata.get("attachment_sources", ""),
             mode=context.execution_metadata.get("permission_mode", context.request.permission_mode),
         )
         # Only the parent can use its own explicitly scoped receipts. Child
@@ -257,6 +257,9 @@ class ProductToolMiddleware(AgentMiddleware[AgentState[object], RunContext]):
         original = context.execution_metadata.get("enabled_tools", self._tools)
         # Tool discovery stays stable for this run; revocations still apply.
         fresh["enabled_tools"] = sorted(set(original) & set(fresh.get("enabled_tools", original)))
+        fresh["attachment_sources"] = await self._repository.attachment_sources_hash(
+            context.request.workspace_id, context.request.conversation_id,
+        )
         # Fetch authority last, after configuration/credential lookups. Even a
         # fixed-model runtime must read live permissions, not its initial request.
         mode, grants = await self._repository.execution_authority(
@@ -311,6 +314,8 @@ class ProductToolMiddleware(AgentMiddleware[AgentState[object], RunContext]):
             record["tool_name"] == name
             and record["risk_level"] == decision.risk.name
             and self._repository.approval_matches_arguments(record, decision.arguments)
+            and (record["reuse_scope"] or {}).get("attachment_sources", "")
+            == (decision.reuse_scope or {}).get("attachment_sources", "")
         )
 
     @staticmethod

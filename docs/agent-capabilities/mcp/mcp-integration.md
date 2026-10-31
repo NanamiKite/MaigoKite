@@ -79,7 +79,9 @@ SDK 的公开进度回调映射到同一工具调用的 `tool.started`，携带 
 
 `result_adapter=antenna_design` 是显式启用的宿主结果投影，缺省 `none`；不根据工具描述、服务名或端口猜测。切换时通过既有 apply 刷新工具包装，可复用配置和凭证未改变的健康连接，不另起服务。
 
-所选服务的 `antenna.solve / get_result / render` 返回计算结果，`antenna.design / export / get_delivery` 返回候选包；这些成功回执进入 `agent.integrations.antenna.AntennaResults`。调用仍走 ToolPolicy、审批和审计，不因服务自报只读而降权。适配器校验 `schema_version=1`、对应 run ID 或 delivery ID、有界摘要和固定资源清单，再通过相同 SDK 会话 `resources/read` 核对 URI、MIME、字节长度、SHA256 和 PNG 文件头，写入当前对话目录。
+所选服务的 `antenna.solve / get_result / render` 返回 v1 计算结果，`antenna.design / export / get_delivery` 返回候选包（当前 v2，兼容 v1）；这些成功回执进入 `agent.integrations.antenna.AntennaResults`。调用仍走 ToolPolicy、审批和审计，不因服务自报只读而降权。适配器按回执类型检查版本、run ID 或 delivery ID、有界摘要和固定资源，再通过相同 SDK 会话 `resources/read` 核对 URI、MIME、字节长度、SHA256 和 PNG 文件头，写入当前对话目录。
+
+v2 分开保存物理设计、逐 run 仿真配置和目标身份，旧 `design_sha256` 保留历史含义；不能仅凭物理身份相同混用频率、地面或网格。旧包缺少匹配汇总时保持未知，不改写旧 ZIP。`get_design_state` 查询已提交的证据里程碑，必要时核验已发布包并幂等补记交付元数据；不启动 worker、不恢复种群，也不进入文件导入的结果分支。
 
 资源读取不开放为任意 URL 下载或模型工具；单文件最多 16 MiB，整个导入最多 48 MiB、30 秒（文件写入清理另计）。限制约束接受的资源内容，不等于 SDK JSON-RPC 分配上限或系统磁盘配额。每次读资源和落盘前查询当前目录/权限；只读时不继续写，写入不覆盖不同内容的已存在文件。
 

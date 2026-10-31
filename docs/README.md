@@ -23,6 +23,7 @@ MaigoKite 是面向个人工作流的本地 Agent。本目录按读者和职责�
 | Python API/Core 职责与资源所有权 | [后端设计](design/BackendDesign.md) |
 | Vue/Electron 与交互 | [前端与桌面交互设计](design/FrontendDesign.md)；视觉细节见 [墨线 UI 设计](design/agent-ui-design.md) |
 | 聊天执行、审批桥接、上下文和资源 | [智能体运行时设计](design/AgentRuntime.md) |
+| 附件、文档读取、页图与本机 OCR | 用户操作见[配置指南](user-guide/Configuration.md#文档和本地文字识别)，端点/限制见 API，请求组装见运行时设计；新增路径尚待行为验收 |
 | REST/WS 契约 | [API 设计](design/API.md)；FastAPI 请求结构与事件 DTO 优先 |
 | 当前业务表与事务 | [数据库设计](design/Database.md)；Repository 是实现事实 |
 | 手机远程首版（未交付） | [手机远程访问](design/RemoteAccess.md) |
@@ -30,7 +31,7 @@ MaigoKite 是面向个人工作流的本地 Agent。本目录按读者和职责�
 | 长期记忆与检索边界 | [记忆与检索边界](agent-capabilities/memory/memory-system.md) |
 | MCP 传输方式 / 生命周期 | [MCP 集成](agent-capabilities/mcp/mcp-integration.md) |
 | SKILL.md / 扩展边界 | [本地技能与扩展边界](agent-capabilities/skills/skill-lifecycle.md) |
-| 天线工作流 / MMANA 兼容与求解器评估 | [天线设计](design/AntennaWorkflow.md)：参数搜索、网格复核、匹配计算与候选包已接入；Linux 有定向验收，制作验证未完成 |
+| 天线工作流 / MMANA 兼容与求解器评估 | [天线设计](design/AntennaWorkflow.md)：搜索、网格、匹配和候选包有历史 Linux 定向记录；新增里程碑/v2 回执待回归，制作验证未完成 |
 | 工具风险、模式、审批规则 | [工具权限](agent-capabilities/security/tool-permission.md) |
 | 威胁、身份、凭证与网络 | [安全边界](ops-security/Security.md) |
 | 日志、审计与排障 | [日志与诊断](ops-security/Observability.md) |

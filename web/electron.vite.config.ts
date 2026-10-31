@@ -21,6 +21,7 @@ export default defineConfig(({ mode }) => ({
       external: [
         'electron',
         'node:child_process',
+        'node:crypto',
         'node:fs',
         'node:net',
         'node:path',

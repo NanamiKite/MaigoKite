@@ -10,7 +10,8 @@
 | 业务 SQLite | 核心：消息、任务、审批、偏好、记忆与审计 |
 | 已启用的 LangGraph 检查点 | 执行恢复所需，独立于业务库 |
 | 工作区文件 / 用户材料 | 核心：工具实际读写的产物，不等于数据库备份 |
-| 天线项目（使用该扩展时） | 保存整个服务 `--root`：`.antenna-project.sqlite3`、求解目录、`.optimizations` 和 `.deliveries` 等原件；聊天副本或单个 ZIP 不能替代项目准入与全部来源记录 |
+| 聊天附件 | 保存 `chat-images/`、`chat-files/` 和 `generated-images/`；SQLite/checkpoint 只有路径、哈希等引用，缺少原文件不能恢复内容 |
+| 天线项目（使用该扩展时） | 保存整个服务 `--root`：项目 SQLite（含求解准入和证据里程碑）、求解目录、`.optimizations` 与 `.deliveries` 等原件；聊天副本或单个 ZIP 不能替代全部记录 |
 | 配置与本地 SKILL.md | 保存非敏感配置和无法重新获得的个人内容 |
 | OS 凭证存储 | 独立处理；凭证存在状态不是敏感凭证备份 |
 | 日志 | 按隐私/诊断需求保留，不默认全部上传 |

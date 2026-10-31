@@ -17,10 +17,12 @@ class ExecutionMetadata(TypedDict, total=False):
     """
 
     workspace_id: str
+    folder_id: str
     conversation_id: str
     principal_id: str
     workspace_root: str
     permission_mode: PermissionMode
+    attachment_sources: str
     sandbox_mode: PermissionMode
     allow_network: bool
     approved: bool

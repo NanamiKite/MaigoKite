@@ -19,7 +19,7 @@ import ComposerAlert from '@/components/inkwell/ComposerAlert.vue'
 import ComposerDraft from '@/components/inkwell/ComposerDraft.vue'
 import ComposerHint from '@/components/inkwell/ComposerHint.vue'
 import ImageAttachments from '@/components/inkwell/ImageAttachments.vue'
-import type { ImageReference } from '@/api/images'
+import { getInputCapabilities, type AttachmentReference } from '@/api/images'
 const props = withDefaults(defineProps<ComposerProps>(), composerDefaults)
 const emit = defineEmits<ComposerEmits>()
 const toolbar = ref<InstanceType<typeof ComposerToolbar> | null>(null),
@@ -30,11 +30,54 @@ const inputValue = ref(''),
   textarea = ref<InstanceType<typeof ComposerDraft> | null>(null)
 const submitting = ref(false),
   submitError = ref('')
-const images = ref<ImageReference[]>([]),
+const images = ref<AttachmentReference[]>([]),
+  pendingFiles = ref<File[]>([]),
   uploading = ref(false)
 const attachments = ref<InstanceType<typeof ImageAttachments> | null>(null)
 const commandsOpen = ref(false)
-const attachmentsReady = computed(() => !attachments.value?.hasPending)
+const imageSupported = ref<boolean | null>(null),
+  imageFallback = ref(false),
+  checkingInputs = ref(false),
+  capabilityError = ref('')
+const hasImages = computed(() => images.value.some((item) => item.type === 'image'))
+const showImageNotice = computed(
+  () =>
+    hasImages.value &&
+    (imageSupported.value === false ||
+      imageFallback.value ||
+      checkingInputs.value ||
+      capabilityError.value),
+)
+const attachmentsReady = computed(
+  () =>
+    !pendingFiles.value.length &&
+    !checkingInputs.value &&
+    !(hasImages.value && imageSupported.value === false),
+)
+watch(
+  [() => props.modelId, hasImages],
+  async ([modelId, present], _, onCleanup) => {
+    imageSupported.value = null
+    imageFallback.value = false
+    capabilityError.value = ''
+    checkingInputs.value = present
+    if (!present) return
+    const request = new AbortController()
+    onCleanup(() => request.abort())
+    try {
+      const result = await getInputCapabilities(modelId, request.signal)
+      if (!request.signal.aborted) {
+        imageSupported.value = result.image_fallback === 'ocr' ? true : result.image_input
+        imageFallback.value = result.image_fallback === 'ocr'
+      }
+    } catch {
+      if (!request.signal.aborted) capabilityError.value = t('未能确认看图能力；发送时会再次检查。')
+    } finally {
+      if (!request.signal.aborted) checkingInputs.value = false
+    }
+  },
+  { flush: 'sync' },
+)
 const busy = computed(() => props.isSubmitting || submitting.value || uploading.value)
 const guideDisabled = computed(() => Boolean(props.waiting || props.guideReason))
 const showGuideHelp = ref(false)
@@ -42,13 +85,13 @@ let draftRevision = 0
 const mode = ref<'ask' | 'plan' | 'auto'>(props.permissionMode === 'read_only' ? 'ask' : 'auto')
 const workspace = useWorkspaceStore()
 const draftKey = computed(() => props.sessionId || 'draft:' + workspace.selectedId)
-const draftCache = useChatDraft(draftKey, inputValue, images, mode, () =>
+const draftCache = useChatDraft(draftKey, inputValue, images, pendingFiles, mode, () =>
   props.permissionMode === 'read_only' ? 'ask' : 'auto',
 )
 const mentions = useMentions(inputValue)
 const commandMenu = useComposerCommands({
   open: () => commandsOpen.value,
-  imageDisabled: () => busy.value || props.isSending || !props.submit || !props.modelOptions.length,
+  imageDisabled: () => busy.value || props.isSending || !props.submit,
   isSending: () => props.isSending,
   image: () => attachments.value?.choose(),
   reference,
@@ -58,9 +101,13 @@ const commandMenu = useComposerCommands({
     void nextTick(() => textarea.value?.focus())
   },
 })
-watch(inputValue, () => {
-  draftRevision++
-})
+watch(
+  [inputValue, images, pendingFiles, mode],
+  () => {
+    draftRevision++
+  },
+  { deep: true, flush: 'sync' },
+)
 watch(
   () => props.permissionMode,
   (value) => {
@@ -81,10 +128,10 @@ function chooseMode(value: 'ask' | 'plan' | 'auto') {
   emit('permission-mode-change', value === 'auto' ? 'workspace' : 'read_only')
 }
 async function send(later = props.isSending) {
-  const content = inputValue.value.trim() || (images.value.length ? t('请描述这些图片。') : '')
+  const content = inputValue.value.trim() || (images.value.length ? t('请查看这些附件。') : '')
   if (!content || !props.modelOptions.length || busy.value || !attachmentsReady.value) return
   if (images.value.length && props.isSending) {
-    submitError.value = t('请等待当前任务结束后再发送图片。')
+    submitError.value = t('请等待当前任务结束后再发送附件。')
     return
   }
   if (props.isSending && !later && guideDisabled.value) {
@@ -109,6 +156,12 @@ async function send(later = props.isSending) {
     key = draftKey.value,
     draft = inputValue.value,
     revision = draftRevision
+  const sentDraft = {
+    text: draft,
+    images: images.value.map((image) => ({ ...image })),
+    pendingFiles: [],
+    mode: mode.value,
+  }
   submitting.value = true
   if (intent === 'guide') {
     try {
@@ -121,13 +174,9 @@ async function send(later = props.isSending) {
     }
   }
   try {
-    await props.submit(
-      payload,
-      intent,
-      images.value.map((image) => ({ ...image })),
-    )
+    await props.submit(payload, intent, sentDraft.images)
     sent.value++
-    draftCache.clearSent(key, draft)
+    draftCache.clearSent(key, sentDraft)
     if (props.sessionId === id && inputValue.value === draft && draftRevision === revision) {
       inputValue.value = ''
       images.value = []
@@ -140,7 +189,11 @@ async function send(later = props.isSending) {
     submitting.value = false
   }
 }
-function chooseMention(item: Mention) {
+async function chooseMention(item: Mention) {
+  const key = draftKey.value,
+    draft = inputValue.value
+  if (item.kind === '文件' && !(await attachments.value?.reference(item.label))) return
+  if (draftKey.value !== key || inputValue.value !== draft) return
   mentions.select(item)
   void nextTick(() => textarea.value?.focus())
 }
@@ -207,7 +260,8 @@ const handleKeydown = useComposerKeyboard({
         :key="draftKey + ':' + workspace.selectedId"
         ref="attachments"
         v-model="images"
-        :disabled="isSubmitting || submitting || isSending || !props.submit || !modelOptions.length"
+        v-model:pending-files="pendingFiles"
+        :disabled="isSubmitting || submitting || isSending || !props.submit"
         @busy="uploading = $event"
       />
       <ComposerDraft
@@ -254,6 +308,21 @@ const handleKeydown = useComposerKeyboard({
         @permission-mode-change="emit('permission-mode-change', $event)"
       />
     </div>
+    <p
+      v-if="showImageNotice"
+      class="composer-notice"
+      role="status"
+    >
+      {{
+        checkingInputs
+          ? $t('正在确认看图能力…')
+          : imageSupported === false
+            ? $t('当前模型不支持图片，请切换模型后发送。')
+            : imageFallback
+              ? $t('将识别图片中的文字，无法理解图形细节。')
+              : capabilityError
+      }}
+    </p>
     <p
       v-if="submitError"
       class="composer-notice"

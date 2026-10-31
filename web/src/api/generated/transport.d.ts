@@ -518,6 +518,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/settings/model-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Inputs */
+        get: operations["inputs_api_v1_workspaces__workspace_id__settings_model_inputs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/models/{model_id}/thinking": {
         parameters: {
             query?: never;
@@ -990,6 +1007,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/files/document": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Document Content */
+        get: operations["document_content_api_v1_workspaces__workspace_id__files_document_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/files/document/ocr-languages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Document Languages */
+        get: operations["document_languages_api_v1_workspaces__workspace_id__files_document_ocr_languages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/files/document/page": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Document Page Image */
+        get: operations["document_page_image_api_v1_workspaces__workspace_id__files_document_page_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/files/document/navigation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Document Navigation */
+        get: operations["document_navigation_api_v1_workspaces__workspace_id__files_document_navigation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/files/download": {
         parameters: {
             query?: never;
@@ -1018,6 +1103,40 @@ export interface paths {
         put?: never;
         /** Upload Image */
         post: operations["upload_image_api_v1_workspaces__workspace_id__files_images_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/files/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Attachment */
+        post: operations["upload_attachment_api_v1_workspaces__workspace_id__files_attachments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/files/attachments/reference": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reference Attachment */
+        post: operations["reference_attachment_api_v1_workspaces__workspace_id__files_attachments_reference_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1231,6 +1350,19 @@ export interface components {
         ApprovalsResponse: {
             /** Approvals */
             approvals: components["schemas"]["ApprovalResponse"][];
+        };
+        AttachmentReference: components["schemas"]["ImageReference"] | components["schemas"]["TextReference"] | components["schemas"]["DocumentReference"];
+        /** AttachmentSource */
+        AttachmentSource: {
+            /** Path */
+            path: string;
+        };
+        /** AttachmentUpload */
+        AttachmentUpload: {
+            /** Data */
+            data: string;
+            /** Name */
+            name: string;
         };
         /** AuthorizationResponse */
         AuthorizationResponse: {
@@ -1451,6 +1583,99 @@ export interface components {
              */
             api_key: string;
         };
+        /** @enum {string} */
+        DocumentFormat: "pdf" | "docx" | "xlsx" | "pptx";
+        /** @enum {string} */
+        DocumentKind: "page" | "paragraph" | "table" | "sheet" | "slide";
+        /** DocumentLocation */
+        DocumentLocation: {
+            /** Unit */
+            unit: number;
+            kind: components["schemas"]["DocumentKind"];
+            /** Text */
+            text: string;
+            /** Text Offset */
+            text_offset: number;
+            /** Level */
+            level?: number | null;
+        };
+        /** DocumentNavigation */
+        DocumentNavigation: {
+            format: components["schemas"]["DocumentFormat"];
+            /** Sha256 */
+            sha256: string;
+            /** Parser Version */
+            parser_version: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "outline" | "search";
+            /** Query */
+            query: string;
+            /** Total Units */
+            total_units: number;
+            /** Empty Text Units */
+            empty_text_units: number;
+            /** Items */
+            items: components["schemas"]["DocumentLocation"][];
+            /** Next Offset */
+            next_offset: number | null;
+            /** Outline Truncated */
+            outline_truncated: boolean;
+        };
+        /** DocumentPage */
+        DocumentPage: {
+            /**
+             * Mode
+             * @default text_layer
+             * @enum {string}
+             */
+            mode: "text_layer" | "ocr";
+            format: components["schemas"]["DocumentFormat"];
+            /** Sha256 */
+            sha256: string;
+            /** Parser Version */
+            parser_version: string;
+            /** Unit */
+            unit: number;
+            /** End Unit */
+            end_unit: number;
+            /** Total Units */
+            total_units: number;
+            kind: components["schemas"]["DocumentKind"];
+            /** Text */
+            text: string;
+            /** Text Offset */
+            text_offset: number;
+            /** Next Offset */
+            next_offset: number | null;
+            /** Next Unit */
+            next_unit: number | null;
+        };
+        /** DocumentReference */
+        DocumentReference: {
+            /**
+             * Type
+             * @default document
+             * @constant
+             */
+            type: "document";
+            /** Path */
+            path: string;
+            /**
+             * Folder Id
+             * @default
+             */
+            folder_id: string;
+            /** Sha256 */
+            sha256: string;
+            /** Size */
+            size: number;
+            /** Name */
+            name: string;
+            format: components["schemas"]["DocumentFormat"];
+        };
         /** EntryCreate */
         EntryCreate: {
             /** Name */
@@ -1626,6 +1851,45 @@ export interface components {
         ImageUpload: {
             /** Data */
             data: string;
+        };
+        /** InputCapabilities */
+        InputCapabilities: {
+            /** Image Input */
+            image_input: boolean | null;
+            /** Image Fallback */
+            image_fallback?: "ocr" | null;
+            /** Ocr Languages */
+            ocr_languages?: string[];
+            /**
+             * Text Input
+             * @default true
+             */
+            text_input: boolean;
+            /**
+             * Document Inputs
+             * @default [
+             *       "pdf",
+             *       "docx",
+             *       "xlsx",
+             *       "pptx"
+             *     ]
+             */
+            document_inputs: components["schemas"]["DocumentFormat"][];
+            /**
+             * Max Attachments
+             * @default 8
+             */
+            max_attachments: number;
+            /**
+             * Max Images
+             * @default 4
+             */
+            max_images: number;
+            /**
+             * Max Bytes
+             * @default 16777216
+             */
+            max_bytes: number;
         };
         "JSONObject-Input": {
             [key: string]: components["schemas"]["JSONValue-Input"];
@@ -2087,7 +2351,7 @@ export interface components {
             /** Content */
             content: string;
             /** Attachments */
-            attachments?: components["schemas"]["ImageReference"][];
+            attachments?: components["schemas"]["AttachmentReference"][];
             output_schema?: components["schemas"]["JSONObject-Input"] | null;
         };
         /** SettingsUpdate */
@@ -2388,6 +2652,34 @@ export interface components {
             content: string;
         } & {
             [key: string]: components["schemas"]["JSONValue-Output"];
+        };
+        /** TextReference */
+        TextReference: {
+            /**
+             * Type
+             * @default text
+             * @constant
+             */
+            type: "text";
+            /** Path */
+            path: string;
+            /**
+             * Folder Id
+             * @default
+             */
+            folder_id: string;
+            /** Sha256 */
+            sha256: string;
+            /**
+             * Mime Type
+             * @default text/plain
+             * @constant
+             */
+            mime_type: "text/plain";
+            /** Size */
+            size: number;
+            /** Name */
+            name: string;
         };
         /** ToolEndedEvent */
         ToolEndedEvent: {
@@ -3758,6 +4050,39 @@ export interface operations {
             };
         };
     };
+    inputs_api_v1_workspaces__workspace_id__settings_model_inputs_get: {
+        parameters: {
+            query?: {
+                model_id?: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InputCapabilities"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     thinking_api_v1_workspaces__workspace_id__models__model_id__thinking_get: {
         parameters: {
             query?: never;
@@ -5057,6 +5382,7 @@ export interface operations {
             query?: {
                 folder_id?: string;
                 path?: string;
+                sha256?: string;
             };
             header?: never;
             path: {
@@ -5073,6 +5399,150 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceFileResponse"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    document_content_api_v1_workspaces__workspace_id__files_document_get: {
+        parameters: {
+            query?: {
+                folder_id?: string;
+                path?: string;
+                sha256?: string;
+                unit?: number;
+                text_offset?: number;
+                mode?: "text_layer" | "ocr";
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentPage"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    document_languages_api_v1_workspaces__workspace_id__files_document_ocr_languages_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    document_page_image_api_v1_workspaces__workspace_id__files_document_page_get: {
+        parameters: {
+            query?: {
+                folder_id?: string;
+                path?: string;
+                sha256?: string;
+                unit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    document_navigation_api_v1_workspaces__workspace_id__files_document_navigation_get: {
+        parameters: {
+            query: {
+                action: "outline" | "search";
+                folder_id?: string;
+                path?: string;
+                sha256?: string;
+                query?: string;
+                offset?: number;
+                ignore_case?: boolean;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentNavigation"];
                 };
             };
             /** @description Default Response */
@@ -5144,6 +5614,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImageReference"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    upload_attachment_api_v1_workspaces__workspace_id__files_attachments_post: {
+        parameters: {
+            query?: {
+                folder_id?: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttachmentUpload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentReference"];
+                };
+            };
+            /** @description Default Response */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reference_attachment_api_v1_workspaces__workspace_id__files_attachments_reference_post: {
+        parameters: {
+            query?: {
+                folder_id?: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttachmentSource"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentReference"];
                 };
             };
             /** @description Default Response */

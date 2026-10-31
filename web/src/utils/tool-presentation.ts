@@ -18,6 +18,8 @@ export function approvalScopeDescription(
   authorizationScope?: ApprovalScope,
 ) {
   const lines: string[] = []
+  if (typeof scope.attachment_sources === 'string')
+    lines.push(t('本次授权仅适用于当前附件；添加新附件后需重新确认。'))
   if (authorizationScope === 'session_public_web') {
     lines.push(
       t('允许本会话使用已配置的搜索服务，并读取不同站点的公共网页。'),

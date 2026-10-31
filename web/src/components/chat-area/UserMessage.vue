@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import MessageActions from './MessageActions.vue'
 import { computed } from 'vue'
-import { parseImages } from '@/api/images'
-import WorkspaceImage from './WorkspaceImage.vue'
+import { parseAttachments } from '@/api/images'
+import WorkspaceAttachment from './WorkspaceAttachment.vue'
 const props = defineProps<{ content: string; timestamp?: Date; attachmentsJson?: string }>()
-const images = computed(() => parseImages(props.attachmentsJson || '[]'))
+const images = computed(() => parseAttachments(props.attachmentsJson || '[]'))
 </script>
 <template>
   <article class="user-message">
     <p>{{ content }}</p>
-    <WorkspaceImage
+    <WorkspaceAttachment
       v-for="image in images"
       :key="image.path"
-      :image="image"
+      :attachment="image"
     />
     <time v-if="timestamp">
       {{ timestamp.toLocaleTimeString($i18n.locale, { hour: '2-digit', minute: '2-digit' }) }}

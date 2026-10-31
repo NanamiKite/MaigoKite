@@ -10,13 +10,13 @@
 - 当前业务数据库只有 SQLite，启用 foreign keys 与 WAL。
 - SQLite 保存工作区、成员关系、会话、消息、任务、事件、工具调用、审批、设置、审计、Todo 和显式用户记忆。
 - 模型与其他非敏感工作区配置保存在 `workspace_settings` JSON 中。
-- 图片生成配置使用 `models.image_generation` 设置键，生图密钥仅存操作系统凭证库。消息表增加 `attachments_json TEXT NOT NULL DEFAULT '[]'`，保存已上传图片的文件夹、路径、哈希、类型和大小；启动增列保留旧消息，分岔事务复制引用，不复制文件。LangGraph checkpoint 保存该轮实际图片输入快照；普通消息/事件不保存 Base64。删除对话仍不删除 `chat-images/` 或 `generated-images/` 中的工作区文件。新库图片引用落盘、分岔与真实 Core 重启续聊已验收；已有旧库的附件增列/保留历史迁移仍未覆盖。
+- 图片生成配置使用 `models.image_generation` 设置键，生图密钥仅存操作系统凭证库。消息表的 `attachments_json TEXT NOT NULL DEFAULT '[]'` 保存图片、文本和文档的文件夹、路径、哈希、类型及大小；扩展引用类型不新增资产表。分岔复制引用，不复制文件。LangGraph checkpoint 保存本轮组装的模型输入，普通消息/事件不保存 Base64。删除对话不删除 `chat-images/`、`chat-files/` 或 `generated-images/` 中的文件。旧图片引用、分岔和重启续聊已有定向记录；后续文本/文档/OCR 与旧库升级尚未行为验收，不能沿用图片结果宣布通过。
 - 敏感凭证值由 Python API 通过操作系统凭证存储保存，不进入 SQLite；访问边界见 [后端设计](BackendDesign.md#3-凭证与访问边界)。
 - 原始文档、FTS、向量嵌入、向量索引、PostgreSQL 和对象存储尚未接入。
 
 当前 Repository 采用单进程写入模型。不能仅凭接口抽象，就推断它已支持多实例并发或 PostgreSQL。
 
-天线扩展在服务 `--root` 中另存 `.antenna-project.sqlite3`，不属于下方主应用业务表。它用 `project / reservations / budget_changes` 保存项目身份、求解准入、补画来源与限额调整；预算先提交再启动计算，失败/取消不自动退回。活跃 worker 状态仍来自进程所有权，不写成另一套执行状态机，也不与 LangGraph checkpoint 双向同步。恢复项目需同时保留该库和服务产物，规则见 [备份与恢复](../ops-security/Backup.md)。
+天线扩展在服务 `--root` 中另存 `.antenna-project.sqlite3`，不属于下方主应用业务表。`project / reservations / budget_changes` 保存项目身份、求解准入、补画来源与限额调整，`workflows` 保存带 revision 和证据身份的有限设计里程碑。预算先提交再启动计算，失败/取消不自动退回；里程碑记录不表示 worker 活跃或支持自动续跑。已发布包与 SQLite 不具备共同事务，查询/取回可在核验证据后幂等补记交付状态，不重新求解。该库不与聊天 checkpoint 双向同步；恢复需保留项目库和服务产物，见 [备份与恢复](../ops-security/Backup.md)。
 
 `sqlite_schema.py` 使用 Repository 创建的连接，不自行 commit、close 或持有锁。Repository 负责连接、锁和提交；审批决定、授权复用、任务与审计更新不拆成独立 Store。
 
@@ -175,3 +175,13 @@ pending, consumed, rejected, expired
 - 全部业务数据直接或间接绑定工作区；UTC 时间、ID、状态与授权语义不能因换存储改变。
 - 敏感凭证不进入业务库、记忆、任务事件或普通日志；新增配置只存非敏感值/引用。
 - 备份和恢复须覆盖业务库、所用检查点和用户文件的适用边界，见 [备份与恢复](../ops-security/Backup.md)。
+
+### 附件快照（2026-10-28）
+
+消息继续使用 `attachments_json`，数组兼容原 `ImageReference`，增加带原文件显示名的 `TextReference` 和带格式信息的 `DocumentReference`（PDF/DOCX/XLSX/PPTX）；不新增资产数据库或执行状态表。附件的身份是工作区文件夹、相对路径和 SHA-256，工作区文件引用会先复制到应用生成的快照路径。修改源文件不会改写旧消息；修改快照本身则在预览、请求准入或 `file_read` 哈希校验时拒绝。
+
+产品消息只保存引用，预算内联内容由现有 LangGraph 消息状态保留。首次输入使用现有 before_model hook 物化并更新该消息；后续追加消息不重复展开。摘要保留已归档附件的确定性引用，恢复仍以 checkpoint 为准。删除会话不删除附件文件，附件清理由用户在工作区文件管理中完成。
+
+文档目录与关键词定位是原始快照的派生读取结果，仅使用有限进程内解析缓存；不新增目录表、向量索引或跨会话检索状态。目录/搜索 API 返回哈希和 parser_version，模型工具结果沿用既有 checkpoint 与压缩引用。
+
+附件授权约束不新增表：Repository 从当前会话同文件夹的用户消息 `attachments_json` 读取去重的 path/sha256 集合并排序计算摘要；`approvals.reuse_scope_json` 中的 `attachment_sources` 绑定该集合。新附件或新版本不能复用旧授权，重启后仍从消息推导；分岔仅继承已复制的消息。未知/高风险操作只允许单次批准，集合摘要不扩大原目录/命令/站点范围。原始文件快照、LangGraph checkpoint 与审批审计仍各司其职。

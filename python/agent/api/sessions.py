@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 
 async def workspace_access(connection: HTTPConnection, workspace_id: str) -> str:
+    """Check product ownership after LocalBoundary admits the client; this is not authentication."""
     core: AgentCore = connection.app.state.core
     role = await core.repository.check_workspace_access(workspace_id, dto.Principal)
     if not role:

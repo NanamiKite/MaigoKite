@@ -5,6 +5,7 @@ import { api, type WorkspaceFileContent } from '@/api/client'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import CodeBlock from '@/components/common/CodeBlock.vue'
 import InkLoader from '@/components/common/InkLoader.vue'
+import DocumentPreview from './DocumentPreview.vue'
 import { desktopEffects } from '@/composables/useElectron'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { renderHTMLFile, renderMarkdownFile, renderSVGFile } from '@/utils/file-preview'
@@ -38,6 +39,7 @@ watch(
   },
 )
 const kind = computed(() => {
+  if (/\.(pdf|docx|xlsx|pptx)$/i.test(props.node.name)) return 'document'
   if (/\.svg$/i.test(props.node.name) || props.content?.mime_type === 'image/svg+xml') return 'svg'
   if (props.content?.mime_type?.startsWith('image/')) return 'image'
   if (/\.(md|markdown)$/i.test(props.node.name)) return 'markdown'
@@ -235,7 +237,13 @@ onScopeDispose(() => {
       v-if="node.type === 'file'"
       class="content"
     >
-      <InkLoader v-if="loading" />
+      <DocumentPreview
+        v-if="kind === 'document'"
+        :path="node.path"
+        :folder-id="workspace.selectedId"
+        :sha256="node.sha256 || ''"
+      />
+      <InkLoader v-else-if="loading" />
       <p
         v-else-if="loadError"
         role="alert"

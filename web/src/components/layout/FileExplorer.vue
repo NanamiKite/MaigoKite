@@ -35,8 +35,14 @@ const {
 } = useFileTree()
 const activeTab = ref<'files' | 'changes'>('files')
 const {
-  root: splitRoot, dragging: splitDragging, size: treeHeight, minimum: treeMinimum,
-  maximum: treeMaximum, defaultSize: defaultTreeHeight, resize: resizeTree, remember: rememberSplit,
+  root: splitRoot,
+  dragging: splitDragging,
+  size: treeHeight,
+  minimum: treeMinimum,
+  maximum: treeMaximum,
+  defaultSize: defaultTreeHeight,
+  resize: resizeTree,
+  remember: rememberSplit,
 } = usePreviewSplit('file_explorer_tree_ratio')
 const creationParent = computed(() =>
   selectedNode.value?.type === 'directory'
@@ -47,15 +53,28 @@ let shownRequest = 0
 watch(
   () => [ui.filePreviewRequest, loading.value] as const,
   async ([request, treeLoading]) => {
-    if (!request || treeLoading || request.serial === shownRequest || request.folderId !== workspace.selectedId) return
+    if (
+      !request ||
+      treeLoading ||
+      request.serial === shownRequest ||
+      request.folderId !== workspace.selectedId
+    )
+      return
     shownRequest = request.serial
     activeTab.value = 'files'
-    await revealFile(request.path)
+    await revealFile(request.path, 'file', request.sha256)
     await nextTick()
-    if (ui.filePreviewRequest?.serial !== request.serial || request.folderId !== workspace.selectedId) return
+    if (
+      ui.filePreviewRequest?.serial !== request.serial ||
+      request.folderId !== workspace.selectedId
+    )
+      return
     Array.from(explorer.value?.querySelectorAll<HTMLElement>('[data-tree-item]') || [])
-      .find(row => row.dataset.treeItem === request.path)?.scrollIntoView({ block: 'nearest' })
-    explorer.value?.querySelector<HTMLButtonElement>('.preview-close')?.focus({ preventScroll: true })
+      .find((row) => row.dataset.treeItem === request.path)
+      ?.scrollIntoView({ block: 'nearest' })
+    explorer.value
+      ?.querySelector<HTMLButtonElement>('.preview-close')
+      ?.focus({ preventScroll: true })
   },
   { immediate: true, flush: 'post' },
 )
@@ -119,7 +138,8 @@ async function created(entry: WorkspaceFileEntry) {
           @click="activeTab = 'files'"
         >
           {{ $t('文件') }}
-        </button><button
+        </button>
+        <button
           type="button"
           :class="{ active: activeTab === 'changes' }"
           @click="activeTab = 'changes'"
@@ -173,10 +193,12 @@ async function created(entry: WorkspaceFileEntry) {
               <span
                 v-else
                 class="empty-icon"
-              ><IconSymbol
-                name="folder"
-                :size="24"
-              /></span>
+              >
+                <IconSymbol
+                  name="folder"
+                  :size="24"
+                />
+              </span>
               <strong>{{ loading ? $t('正在读取工作区…') : $t('没有可显示的文件') }}</strong>
               <p
                 v-if="error"

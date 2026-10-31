@@ -23,7 +23,12 @@ async function load() {
   error.value = ''
   url.value = ''
   try {
-    const file = await api.getWorkspaceFile(props.image.path, props.image.folder_id, request.signal)
+    const file = await api.getWorkspaceFile(
+      props.image.path,
+      props.image.folder_id,
+      request.signal,
+      props.image.sha256,
+    )
     if (request.signal.aborted) return
     if (!file.data_url || file.truncated) throw new Error(t('图片暂时无法预览，请打开文件查看。'))
     url.value = file.data_url
@@ -36,7 +41,7 @@ async function load() {
 }
 function open() {
   workspace.select(props.image.folder_id)
-  ui.openFilePreview(props.image.path, props.image.folder_id)
+  ui.openFilePreview(props.image.path, props.image.folder_id, props.image.sha256)
 }
 watch(
   () => [props.image.path, props.image.folder_id, props.image.sha256],

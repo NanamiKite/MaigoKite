@@ -121,12 +121,14 @@ export function useFileTree() {
     if (node.type !== 'file' || /\.(pdf|docx|xlsx|pptx)$/i.test(node.name)) return
     previewLoading.value = true
     try {
-      const content = await api.getWorkspaceFile(
+      const previewArgs: Parameters<typeof api.getWorkspaceFile> = [
         node.path,
         workspace.selectedId,
         previewController.signal,
-        node.sha256,
-      )
+      ]
+      // Ordinary file browsing is unversioned; snapshot previews retain their hash constraint.
+      if (node.sha256) previewArgs.push(node.sha256)
+      const content = await api.getWorkspaceFile(...previewArgs)
       if (request === previewRequest) selectedContent.value = content
     } catch (reason) {
       if (request === previewRequest)

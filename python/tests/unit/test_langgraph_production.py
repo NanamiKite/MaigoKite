@@ -13,6 +13,7 @@ from agent.event_bus import EventBus
 from agent.models.native_model import close_chat_models
 from agent.observability import Observability
 from agent.repository import ConversationBusyError, SQLiteRepository
+from agent.tools.native.file_read import FileReadParams
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
@@ -499,12 +500,15 @@ async def test_sync_file_read_cancel_stops_runtime_but_not_worker_thread(
     release = threading.Event()
     finished = threading.Event()
 
-    def slow_read(path: str, encoding: str = "utf-8", max_bytes: int = 16_000, offset: int = 0) -> dict[str, Any]:
+    def slow_read(**arguments: object) -> dict[str, Any]:
+        # Permission normalization supplies all schema defaults, including
+        # document/image options. Validate them with the production contract.
+        params = FileReadParams.model_validate(arguments)
         started.set()
         release.wait(timeout=5)
         finished.set()
         return {
-            "path": path,
+            "path": params.path,
             "content": "value",
             "size_bytes": 5,
             "truncated": False,
@@ -523,7 +527,8 @@ async def test_sync_file_read_cancel_stops_runtime_but_not_worker_thread(
     conversation = await core.create_conversation(title="sync cancel")
     run_task = asyncio.create_task(core.run("read slow.txt", {"conversation_id": conversation["id"]}))
     try:
-        assert await asyncio.wait_for(asyncio.to_thread(started.wait, 2), timeout=3)
+        worker_started = await asyncio.wait_for(asyncio.to_thread(started.wait, 2), timeout=3)
+        assert worker_started, f"Sync file_read worker did not start; runtime events: {events!r}"
         task_id = next(payload["task_id"] for kind, payload in events if kind == "task.started")
         await core.cancel_task("personal", task_id)
         result = await asyncio.wait_for(run_task, timeout=2)

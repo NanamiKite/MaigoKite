@@ -60,6 +60,39 @@ describe('workspace explorer', () => {
     scope.stop()
   })
 
+  it('preserves the snapshot hash when revealing a versioned file', async () => {
+    vi.spyOn(api, 'listWorkspaceFiles').mockResolvedValue([])
+    vi.spyOn(api, 'getWorkspaceFile').mockResolvedValue({
+      path: 'snapshot.txt',
+      content: 'snapshot',
+      binary: false,
+      truncated: false,
+      size: 8,
+      modified_at: '',
+      mime_type: 'text/plain',
+      data_url: '',
+    })
+    useWorkspaceStore().select('folder-a')
+    const scope = effectScope()
+    const explorer = scope.run(() => useFileTree())!
+    try {
+      await flushPromises()
+      const sha256 = 'a'.repeat(64)
+      await explorer.revealFile('snapshot.txt', 'file', sha256)
+
+      expect(api.getWorkspaceFile).toHaveBeenCalledWith(
+        'snapshot.txt',
+        'folder-a',
+        expect.any(AbortSignal),
+        sha256,
+      )
+      expect(explorer.selectedNode.value?.sha256).toBe(sha256)
+      expect(explorer.selectedContent.value?.content).toBe('snapshot')
+    } finally {
+      scope.stop()
+    }
+  })
+
   it('aborts obsolete previews and does not replace the current file with a late result', async () => {
     vi.spyOn(api, 'listWorkspaceFiles').mockResolvedValue([])
     const pending: Array<{

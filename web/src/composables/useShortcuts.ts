@@ -6,6 +6,7 @@ import { useInboxStore } from '@/stores/inbox'
 import { revealRailNode } from '@/utils/rail-navigation'
 import { overlayPanel } from '@/utils/layout-media'
 import { pendingItem } from '@/utils/rail-presentation'
+import { awaitCardVisible } from '@/utils/await-focus'
 export function useShortcuts() {
   const ui = useUIStore(),
     session = useSessionStore(),
@@ -46,25 +47,31 @@ export function useShortcuts() {
       return
     }
     if (editing || modifier || event.altKey) return
-    const drawerScope = ui.drawerOpen && ui.drawerTab === 'pending'
-    if (target?.closest('#work-drawer') && !drawerScope) return
+    const inDrawer = Boolean(target?.closest('#work-drawer'))
+    const drawerScope = inDrawer && ui.drawerOpen && ui.drawerTab === 'pending'
+    if (inDrawer && !drawerScope) return
     const scope = document.querySelector<HTMLElement>(
       drawerScope ? '#work-drawer' : 'main.main-content',
     )
-    if (scope?.closest('[inert]') || target?.closest('#session-sidebar')) return
+    if (!scope || scope.closest('[inert]') || target?.closest('#session-sidebar')) return
     if (['y', 'n'].includes(key)) {
-      const pending = inbox.items.find(
-        (item) =>
-          pendingItem(item) &&
-          item.mode === 'approval' &&
-          (drawerScope || item.sessionId === session.activeSessionId) &&
-          scope?.querySelector(`[data-await="${CSS.escape(item.id)}"]`),
-      )
-      if (pending) {
+      if (event.repeat) return
+      const focusedId = target?.closest<HTMLElement>('[data-await]')?.dataset.await
+      const card = inbox.items
+        .filter(
+          (item) =>
+            pendingItem(item) &&
+            item.mode === 'approval' &&
+            (drawerScope || item.sessionId === session.activeSessionId) &&
+            (!focusedId || item.id === focusedId),
+        )
+        .map((item) => scope.querySelector<HTMLElement>(`[data-await="${CSS.escape(item.id)}"]`))
+        .find(awaitCardVisible)
+      if (card) {
         event.preventDefault()
-        scope
-          ?.querySelector<HTMLButtonElement>(
-            `[data-await="${CSS.escape(pending.id)}"] [data-verdict="${key === 'y' ? 'allow' : 'deny'}"]:not(:disabled)`,
+        card
+          .querySelector<HTMLButtonElement>(
+            `[data-verdict="${key === 'y' ? 'allow' : 'deny'}"]:not(:disabled)`,
           )
           ?.click()
       }

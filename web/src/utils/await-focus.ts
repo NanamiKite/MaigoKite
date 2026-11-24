@@ -24,3 +24,24 @@ export function awaitFocus(card: HTMLElement | null): () => void {
       ?.focus({ preventScroll: true })
   }
 }
+
+export function awaitCardVisible(card: HTMLElement | null): card is HTMLElement {
+  if (!card) return false
+  const target = card.querySelector<HTMLElement>('[data-await-action]:not(:disabled)') || card
+  const rect = target.getBoundingClientRect()
+  const area = rect.width * rect.height
+  if (!area) return false
+  const port = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
+  for (let node = target.parentElement; node; node = node.parentElement) {
+    const style = getComputedStyle(node)
+    if (style.overflowX === 'visible' && style.overflowY === 'visible') continue
+    const clip = node.getBoundingClientRect()
+    port.left = Math.max(port.left, clip.left + node.clientLeft)
+    port.top = Math.max(port.top, clip.top + node.clientTop)
+    port.right = Math.min(port.right, clip.left + node.clientLeft + node.clientWidth)
+    port.bottom = Math.min(port.bottom, clip.top + node.clientTop + node.clientHeight)
+  }
+  const width = Math.max(0, Math.min(rect.right, port.right) - Math.max(rect.left, port.left))
+  const height = Math.max(0, Math.min(rect.bottom, port.bottom) - Math.max(rect.top, port.top))
+  return (width * height) / area >= 0.5
+}

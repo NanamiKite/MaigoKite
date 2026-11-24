@@ -40,7 +40,9 @@ export function useShortcuts() {
     if (key === 'escape') {
       if (ui.drawerOpen || ui.commandOpen || ui.shortcutsOpen) ui.closeOverlays()
       else if (overlayPanel('sidebar') && !ui.layout.sidebarCollapsed) ui.layout.toggleSidebar()
-      else void session.cancelActiveTask().catch(() => undefined)
+      else if (!editing && router.currentRoute.value.name === 'Chat') {
+        void session.cancelActiveTask().catch(() => undefined)
+      }
       return
     }
     if (editing || modifier || event.altKey) return

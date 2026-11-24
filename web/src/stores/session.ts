@@ -976,10 +976,13 @@ export const useSessionStore = defineStore('session', () => {
   }
   async function cancelActiveTask() {
     const id = activeSessionId.value
-    if (id) queuedPaused.value[id] = true
-    const task = id ? runningTaskIds.value[id]?.find((t) => !t.startsWith('pending-')) : undefined
-    if (id && task) await cancelTask(task, id)
-    else if (id && runningTaskIds.value[id]?.length)
+    if (!id) return
+    const running = runningTaskIds.value[id] || [],
+      task = running.find((item) => !item.startsWith('pending-'))
+    if (!running.length && !queuedMessages.value[id]?.length) return
+    queuedPaused.value[id] = true
+    if (task) await cancelTask(task, id)
+    else if (running.length)
       error.value = t('消息正在提交，任务建立后可停止。待发消息已暂停。')
   }
   function disconnect() {

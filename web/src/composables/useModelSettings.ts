@@ -1,6 +1,16 @@
 import { t } from '@/i18n'
 import { confirmAction } from '@/utils/confirm-action'
-import { computed, onScopeDispose, reactive, ref, watch } from 'vue'
+import {
+  computed,
+  inject,
+  onScopeDispose,
+  provide,
+  reactive,
+  ref,
+  watch,
+  type InjectionKey,
+} from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import {
   COMPATIBLE_PROVIDER_PRESETS,
   getModelProvider,
@@ -18,17 +28,34 @@ import {
   type ChatModelProfile,
   type ChatModelProvider,
   type DiscoveredChatModel,
+  type ModelBatchEdit,
 } from '@/api/client'
 
 import { type ProviderChoice } from '@/config/model-provider-choices'
 
 type PanelMode = 'list' | 'providers' | 'editor'
+type LeaveCheck = () => Promise<boolean> | boolean
+const leaveChecksKey: InjectionKey<(check: LeaveCheck) => () => void> =
+  Symbol('modelDraftLeaveChecks')
 
 function newEditId(): string {
   // UUID accepts 32 hex digits; getRandomValues also works on LAN HTTP pages.
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), (value) =>
     value.toString(16).padStart(2, '0'),
   ).join('')
+}
+
+export function useModelDraftLeaveGuard(): void {
+  const checks = new Set<LeaveCheck>()
+  provide(leaveChecksKey, (check) => {
+    checks.add(check)
+    return () => {
+      checks.delete(check)
+    }
+  })
+  onBeforeRouteLeave(async () => {
+    for (const check of checks) if (!(await check())) return false
+  })
 }
 
 // Keep edits in a draft so endpoint changes cannot reuse a saved service's key.
@@ -50,6 +77,8 @@ export function useModelSettings() {
   let operationId = newEditId()
   let expectedRevision = settings.modelRevision
   let discoveryController: AbortController | null = null
+  const persisting = ref(false)
+  let openedFingerprint = ''
 
   function blankProfile(): ChatModelProfile {
     return {
@@ -198,6 +227,33 @@ export function useModelSettings() {
       Boolean(apiKey.value.trim()),
   )
 
+  function draftFingerprint(): string {
+    return JSON.stringify({
+      profile: modelSettingsFingerprint(draft),
+      name: draft.name,
+      apiKey: apiKey.value.trim(),
+      manualModelId: manualModelId.value.trim(),
+      models: selectedModels.value,
+      capacities: Object.entries(capacityOverrides.value).filter(([, value]) => value),
+      customService: customService.value,
+    })
+  }
+  const hasUnsavedDraft = computed(
+    () =>
+      mode.value === 'editor' &&
+      !persisting.value &&
+      (original.value ? isDirty.value : draftFingerprint() !== openedFingerprint),
+  )
+
+  async function canLeave() {
+    return (
+      !hasUnsavedDraft.value ||
+      (await confirmAction(t('模型配置尚未保存，离开会丢失修改。继续？'), false))
+    )
+  }
+  const registerLeaveCheck = inject(leaveChecksKey)
+  if (registerLeaveCheck) onScopeDispose(registerLeaveCheck(canLeave))
+
   watch(
     () => [
       modelSettingsFingerprint(draft),
@@ -234,7 +290,7 @@ export function useModelSettings() {
   watch(
     () => settings.modelProfiles.map((profile) => profile.id),
     (ids) => {
-      if (!settings.saving && selectedId.value && !ids.includes(selectedId.value)) closeEditor()
+      if (!settings.saving && selectedId.value && !ids.includes(selectedId.value)) showList()
     },
   )
 
@@ -303,6 +359,7 @@ export function useModelSettings() {
       customService.value = true
       draft.baseUrl = ''
     }
+    openedFingerprint = draftFingerprint()
     mode.value = 'editor'
   }
 
@@ -339,9 +396,18 @@ export function useModelSettings() {
     mode.value = 'editor'
   }
 
-  function closeEditor() {
+  function showList() {
     resetEditor()
     mode.value = 'list'
+  }
+
+  async function closeEditor() {
+    if (
+      hasUnsavedDraft.value &&
+      !(await confirmAction(t('模型配置尚未保存，返回模型列表会丢失修改。继续？'), false))
+    )
+      return
+    showList()
   }
 
   function selectProvider(value: ChatModelProvider) {
@@ -383,6 +449,15 @@ export function useModelSettings() {
     // Keep the gateway URL; endpointChanged prevents reuse of a different protocol's stored key.
     draft.provider = value
     draft.model = ''
+  }
+
+  async function persist(edit: ModelBatchEdit) {
+    persisting.value = true
+    try {
+      return await settings.applyModelEdit(edit)
+    } finally {
+      persisting.value = false
+    }
   }
 
   async function save() {
@@ -430,7 +505,7 @@ export function useModelSettings() {
         },
       ]
     })
-    const result = await settings.applyModelEdit({
+    const result = await persist({
       operationId,
       expectedRevision,
       profiles: targets,
@@ -441,7 +516,7 @@ export function useModelSettings() {
     if (result.revision) expectedRevision = result.revision
     if (!result.ok) return
     const message = settings.success
-    closeEditor()
+    showList()
     settings.success = message
   }
 
@@ -545,7 +620,7 @@ export function useModelSettings() {
       return
     if (settings.saving || draft.id !== selected) return
     const ids = originalModels.value.map((item) => item.id)
-    const result = await settings.applyModelEdit({
+    const result = await persist({
       operationId,
       expectedRevision,
       profiles: [],
@@ -556,7 +631,7 @@ export function useModelSettings() {
     if (result.revision) expectedRevision = result.revision
     if (result.ok) {
       const message = settings.success
-      closeEditor()
+      showList()
       settings.success = message
     }
   }

@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSettingsStore } from '@/stores/settings'
+import { useModelDraftLeaveGuard } from '@/composables/useModelSettings'
 import { settingsFields, type SettingsField } from '@/config/settings-fields'
 import SettingsSearch from '@/components/settings/SettingsSearch.vue'
 import ModelSettingsPanel from '@/components/settings/ModelSettingsPanel.vue'
@@ -17,6 +18,7 @@ import InkLoader from '@/components/common/InkLoader.vue'
 const route = useRoute(),
   router = useRouter(),
   settings = useSettingsStore()
+useModelDraftLeaveGuard()
 const tabs = [
   { id: 'general', label: '外观与称呼', icon: 'eye', component: AppearanceSettingsPanel },
   { id: 'models', label: '模型', icon: 'brain', component: ModelSettingsPanel },
@@ -140,10 +142,7 @@ watch(
         class="settings-content"
         :data-highlight="highlighted"
       >
-        <KeepAlive
-          :max="5"
-          exclude="SafetySettingsPanel"
-        >
+        <KeepAlive exclude="SafetySettingsPanel">
           <component
             :is="active.component"
             :key="active.id"

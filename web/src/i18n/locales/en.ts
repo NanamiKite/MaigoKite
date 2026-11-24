@@ -1277,6 +1277,10 @@ const en: Record<string, string> = {
     'Leave empty for the official API. Only fill in for a proxy or private gateway.',
   侧栏: 'Sidebar',
   '保存后将移除 {0} 个模型：{1}。继续？': 'Saving will remove {0} models: {1}. Continue?',
+  '模型配置尚未保存，返回模型列表会丢失修改。继续？':
+    'Your model configuration is not saved. Return to the model list and discard the changes?',
+  '模型配置尚未保存，离开会丢失修改。继续？':
+    'Your model configuration is not saved. Leave and discard the changes?',
   做: 'Act',
   '允许 / 驳回': 'Allow / Deny',
   内置工具: 'Built-in tools',

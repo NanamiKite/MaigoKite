@@ -76,7 +76,8 @@ watch(mode, () => {
         <IconSymbol
           name="plus"
           :size="15"
-        />{{ $t('添加服务') }}
+        />
+        {{ $t('添加服务') }}
       </button>
     </header>
 
@@ -106,10 +107,12 @@ watch(mode, () => {
         v-if="!settings.modelProfiles.length"
         class="empty-profile"
       >
-        <span class="empty-icon"><IconSymbol
-          name="brain"
-          :size="25"
-        /></span>
+        <span class="empty-icon">
+          <IconSymbol
+            name="brain"
+            :size="25"
+          />
+        </span>
         <h3>{{ $t('还没有模型') }}</h3>
         <button
           type="button"
@@ -146,7 +149,7 @@ watch(mode, () => {
           type="search"
           :aria-label="$t('搜索模型服务')"
           :placeholder="$t('搜索厂商、平台或中转站')"
-        >
+        />
       </label>
       <p
         v-if="!filteredGroups.length"
@@ -171,7 +174,10 @@ watch(mode, () => {
             @click="beginAdd(choice)"
           >
             <span class="provider-mark compatible">{{ choice.monogram }}</span>
-            <span><strong>{{ $t(choice.name) }}</strong><small>{{ $t(choice.description) }}</small></span>
+            <span>
+              <strong>{{ $t(choice.name) }}</strong>
+              <small>{{ $t(choice.description) }}</small>
+            </span>
             <i>›</i>
           </button>
         </div>

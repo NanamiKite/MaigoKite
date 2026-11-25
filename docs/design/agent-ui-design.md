@@ -791,7 +791,7 @@ macOS 下 `Ctrl` 自动换成 `⌘`。
 | 页面 | 入口与职责 |
 | --- | --- |
 | Chat `/chat/:id?` | 默认写作入口；空时间线显示一张工作纸，组织问候、MyGO 页边题记、起手式与同一个砚台组件。落款链接进入工作记录。 |
-| Overview `/overview` | 侧栏和命令面板统一叫“工作记录”；依次展示待处理、运行中、最近对话与工作区。没有第二套问候或指标仪表盘。确认加载成功、没有任何对话才跳转 Chat；错误、加载中或全部归档不会触发此跳转。 |
+| Overview `/overview` | 侧栏和命令面板统一叫“工作记录”；依次展示待处理、运行中、最近对话与工作区。没有第二套问候或指标仪表盘。确认加载成功、没有任何对话才跳转 Chat；错误、加载中或全部归档不会触发此跳转。（2026-11-25 起零会话不再跳转，改为显示空态说明和「新建对话」入口，见第 5 节。） |
 | Memory `/memory` | 保留“它记得”入口；身份区在上，偏好与记忆条目在下。不是新增一套记忆 Runtime。 |
 
 ### 逐项实现
@@ -824,7 +824,7 @@ macOS 下 `Ctrl` 自动换成 `⌘`。
 | `components/chat-area/WelcomeSheet.vue` | 题记、问候、工作区、四个起手式及安全数字快捷键。 |
 | `utils/welcome-presentation.ts`（新增） | 时段、渲染生命周期首次标记、起手式元信息和键盘过滤；无任务状态。 |
 | `styles/chat.scss`、`styles/welcome-sheet.scss`（新增） | 工作纸构图、有限叙事动画、断点与 reduced-motion。 |
-| `views/Overview.vue`、`styles/overview.scss` | 真实记录列表与空记录跳转，清除旧仪表盘死样式。 |
+| `views/Overview.vue`、`styles/overview.scss` | 真实记录列表与空记录跳转（2026-11-25 起零会话改为空态说明，不再跳转），清除旧仪表盘死样式。 |
 | `utils/work-records.ts`（新增） | 只读状态选择、记忆分组、置信度展示归一化。 |
 | `views/Memory.vue`、`styles/memory.scss`（新增） | 身份区、条目区、错误重试、保存微反馈。 |
 | `components/message/MemoryItem.vue` | 细线置信度、元信息、朱砂删除和墨晕定位。 |

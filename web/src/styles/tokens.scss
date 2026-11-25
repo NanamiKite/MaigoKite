@@ -123,6 +123,7 @@
   --panel-edge-gap: var(--space-5);
   --shadow-raised: var(--elevation-raised);
   --motion-reduced: 80ms;
+  --motion-reduced-pulse: 2400ms;
   --workpaper-width: 940px;
   --workpaper-inset: 52px;
   --workpaper-top: 68px;
@@ -234,14 +235,14 @@
   --font-sans: 'Inter', 'HarmonyOS Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --font-serif: 'Source Han Serif SC', 'Noto Serif SC', 'Songti SC', serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Code', monospace;
-  --text-xs: max(12px, calc(12px * var(--font-scale)));
-  --text-sm: max(12px, calc(13px * var(--font-scale)));
+  --text-xs: calc(12px * var(--font-scale));
+  --text-sm: calc(13px * var(--font-scale));
   --text-md: calc(15px * var(--font-scale));
-  --text-lg: 20px;
+  --text-lg: calc(20px * var(--font-scale));
   --type-caption: var(--text-xs);
   --type-small: var(--text-sm);
   --type-body: var(--text-md);
-  --type-subheading: 19px;
+  --type-subheading: calc(19px * var(--font-scale));
   --type-heading: 24px;
   --type-display-small: 30px;
   --type-display: 38px;
@@ -267,7 +268,7 @@
   --contrast-disabled-opacity: 0.7;
   --opacity-busy: 0.8;
   --leading-body: calc(26px * var(--font-scale));
-  --leading-small: 20px;
+  --leading-small: calc(20px * var(--font-scale));
   --leading-tight: 1.4;
   --leading-normal: 1.65;
   --weight-normal: 400;
@@ -345,6 +346,7 @@
   // Intrinsic dimensions keep the noise tile small during window resizing.
   --noise: url("data:image/svg+xml,%3Csvg width='180' height='180' viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' opacity='.8' filter='url(%23n)'/%3E%3C/svg%3E");
   --noise-opacity: 0.025;
+  --glyph-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m5 12 4.2 4.2L19 6.5' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --transparent: transparent;
   --backdrop: rgb(0 0 0 / 0.15);
   --titlebar-height: 44px;

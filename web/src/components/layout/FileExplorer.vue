@@ -12,6 +12,7 @@ import type { WorkspaceFileEntry } from '@/api/client'
 import WorkspaceDiff from '../file-explorer/WorkspaceDiff.vue'
 import InkLoader from '@/components/common/InkLoader.vue'
 import ResizeHandle from '@/components/common/ResizeHandle.vue'
+import { vTooltip } from '@/utils/tooltip'
 import { usePreviewSplit } from '../file-explorer/usePreviewSplit'
 
 const layoutStore = useLayoutStore()
@@ -93,9 +94,9 @@ async function created(entry: WorkspaceFileEntry) {
   >
     <button
       v-if="!embedded && layoutStore.fileExplorerCollapsed"
+      v-tooltip="$t('展开文件栏')"
       class="collapsed-button icon-button"
       type="button"
-      :title="$t('展开文件栏')"
       :aria-label="$t('展开文件栏')"
       @click="layoutStore.toggleFileExplorer"
     >

@@ -7,6 +7,7 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { useInboxStore } from '@/stores/inbox'
 import { useRunStore } from '@/stores/run'
 import { pendingItem } from '@/utils/rail-presentation'
+import { vTooltip } from '@/utils/tooltip'
 import { t } from '@/i18n'
 import Pulse from './Pulse.vue'
 import IconSymbol from '@/components/common/IconSymbol.vue'
@@ -185,10 +186,10 @@ function key(event: KeyboardEvent, index: number) {
         </button>
         <button
           v-if="tab.id || view.opened.length"
+          v-tooltip="$t('关闭标签，不会删除对话或停止任务')"
           type="button"
           class="conversation-tab__close"
           :aria-label="$t('关闭标签：{0}', [tab.title])"
-          :title="$t('关闭标签，不会删除对话或停止任务')"
           @click.stop="close(tab.id)"
           @keydown="key($event, index)"
         >
@@ -200,10 +201,10 @@ function key(event: KeyboardEvent, index: number) {
       </div>
     </div>
     <button
+      v-tooltip="$t('新页')"
       class="conversation-tabs__new"
       type="button"
       :aria-label="$t('新页')"
-      :title="$t('新页')"
       @click="select('')"
     >
       <IconSymbol

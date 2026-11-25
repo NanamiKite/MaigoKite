@@ -148,10 +148,10 @@
   gap: var(--space-3);
   margin: 0;
   font-size: var(--text-sm);
-  color: var(--ink-2);
+  color: var(--ink);
 }
 .validation.ok {
-  @include mixins.text-ink;
+  color: var(--ink-2);
 }
 .editor-footer {
   display: flex;

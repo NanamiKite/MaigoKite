@@ -8,6 +8,7 @@ import ThinkingControl from './ThinkingControl.vue'
 import Pulse from '@/components/shell/Pulse.vue'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import InkSelect from '@/components/common/InkSelect.vue'
+import { vTooltip } from '@/utils/tooltip'
 import { useSessionStore } from '@/stores/session'
 import { useUIStore } from '@/stores/ui'
 defineOptions({ inheritAttrs: false })
@@ -103,10 +104,10 @@ defineExpose({ closeMenu })
 <template>
   <div class="composer-controls">
     <button
+      v-tooltip="$t('添加与操作')"
       class="add-button"
       type="button"
       :aria-label="$t('添加与操作')"
-      :title="$t('添加与操作')"
       aria-haspopup="listbox"
       :aria-expanded="commandsOpen || false"
       :aria-controls="commandsOpen ? commandsId : undefined"

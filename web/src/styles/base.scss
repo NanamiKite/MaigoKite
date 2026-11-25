@@ -378,8 +378,8 @@ kbd {
   }
 }
 .error-banner {
-  color: var(--ink-2);
-  border-left: var(--space-1) solid var(--wait);
+  color: var(--ink);
+  border-inline-start: var(--focus-width) solid var(--wait);
   padding: var(--space-3) var(--space-4);
 }
 .sr-only {
@@ -408,6 +408,12 @@ kbd {
     animation: inkline-reduced-fade var(--motion-reduced) linear !important;
     transform: none !important;
   }
+  .ink-loader i,
+  button[aria-busy='true']::before,
+  .pulse.thinking,
+  .pulse.acting {
+    animation: inkline-reduced-breathe var(--motion-reduced-pulse) var(--ease) infinite !important;
+  }
 }
 @keyframes inkline-reduced-fade {
   from {
@@ -415,5 +421,10 @@ kbd {
   }
   to {
     opacity: 1;
+  }
+}
+@keyframes inkline-reduced-breathe {
+  50% {
+    opacity: var(--pulse-low-opacity);
   }
 }

@@ -205,9 +205,13 @@
   from, to { opacity: 0; }
   15%, 65% { opacity: 1; }
 }
+@keyframes chat-turn-locate-reduced {
+  from { opacity: 0; }
+  5%, to { opacity: 1; }
+}
 @media (prefers-reduced-motion: reduce) {
   .turn.located::before {
-    animation: paper-fade var(--motion-reduced) var(--ease-out) both;
+    animation: chat-turn-locate-reduced var(--chat-focus-duration) linear both !important;
   }
 }
 .welcome-state {

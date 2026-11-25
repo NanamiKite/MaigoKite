@@ -201,9 +201,4 @@ const statusLabels: Record<PlanItem['status'], string> = {
   color: var(--ink-2);
   font-variant-numeric: tabular-nums;
 }
-@media (prefers-reduced-motion: reduce) {
-  .plan-progress i {
-    transition: none;
-  }
-}
 </style>

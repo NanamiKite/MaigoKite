@@ -114,5 +114,5 @@
 .ink-confirm .danger { color: var(--seal); }
 .ink-confirm footer { display: flex; justify-content: flex-end; gap: var(--space-3); }
 @media (prefers-reduced-motion: reduce) {
-  .ink-select-menu, .ink-confirm { animation-duration: var(--motion-reduced); }
+  .ink-select-menu, .ink-confirm { animation: paper-fade var(--motion-reduced) var(--ease-out) both !important; }
 }

@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import type { AttachmentReference } from '@/api/images'
 import { t } from '@/i18n'
+import { vTooltip } from '@/utils/tooltip'
 const props = defineProps<{
   items: { id: string; content: string; attachments?: AttachmentReference[] }[]
   paused: boolean
@@ -226,10 +227,10 @@ async function guideNow(id: string) {
               {{ $t('立即发送') }}
             </button>
             <button
+              v-tooltip="$t('编辑')"
               type="button"
               class="icon-button"
               :disabled="Boolean(busy)"
-              :title="$t('编辑')"
               @click="edit(item)"
             >
               <IconSymbol
@@ -239,10 +240,10 @@ async function guideNow(id: string) {
               <span class="sr-only">{{ $t('编辑') }}</span>
             </button>
             <button
+              v-tooltip="$t('移除')"
               type="button"
               class="icon-button"
               :disabled="Boolean(busy)"
-              :title="$t('移除')"
               @click="emit('remove', index)"
             >
               <IconSymbol

@@ -112,13 +112,13 @@ textarea {
 }
 .extension-error {
   color: var(--ink);
-  border-inline-start: var(--focus-width) solid var(--rule);
+  border-inline-start: var(--focus-width) solid var(--wait);
   padding-inline-start: var(--space-3);
   font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 .extension-result {
-  @include mixins.text-ink;
+  color: var(--ink);
   font-size: var(--text-sm);
 }
 .extension-wait {

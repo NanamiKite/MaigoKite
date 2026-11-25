@@ -12,6 +12,7 @@ import ResizeHandle from '@/components/common/ResizeHandle.vue'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import AppIcon from '@/components/common/AppIcon.vue'
 import { overlayPanel } from '@/utils/layout-media'
+import { vTooltip } from '@/utils/tooltip'
 defineProps<{ maximumWidth?: number }>()
 const session = useSessionStore(),
   settings = useSettingsStore(),
@@ -83,8 +84,8 @@ function closeOnNarrowScreen() {
       </template>
     </div>
     <button
+      v-tooltip="ui.layout.sidebarCollapsed ? $t('新页') + ' (' + mod + '+N)' : undefined"
       class="new-page"
-      :title="$t('新页') + ' (' + mod + '+N)'"
       :aria-label="$t('新页')"
       @click="create()"
     >
@@ -96,9 +97,9 @@ function closeOnNarrowScreen() {
       <kbd v-if="!ui.layout.sidebarCollapsed">{{ mod }} N</kbd>
     </button>
     <button
+      v-tooltip="$t('搜索工作区和对话')"
       class="sidebar-action"
       :aria-label="$t('搜索工作区和对话')"
-      :title="$t('搜索工作区和对话')"
       :aria-expanded="searchOpen && !ui.layout.sidebarCollapsed"
       aria-controls="session-search"
       @click="search"
@@ -111,9 +112,9 @@ function closeOnNarrowScreen() {
     </button>
     <button
       v-if="ui.layout.sidebarCollapsed"
+      v-tooltip="$t('归档对话')"
       class="sidebar-action"
       :aria-label="$t('归档对话')"
-      :title="$t('归档对话')"
       :aria-pressed="session.showArchived"
       @click="toggleArchive"
     >
@@ -138,9 +139,9 @@ function closeOnNarrowScreen() {
           @keydown.esc.stop="closeSearch"
         />
         <button
+          v-tooltip="$t('关闭搜索')"
           class="sidebar-icon"
           :aria-label="$t('关闭搜索')"
-          :title="$t('关闭搜索')"
           @click="closeSearch"
         >
           <IconSymbol
@@ -157,10 +158,10 @@ function closeOnNarrowScreen() {
         class="session-list-controls"
       >
         <button
+          v-tooltip="session.showArchived ? $t('查看当前对话') : $t('查看归档对话')"
           class="sidebar-icon"
           :aria-pressed="session.showArchived"
           :aria-label="session.showArchived ? $t('查看当前对话') : $t('查看归档对话')"
-          :title="session.showArchived ? $t('查看当前对话') : $t('查看归档对话')"
           @click="toggleArchive"
         >
           <IconSymbol
@@ -169,11 +170,11 @@ function closeOnNarrowScreen() {
           />
         </button>
         <button
+          v-tooltip="$t('刷新会话')"
           class="sidebar-icon"
           :disabled="session.isLoading"
           :aria-busy="session.isLoading || undefined"
           :aria-label="$t('刷新会话')"
-          :title="$t('刷新会话')"
           @click="session.loadSessions"
         >
           <IconSymbol
@@ -191,9 +192,9 @@ function closeOnNarrowScreen() {
     />
     <footer>
       <router-link
+        v-tooltip="ui.layout.sidebarCollapsed ? $t('工作记录') : undefined"
         to="/overview"
         :aria-label="$t('工作记录')"
-        :title="$t('工作记录')"
         @click="closeOnNarrowScreen"
       >
         <IconSymbol
@@ -203,9 +204,9 @@ function closeOnNarrowScreen() {
         <span v-if="!ui.layout.sidebarCollapsed">{{ $t('工作记录') }}</span>
       </router-link>
       <router-link
+        v-tooltip="ui.layout.sidebarCollapsed ? $t('扩展') : undefined"
         to="/integrations"
         :aria-label="$t('扩展')"
-        :title="$t('扩展')"
         @click="closeOnNarrowScreen"
       >
         <IconSymbol
@@ -215,9 +216,9 @@ function closeOnNarrowScreen() {
         <span v-if="!ui.layout.sidebarCollapsed">{{ $t('扩展') }}</span>
       </router-link>
       <router-link
+        v-tooltip="ui.layout.sidebarCollapsed ? $t('它记得') : undefined"
         to="/memory"
         :aria-label="$t('它记得')"
-        :title="$t('它记得')"
         @click="closeOnNarrowScreen"
       >
         <span
@@ -229,9 +230,9 @@ function closeOnNarrowScreen() {
         <span v-if="!ui.layout.sidebarCollapsed">{{ $t('它记得') }}</span>
       </router-link>
       <router-link
+        v-tooltip="ui.layout.sidebarCollapsed ? $t('设置') : undefined"
         to="/settings"
         :aria-label="$t('设置')"
-        :title="$t('设置')"
         @click="closeOnNarrowScreen"
       >
         <IconSymbol

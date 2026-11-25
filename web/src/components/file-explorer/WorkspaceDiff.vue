@@ -4,6 +4,7 @@ import CodeBlock from '@/components/common/CodeBlock.vue'
 import InkLoader from '@/components/common/InkLoader.vue'
 import ResizeHandle from '@/components/common/ResizeHandle.vue'
 import { layoutPixels } from '@/utils/layout-media'
+import { vTooltip } from '@/utils/tooltip'
 import { usePreviewSplit } from './usePreviewSplit'
 import { useWorkspaceChanges } from './useWorkspaceChanges'
 
@@ -46,12 +47,12 @@ defineExpose({ load })
         <template v-if="changesTruncated">+</template>
       </span>
       <button
+        v-tooltip="$t('刷新变更')"
         class="icon-button"
         type="button"
         :disabled="loading"
         :aria-busy="loading || undefined"
         :aria-label="$t('刷新变更')"
-        :title="$t('刷新变更')"
         @click="load"
       >
         <IconSymbol

@@ -8,6 +8,7 @@ import { useDialog } from '@/composables/useDialog'
 import { i18n, t } from '@/i18n'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import InkButton from '@/components/common/InkButton.vue'
+import { vTooltip } from '@/utils/tooltip'
 
 const props = defineProps<{ folder: WorkspaceFolder; disabled?: boolean }>()
 const workspace = useWorkspaceStore(),
@@ -67,11 +68,11 @@ async function remove() {
   >
     <button
       ref="trigger"
+      v-tooltip="$t('删除工作区：{0}', [folder.name])"
       type="button"
       class="workspace-delete-trigger"
       :disabled="disabled || busy"
       :aria-label="$t('删除工作区：{0}', [folder.name])"
-      :title="$t('删除工作区：{0}', [folder.name])"
       @click="confirm"
     >
       <IconSymbol

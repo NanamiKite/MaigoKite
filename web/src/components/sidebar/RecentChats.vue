@@ -6,6 +6,7 @@ import { t } from '@/i18n'
 import { useSessionStore } from '@/stores/session'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useInboxStore } from '@/stores/inbox'
+import { vTooltip } from '@/utils/tooltip'
 import SessionItem from './SessionItem.vue'
 import WorkspaceDeleteButton from './WorkspaceDeleteButton.vue'
 import IconSymbol from '@/components/common/IconSymbol.vue'
@@ -176,9 +177,9 @@ async function selectGroup(id: string) {
           <small>{{ group.sessions.length }}</small>
         </button>
         <button
+          v-tooltip="$t('在「{0}」中新建对话', [group.label])"
           class="workspace-new"
           :aria-label="$t('在「{0}」中新建对话', [group.label])"
-          :title="$t('在「{0}」中新建对话', [group.label])"
           @click="emit('create', group.id)"
         >
           <IconSymbol

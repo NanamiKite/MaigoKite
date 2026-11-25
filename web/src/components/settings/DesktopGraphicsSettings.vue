@@ -173,9 +173,6 @@ onUnmounted(() => {
 .graphics-feedback.pending {
   color: var(--wait-ink);
 }
-.graphics-feedback.field-saved {
-  color: var(--accent-ink);
-}
 .graphics-caption {
   margin-top: var(--space-6);
 }

@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { useUIStore } from '@/stores/ui'
 import IconSymbol from '@/components/common/IconSymbol.vue'
+import { vTooltip } from '@/utils/tooltip'
 defineProps<{ pendingCount: number; sidebarOverlay?: boolean }>()
 const ui = useUIStore()
 </script>
 <template>
   <button
+    v-tooltip="$t(ui.layout.sidebarCollapsed ? '展开侧栏' : '收起侧栏')"
     class="sidebar-toggle"
     type="button"
-    :title="$t(ui.layout.sidebarCollapsed ? '展开侧栏' : '收起侧栏')"
     :aria-label="$t(ui.layout.sidebarCollapsed ? '展开侧栏' : '收起侧栏')"
     :aria-expanded="!ui.layout.sidebarCollapsed"
     aria-controls="session-sidebar"
@@ -22,7 +23,9 @@ const ui = useUIStore()
       v-if="pendingCount && (ui.layout.sidebarCollapsed || sidebarOverlay)"
       class="pending-count"
       :aria-label="$t('{0} 项等你处理', [pendingCount])"
-    >{{ pendingCount }}</span>
+    >
+      {{ pendingCount }}
+    </span>
   </button>
 </template>
 <style scoped lang="scss">

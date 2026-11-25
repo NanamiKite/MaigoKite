@@ -209,11 +209,21 @@
 .field-error,
 .page-error {
   color: var(--ink);
-  border-inline-start: var(--focus-width) solid var(--rule);
+  border-inline-start: var(--focus-width) solid var(--wait);
   padding-inline-start: var(--space-3);
 }
 .field-saved {
-  @include mixins.text-ink;
+  color: var(--ink-2);
+}
+.field-saved::before {
+  content: '';
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-inline-end: var(--space-2);
+  vertical-align: -0.125em;
+  background: currentColor;
+  mask: var(--glyph-check) center / contain no-repeat;
 }
 .field-error button,
 .page-error button {

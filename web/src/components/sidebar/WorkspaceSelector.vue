@@ -9,6 +9,7 @@ import InkButton from '@/components/common/InkButton.vue'
 import InkLoader from '@/components/common/InkLoader.vue'
 import WorkspaceFolderBrowser from './WorkspaceFolderBrowser.vue'
 import WorkspaceDeleteButton from './WorkspaceDeleteButton.vue'
+import { vTooltip } from '@/utils/tooltip'
 
 const props = defineProps<{ collapsed: boolean; presentationTrigger?: boolean }>()
 const workspace = useWorkspaceStore(),
@@ -102,9 +103,9 @@ function close() {
       <small>{{ workspace.folders.length }}</small>
     </span>
     <button
+      v-tooltip="$t(triggerLabel)"
       class="icon-button"
       :aria-label="$t(triggerLabel)"
-      :title="$t(triggerLabel)"
       :disabled="choosing || busy"
       :aria-busy="choosing || busy || undefined"
       @click="presentationTrigger || collapsed ? openSelector() : openAdd()"

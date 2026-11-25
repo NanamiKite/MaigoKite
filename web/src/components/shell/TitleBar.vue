@@ -7,6 +7,7 @@ import { useUIStore } from '@/stores/ui'
 import { useInboxStore } from '@/stores/inbox'
 import { usePulse } from '@/composables/usePulse'
 import { overlayPanel } from '@/utils/layout-media'
+import { vTooltip } from '@/utils/tooltip'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import SessionTitle from '@/components/common/SessionTitle.vue'
 import Pulse from './Pulse.vue'
@@ -102,9 +103,9 @@ function toggleDrawer() {
     <span class="pulse-slot">
       <button
         v-if="jumpable"
+        v-tooltip="pulseLabel"
         class="pulse-target"
         type="button"
-        :title="pulseLabel"
         :aria-label="pulseLabel"
         @click="goToTarget"
       >
@@ -147,9 +148,9 @@ function toggleDrawer() {
         class="chat-session-actions"
       />
       <button
+        v-tooltip="$t(ui.theme === 'dark' ? '切换到宣纸' : '切换到松烟')"
         class="title-button"
         type="button"
-        :title="$t(ui.theme === 'dark' ? '切换到宣纸' : '切换到松烟')"
         :aria-label="$t(ui.theme === 'dark' ? '切换到宣纸' : '切换到松烟')"
         @click="ui.setAppearance({ theme: ui.theme === 'dark' ? 'light' : 'dark' })"
       >
@@ -159,9 +160,9 @@ function toggleDrawer() {
         />
       </button>
       <button
+        v-tooltip="drawerLabel"
         class="title-button drawer-toggle"
         type="button"
-        :title="drawerLabel"
         :aria-label="drawerLabel"
         :aria-expanded="ui.drawerOpen"
         aria-controls="work-drawer"

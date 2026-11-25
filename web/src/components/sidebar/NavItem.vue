@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useLayoutStore } from '@/stores/layout'
 import IconSymbol from '@/components/common/IconSymbol.vue'
+import { vTooltip } from '@/utils/tooltip'
 
 defineProps<{ icon: string; to: string; label: string }>()
 const layoutStore = useLayoutStore()
@@ -8,9 +9,10 @@ const layoutStore = useLayoutStore()
 
 <template>
   <router-link
+    v-tooltip="layoutStore.sidebarCollapsed ? $t(label) : undefined"
     :to="to"
     class="nav-item"
-    :title="layoutStore.sidebarCollapsed ? $t(label) : undefined"
+    :aria-label="$t(label)"
   >
     <IconSymbol
       :name="icon"
@@ -19,7 +21,9 @@ const layoutStore = useLayoutStore()
     <span
       v-show="!layoutStore.sidebarCollapsed"
       class="nav-label"
-    >{{ $t(label) }}</span>
+    >
+      {{ $t(label) }}
+    </span>
   </router-link>
 </template>
 

@@ -2,6 +2,7 @@
 import { onScopeDispose, ref, watch } from 'vue'
 import { t } from '@/i18n'
 import IconSymbol from '@/components/common/IconSymbol.vue'
+import { vTooltip } from '@/utils/tooltip'
 
 const props = defineProps<{ content: string }>()
 const copied = ref(false),
@@ -32,8 +33,7 @@ async function copy() {
       timer = undefined
     }, 1800)
   } catch {
-    if (!disposed && props.content === content)
-      error.value = t('无法复制，请选中文字后复制。')
+    if (!disposed && props.content === content) error.value = t('无法复制，请选中文字后复制。')
   } finally {
     if (!disposed) busy.value = false
   }
@@ -49,12 +49,12 @@ onScopeDispose(() => {
   <div class="message-action-row">
     <div class="message-action-row__buttons">
       <button
+        v-tooltip="$t(copied ? '已复制' : '复制消息')"
         type="button"
         class="icon-button message-copy"
         :class="{ copied }"
         :disabled="busy || !content"
         :aria-label="$t(copied ? '已复制' : '复制消息')"
-        :title="$t(copied ? '已复制' : '复制消息')"
         :aria-busy="busy || undefined"
         @click="copy"
       >
@@ -69,7 +69,9 @@ onScopeDispose(() => {
       class="sr-only"
       role="status"
       aria-live="polite"
-    >{{ copied ? $t('已复制') : '' }}</span>
+    >
+      {{ copied ? $t('已复制') : '' }}
+    </span>
     <p
       v-if="error"
       class="message-action-row__error"

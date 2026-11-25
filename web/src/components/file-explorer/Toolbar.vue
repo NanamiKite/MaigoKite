@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import IconSymbol from '@/components/common/IconSymbol.vue'
+import { vTooltip } from '@/utils/tooltip'
 defineProps<{ loading?: boolean; location?: string; opening?: boolean }>()
 const emit = defineEmits<{ refresh: []; create: [type: 'file' | 'directory']; 'open-folder': [] }>()
 </script>
@@ -15,11 +16,11 @@ const emit = defineEmits<{ refresh: []; create: [type: 'file' | 'directory']; 'o
     </span>
     <div class="toolbar-actions">
       <button
+        v-tooltip="$t('新建空文件')"
         class="icon-button"
         type="button"
         :disabled="loading"
         :aria-label="$t('新建空文件')"
-        :title="$t('新建空文件')"
         @click="emit('create', 'file')"
       >
         <IconSymbol
@@ -28,11 +29,11 @@ const emit = defineEmits<{ refresh: []; create: [type: 'file' | 'directory']; 'o
         />
       </button>
       <button
+        v-tooltip="$t('新建文件夹')"
         class="icon-button"
         type="button"
         :disabled="loading"
         :aria-label="$t('新建文件夹')"
-        :title="$t('新建文件夹')"
         @click="emit('create', 'directory')"
       >
         <IconSymbol
@@ -41,12 +42,12 @@ const emit = defineEmits<{ refresh: []; create: [type: 'file' | 'directory']; 'o
         />
       </button>
       <button
+        v-tooltip="$t('在文件资源管理器中打开文件夹')"
         class="icon-button"
         type="button"
         :disabled="opening || loading"
         :aria-busy="opening || undefined"
         :aria-label="$t('在文件资源管理器中打开文件夹')"
-        :title="$t('在文件资源管理器中打开文件夹')"
         @click="emit('open-folder')"
       >
         <IconSymbol
@@ -55,12 +56,12 @@ const emit = defineEmits<{ refresh: []; create: [type: 'file' | 'directory']; 'o
         />
       </button>
       <button
+        v-tooltip="$t('刷新文件')"
         class="icon-button"
         type="button"
         :disabled="loading"
         :aria-busy="loading || undefined"
         :aria-label="$t('刷新文件')"
-        :title="$t('刷新文件')"
         @click="emit('refresh')"
       >
         <IconSymbol

@@ -9,6 +9,7 @@ import DocumentPreview from './DocumentPreview.vue'
 import { desktopEffects } from '@/composables/useElectron'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { renderHTMLFile, renderMarkdownFile, renderSVGFile } from '@/utils/file-preview'
+import { vTooltip } from '@/utils/tooltip'
 
 const props = defineProps<{
   node: FileTreeNode
@@ -185,9 +186,9 @@ onScopeDispose(() => {
         <small>{{ node.type === 'directory' ? $t('文件夹') : $t('只读预览') }}</small>
       </div>
       <button
+        v-tooltip="$t('关闭预览')"
         class="icon-button preview-close"
         :aria-label="$t('关闭预览')"
-        :title="$t('关闭预览')"
         @click="$emit('close')"
       >
         <IconSymbol

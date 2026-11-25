@@ -1,0 +1,27 @@
+.inkline-tooltip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: var(--z-tooltip);
+  max-width: min(var(--measure-304px), calc(100vw - var(--space-5) * 2));
+  padding: var(--space-3) var(--space-4);
+  border: var(--hairline) solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--paper-raised);
+  box-shadow: var(--shadow-float);
+  color: var(--ink);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity var(--motion-fast) var(--ease),
+    visibility var(--motion-fast);
+}
+.inkline-tooltip.is-visible {
+  visibility: visible;
+  opacity: 1;
+}

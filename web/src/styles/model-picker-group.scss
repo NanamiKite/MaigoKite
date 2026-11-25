@@ -52,6 +52,3 @@
   &[aria-selected='true'] { @include mixins.text-ink; }
   small { color: var(--ink-2); font-size: var(--text-xs); white-space: nowrap; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .group-chevron { transition: none; }
-}

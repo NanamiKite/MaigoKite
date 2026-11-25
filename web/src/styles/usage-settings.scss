@@ -250,6 +250,3 @@
     .usage-model-detail dl { grid-template-columns: minmax(0, 1fr); }
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .usage-service > summary > svg, .usage-model-toggle > svg { transition: none; }
-}

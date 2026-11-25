@@ -3,6 +3,7 @@ import { computed, onScopeDispose, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import IconSymbol from '@/components/common/IconSymbol.vue'
+import { vTooltip } from '@/utils/tooltip'
 
 // The caller keys this component by the persisted message ID, not a task or stream ID.
 const props = defineProps<{ conversationId: string; messageId?: string; disabled: boolean }>()
@@ -12,7 +13,9 @@ const menu = ref<HTMLDetailsElement | null>(null)
 const busy = ref(false),
   error = ref('')
 const available = computed(
-  () => session.capabilities.conversation_fork && props.messageId &&
+  () =>
+    session.capabilities.conversation_fork &&
+    props.messageId &&
     !props.messageId.startsWith('stream-'),
 )
 let requestKey = ''
@@ -72,9 +75,9 @@ onScopeDispose(() => {
     @keydown.esc.stop.prevent="close(true)"
   >
     <summary
+      v-tooltip="$t('从此处分叉新对话')"
       class="icon-button"
       :aria-label="$t('从此处分叉新对话')"
-      :title="$t('从此处分叉新对话')"
     >
       <IconSymbol
         name="branch"
@@ -123,8 +126,13 @@ summary {
   border-radius: var(--radius-sm);
   cursor: pointer;
   list-style: none;
-  &::-webkit-details-marker { display: none; }
-  &:hover { background: var(--paper-2); color: var(--ink); }
+  &::-webkit-details-marker {
+    display: none;
+  }
+  &:hover {
+    background: var(--paper-2);
+    color: var(--ink);
+  }
 }
 .message-actions__options {
   // Stay in flow: the menu must remain reachable in a narrow, scrollable transcript.
@@ -144,18 +152,34 @@ button {
   background: transparent;
   color: var(--ink);
   font: inherit;
-  &:hover:not(:disabled) { background: var(--paper-3); }
+  &:hover:not(:disabled) {
+    background: var(--paper-3);
+  }
 }
-p { margin: var(--space-2) var(--space-3); overflow-wrap: anywhere; }
-.message-actions__error { color: var(--seal); }
+p {
+  margin: var(--space-2) var(--space-3);
+  overflow-wrap: anywhere;
+}
+.message-actions__error {
+  color: var(--seal);
+}
 @media (hover: hover) and (pointer: fine) {
-  summary { opacity: 0.55; }
+  summary {
+    opacity: 0.55;
+  }
   .message-actions:hover summary,
   .message-actions:focus-within summary,
-  .message-actions[open] summary { opacity: 1; }
+  .message-actions[open] summary {
+    opacity: 1;
+  }
 }
 @media (pointer: coarse) {
-  summary, button { min-height: var(--measure-46px); }
-  summary { min-width: var(--measure-46px); }
+  summary,
+  button {
+    min-height: var(--measure-46px);
+  }
+  summary {
+    min-width: var(--measure-46px);
+  }
 }
 </style>

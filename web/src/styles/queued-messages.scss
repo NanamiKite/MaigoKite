@@ -66,6 +66,3 @@ textarea {
   .queue-item { grid-template-columns: var(--size-26) minmax(0, 1fr); }
   .queue-actions { grid-column: 2 / -1; justify-content: flex-end; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .queue-move { transition: none; }
-}

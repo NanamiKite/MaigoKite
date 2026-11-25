@@ -11,6 +11,7 @@ import { useDialog } from '@/composables/useDialog'
 import Pulse from '@/components/shell/Pulse.vue'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import { pendingOrder } from '@/utils/rail-presentation'
+import { vTooltip } from '@/utils/tooltip'
 import ConversationAuthorizations from './ConversationAuthorizations.vue'
 import InkSelect from '@/components/common/InkSelect.vue'
 const props = defineProps<{ item: Conversation; collapsed: boolean }>()
@@ -26,11 +27,25 @@ const title = ref(''),
   folder = ref(''),
   error = ref(''),
   busy = ref<'save' | 'archive' | 'delete' | ''>('')
-const inbox = useInboxStore(), route = useRoute()
-const pending = computed(() => props.item.id === String(route.params.id || '') ? [] : inbox.items
-  .filter(item => item.sessionId === props.item.id && !item.closed && !item.verdict && item.answer === undefined).sort(pendingOrder))
-const destination = computed(() => ({ path: '/chat/' + props.item.id,
-  ...(pending.value[0] ? { query: { await: pending.value[0].id } } : {}) }))
+const inbox = useInboxStore(),
+  route = useRoute()
+const pending = computed(() =>
+  props.item.id === String(route.params.id || '')
+    ? []
+    : inbox.items
+        .filter(
+          (item) =>
+            item.sessionId === props.item.id &&
+            !item.closed &&
+            !item.verdict &&
+            item.answer === undefined,
+        )
+        .sort(pendingOrder),
+)
+const destination = computed(() => ({
+  path: '/chat/' + props.item.id,
+  ...(pending.value[0] ? { query: { await: pending.value[0].id } } : {}),
+}))
 const running = computed(
   () =>
     Boolean(session.runningTaskIds[props.item.id]?.length) ||
@@ -99,9 +114,8 @@ async function act(action: 'save' | 'archive' | 'delete') {
       <Pulse
         v-if="running && !pending.length"
         :state="run.pulse(item.id)"
-      /><span v-if="!collapsed">{{
-        item.title || $t('未命名对话')
-      }}</span>
+      />
+      <span v-if="!collapsed">{{ item.title || $t('未命名对话') }}</span>
       <small
         v-if="pending.length"
         class="session-pending"
@@ -110,7 +124,8 @@ async function act(action: 'save' | 'archive' | 'delete') {
         <Pulse
           state="waiting"
           :size="10"
-        /><span v-if="!collapsed">{{ $t('等你处理') }}</span>
+        />
+        <span v-if="!collapsed">{{ $t('等你处理') }}</span>
       </small>
     </router-link>
     <template v-if="!collapsed">
@@ -118,7 +133,9 @@ async function act(action: 'save' | 'archive' | 'delete') {
         class="session-time"
         :datetime="item.updated_at"
         :title="new Date(item.updated_at).toLocaleString($i18n.locale)"
-      >{{ updatedTime }}</time>
+      >
+        {{ updatedTime }}
+      </time>
       <div class="session-actions">
         <button
           class="icon-button"
@@ -134,9 +151,9 @@ async function act(action: 'save' | 'archive' | 'delete') {
           />
         </button>
         <button
+          v-tooltip="$t('管理对话')"
           class="icon-button"
           :aria-label="$t('管理对话：') + item.title"
-          :title="$t('管理对话')"
           @click="manage"
         >
           <IconSymbol
@@ -155,7 +172,8 @@ async function act(action: 'save' | 'archive' | 'delete') {
         @click.self="open = false"
       >
         <header>
-          <strong>{{ confirming ? $t('删除对话？') : $t('管理对话') }}</strong><button
+          <strong>{{ confirming ? $t('删除对话？') : $t('管理对话') }}</strong>
+          <button
             class="icon-button"
             :aria-label="$t('关闭')"
             @click="open = false"
@@ -187,19 +205,25 @@ async function act(action: 'save' | 'archive' | 'delete') {
         </template>
         <template v-else>
           <form @submit.prevent="act('save')">
-            <label>{{ $t('对话名称')
-            }}<input
-              v-model="title"
-              maxlength="200"
-              required
-              :disabled="!!busy"
-            ></label>
-            <label>{{ $t('所属工作区')
-            }}<InkSelect
-              v-model="folder"
-              :options="workspace.folders.map(entry => ({ value: entry.id, label: entry.name }))"
-              :disabled="!!busy || running"
-            /></label>
+            <label>
+              {{ $t('对话名称') }}
+              <input
+                v-model="title"
+                maxlength="200"
+                required
+                :disabled="!!busy"
+              />
+            </label>
+            <label>
+              {{ $t('所属工作区') }}
+              <InkSelect
+                v-model="folder"
+                :options="
+                  workspace.folders.map((entry) => ({ value: entry.id, label: entry.name }))
+                "
+                :disabled="!!busy || running"
+              />
+            </label>
             <p
               v-if="running"
               class="empty-copy"

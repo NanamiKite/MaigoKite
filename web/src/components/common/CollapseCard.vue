@@ -159,9 +159,4 @@ watch(
     padding: var(--space-5);
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .chevron {
-    transition: none;
-  }
-}
 </style>

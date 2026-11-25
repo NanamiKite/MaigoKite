@@ -177,7 +177,7 @@ h3 {
 }
 @media (prefers-reduced-motion: reduce) {
   .stat-panel {
-    animation: paper-fade var(--motion-reduced) linear both;
+    animation: paper-fade var(--motion-reduced) linear both !important;
   }
 }
 </style>

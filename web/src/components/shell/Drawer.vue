@@ -9,6 +9,7 @@ import PlanTab from '@/components/drawer/PlanTab.vue'
 import PendingTab from '@/components/drawer/PendingTab.vue'
 import { useInboxStore } from '@/stores/inbox'
 import { pendingItem } from '@/utils/rail-presentation'
+import { vTooltip } from '@/utils/tooltip'
 import FileExplorer from '@/components/layout/FileExplorer.vue'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import ResizeHandle from '@/components/common/ResizeHandle.vue'
@@ -116,9 +117,9 @@ function refreshPanel() {
       <div class="drawer-controls">
         <button
           v-if="panel?.refresh && panel.refreshLabel"
+          v-tooltip="panel.refreshLabel"
           class="drawer-control drawer-refresh"
           type="button"
-          :title="panel.refreshLabel"
           :aria-label="panel.refreshLabel"
           :aria-disabled="panel.busy || undefined"
           @click="refreshPanel"
@@ -129,9 +130,9 @@ function refreshPanel() {
           />
         </button>
         <button
+          v-tooltip="wide ? $t('还原面板') : $t('放大面板')"
           class="drawer-control"
           :aria-label="wide ? $t('还原面板') : $t('放大面板')"
-          :title="wide ? $t('还原面板') : $t('放大面板')"
           :aria-pressed="wide"
           @click="wide = !wide"
         >
@@ -141,9 +142,9 @@ function refreshPanel() {
           />
         </button>
         <button
+          v-tooltip="$t('关闭抽屉') + ' (' + mod + '+.)'"
           class="drawer-control"
           :aria-label="$t('关闭抽屉')"
-          :title="$t('关闭抽屉') + ' (' + mod + '+.)'"
           @click="ui.drawerOpen = false"
         >
           <IconSymbol

@@ -66,6 +66,3 @@
   .profile-main { flex-basis: calc(100% - var(--space-7)); }
   .service-heading > .default-action { margin-inline-start: auto; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .service-chevron { transition: none; }
-}

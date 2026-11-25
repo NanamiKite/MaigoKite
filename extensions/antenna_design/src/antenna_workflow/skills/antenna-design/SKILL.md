@@ -86,10 +86,10 @@ min_forward_gain_dbi / min_front_to_back_db 不是必填问卷；未要求的指
 - 评分是各频点增益/F/B 缺口的归一化平方和；默认尺度分别为 1 dB，可显式设置 gain_scale_db / front_back_scale_db。只有已选定直连并给出 max_direct_swr 时纳入 SWR 缺口，swr_scale 默认 1。超出的增益不抵消别的频点缺口；不要用改变尺度、参考阻抗或目标冒充优化成功。
 - 默认在项目剩余次数中留出最多两次完整频点扫算的验证余量，其余作为搜索硬上限（不超过 4096）。这只是余量，不是锁定的验证预留，也不保证足够完成带宽/收敛验收。显式 `max_solver_runs` 可进一步指定本次上限，不能超过项目剩余次数；使用它时由调用者另留验证余量。
 - 默认总种群/资源批次为 `max(8, 2×自由参数数)`，不代表数值收敛保证。资源批次仅限制消耗，不用于判断停滞。SciPy 每完成一整代后才比较改善；初始化不计代数。默认至少完成 minimum_generations=5 代，并连续 stagnation_generations=5 代没有超过 0.1% 且 1e-8 的改善才因停滞停止；次数/时限依然可以提前终止。回执 generations_completed 是实际完整代数，不用候选数量推算。
-- 完整候选实测耗时（含保存/评价）乘 1.25 后的高水位用于限制后续批次和候选准入；共享 worker 时限保留至少 5 秒或 10% 收尾时间。不够完成下一个全频候选就停止。没有耗时记录时最多先放行一个探测候选，极慢求解仍由父进程硬超时终止。`budget` 回执区分硬上限、已领取候选、实际用量、停滞和耗时；没有旧基线时基线也计费。
+- 完整候选实测耗时（含内存评价）乘 1.25 后的高水位用于限制后续批次和候选准入；共享 worker 时限保留至少 5 秒或 10% 收尾时间。不够完成下一个全频候选就停止。没有耗时记录时最多先放行一个探测候选，极慢求解仍由父进程硬超时终止。`budget` 回执区分硬上限、已领取候选、实际用量、停滞和耗时；没有旧基线时基线也计费。
 - 使用新的优化 run_id（最长 40 字符），调用前保存 `optimization-input-rNN.json`。回执保存为 `optimization-result-rNN.json`；best.run_ids 属于同一几何，可直接用于 evaluate/export，best.parameters 的顺序与 dimensions 一致。首版搜索只存数值，不逐个候选绘图。为最佳候选各频点调用 render，再以其输出编号交付带图设计包；不为出图重新 solve。
 - `stop_reason=sampled_targets_met` 只表示当前采样点目标满足；stagnation / time_limit / budget_limit / optimizer_finished / interrupted / failed 都不等于达标。best=null 表示没有完整可评价候选，不能给出虚构尺寸或指标；best 仍是基线则明确没有找到更好的方案。
-- 取消使用优化 run_id；超时、断线或重启后先 get_optimization。它只取回，不恢复种群、不重新求解。未完成候选的频点可由 project_status 找回，不能拼进最佳方案。继续搜索需要明确新的预算和新编号，可将已保存最佳模型及全频点结果作为新基线；不能偷偷重跑旧输入。
+- 取消使用优化 run_id；超时、断线或重启后先 get_optimization。它只取回最后一份已发布的完整最佳，不恢复种群、不重新求解。候选先在内存评分，只有最佳候选在首次可评价、整代结束且有改善、收尾或达标时才发布完整频点证据；其余候选在 project_status 中显示 `summary_only`，只保留参数和逐频关键指标，没有可取回的频点文件，不能当作证据拼进方案。切换前的中断返回上一份完整最佳，此前没有最佳则 best 为 null；摘要、未完成与已发布证据缺损是不同状态，缺损不退额度也不自动重放。继续搜索需要明确新的预算和新编号，可将已保存最佳模型及全频点结果作为新基线；不能偷偷重跑旧输入。
 
 ## 交付设计文件
 
@@ -108,7 +108,7 @@ min_forward_gain_dbi / min_front_to_back_db 不是必填问卷；未要求的指
 | 实际情况 | 下一步 |
 | --- | --- |
 | 回执丢失或本地文件导入中断 | `get_result(run_id)`；它不求解。宿主核验已有文件并补齐同一个结果目录，不覆盖用户修改 |
-| 优化超时、断线或重启 | `get_optimization(run_id)` 取回完整最佳候选；不恢复执行，不自动再提交 optimize |
+| 优化超时、断线或重启 | `get_optimization(run_id)` 取回最后一份已发布的完整最佳候选；不恢复执行，不自动再提交 optimize |
 | 交付回执丢失或包的本地导入中断 | `get_delivery(delivery_id)`；不重复求解或重新导出 |
 | `DELIVERY_INPUT_CONFLICT` / `DELIVERY_INCOMPLETE` / `DELIVERY_UNAVAILABLE` | 保留原包并核实输入或完整性；不覆盖、不删目录重试，不改变求解额度 |
 | 数值已保存，`render_status=incomplete` | `render(run_id, output_run_id)`；使用新的输出编号，只读取数值补画 |

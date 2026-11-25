@@ -79,6 +79,7 @@ from .mcp_resources import (
 from .optimization import (
     OptimizationResult,
     OptimizeInput,
+    candidate_disposition,
     candidate_model,
     get_optimization,
     optimization_path,
@@ -172,9 +173,11 @@ class SolveResult(Contract):
 
 
 class RunStatus(RunReservation):
-    evidence: Literal["active", "complete", "incomplete", "missing", "corrupt"]
+    evidence: Literal["active", "complete", "incomplete", "summary_only", "missing", "corrupt"]
     render_status: Literal["complete", "incomplete"] | None = None
-    next_action: Literal["wait_or_cancel", "get_result", "get_result_or_render", "inspect_do_not_replay"]
+    next_action: Literal[
+        "wait_or_cancel", "get_result", "get_result_or_render", "get_optimization", "inspect_do_not_replay"
+    ]
 
 
 class ProjectStatus(Contract):
@@ -191,10 +194,10 @@ class ProjectStatus(Contract):
 def _project_status(snapshot: ProjectSnapshot, store: Path, active: set[str]) -> ProjectStatus:
     records = []
     for reservation in snapshot.reservations:
-        evidence: Literal["active", "complete", "incomplete", "missing", "corrupt"] = "active"
-        next_action: Literal["wait_or_cancel", "get_result", "get_result_or_render", "inspect_do_not_replay"] = (
-            "wait_or_cancel"
-        )
+        evidence: Literal["active", "complete", "incomplete", "summary_only", "missing", "corrupt"] = "active"
+        next_action: Literal[
+            "wait_or_cancel", "get_result", "get_result_or_render", "get_optimization", "inspect_do_not_replay"
+        ] = "wait_or_cancel"
         render_status: Literal["complete", "incomplete"] | None = None
         search_owned = any(
             re.fullmatch(rf"{re.escape(owner)}-(?:c[0-9]{{4}}|mesh[0-9]{{1,3}}|plot)-f[1-6]", reservation.run_id)
@@ -213,12 +216,18 @@ def _project_status(snapshot: ProjectSnapshot, store: Path, active: set[str]) ->
                 next_action = "get_result_or_render" if render_status == "incomplete" else "get_result"
             except RunUnavailableError as error:
                 if error.code == "RUN_NOT_FOUND":
-                    evidence = "missing"
-                elif error.code == "RUN_INCOMPLETE":
-                    evidence = "incomplete"
+                    # A summary-only candidate owes no artifact by policy; a run the receipt
+                    # names as published but cannot show is damaged evidence, not a lost candidate.
+                    disposition = candidate_disposition(store, reservation.run_id)
+                    if disposition == "summary_only":
+                        evidence, next_action = "summary_only", "get_optimization"
+                    elif disposition == "published":
+                        evidence, next_action = "corrupt", "inspect_do_not_replay"
+                    else:
+                        evidence, next_action = "missing", "inspect_do_not_replay"
                 else:
-                    evidence = "corrupt"
-                next_action = "inspect_do_not_replay"
+                    evidence = "incomplete" if error.code == "RUN_INCOMPLETE" else "corrupt"
+                    next_action = "inspect_do_not_replay"
             except ArtifactUnavailableError, OSError:
                 evidence, next_action = "corrupt", "inspect_do_not_replay"
         records.append(
@@ -650,8 +659,10 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
             types.Tool(
                 name="antenna.get_optimization",
                 description=(
-                    "Read saved search progress and best complete candidate by run_id, including after restart. "
-                    "Does not resume search, reset budget or recalculate. Interrupted is not target satisfaction."
+                    "Read saved search progress and the last complete published best candidate by run_id, including "
+                    "after restart. Other candidates keep key-number summaries only; project_status lists them as "
+                    "summary_only. Does not resume search, reset budget or recalculate. best is null when no "
+                    "complete candidate was published before an interruption; interrupted is not target satisfaction."
                 ),
                 inputSchema=ResultInput.model_json_schema(),
                 outputSchema=OptimizationResult.model_json_schema(),
@@ -689,6 +700,8 @@ def create_server(store: Path, timeout: int, solve_limit: int | None = None) -> 
                     "Read the operator-selected project's persistent attempt budget and recent run identifiers. "
                     "Use before solving or when a reply/run_id was lost. Follow next_before_sequence for older runs. "
                     "Charges are conservative admissions, not confirmed solver invocations. "
+                    "summary_only marks search candidates whose key numbers stay in the search receipt; "
+                    "a missing run named by a published best is damaged evidence. "
                     "Missing/incomplete evidence is not permission to replay; this query never launches a worker."
                 ),
                 inputSchema=StatusInput.model_json_schema(),

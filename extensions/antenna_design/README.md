@@ -130,11 +130,11 @@ C:\absolute\antenna_design\.venv\Scripts\python.exe
 | `antenna.plan_design` | OptimizeInput + title/purpose；可选 assumptions/sources、verification_segments、mesh_tolerances | 只读计划：初始化加完整一代的最低次数、达到暖机代数的推荐次数、验证预留与额度缺口；不改变项目限额 |
 | `antenna.design` | 与 plan_design 相同；run_id 同时作为交付编号 | 一次调用完成搜索、两个更细网格、敏感性比较、补画和交付；原始证据保留，失败不自动重试，不等于制作验收 |
 | `antenna.get_design_state` | `run_id` | 查询领域里程碑，并核验已发布交付的状态对账；不启动 worker、不恢复搜索、不为历史任务推断状态 |
-| `antenna.project_status` | 可选 `limit`（1～20，默认 10）和 `before_sequence` | 持久项目 ID、剩余求解额度、最近运行编号和恢复建议；按返回的 `next_before_sequence` 查询更早记录，不启动 worker |
+| `antenna.project_status` | 可选 `limit`（1～20，默认 10）和 `before_sequence` | 持久项目 ID、剩余求解额度、最近运行编号和恢复建议；未入选搜索候选标为 `summary_only`。按返回的 `next_before_sequence` 查询更早记录，不启动 worker |
 | `antenna.model_validate` | `model`：现有 `EngineeringRequest` JSON 对象 | `INPUT_ACCEPTED_NOT_SIMULATED`；校验单位、输入范围、支持字段与基本连接，不启动 solver，不称为物理验证 |
 | `antenna.evaluate` | 最多 12 个频点目标/已有 run_id、地面和前向切面、系统阻抗；可选下一批次数 | 校验已发布证据，比较同一设计的采样点指标与预算缺口；只读、零求解，不预留次数，不宣称全带/工程验证 |
-| `antenna.optimize` | 新 run_id、model、dimensions、targets；可选 max_solver_runs、random_seed、population_size、评分尺度 | SciPy 参数搜索，按改善/停滞/耗时动态领取额度，pymininec 复核每个候选的全部频点；不调用模型，不自动改变项目总限额 |
-| `antenna.get_optimization` | 优化的 run_id | 取回最佳候选与停止原因、重新核验数值证据；不恢复种群，不重新求解 |
+| `antenna.optimize` | 新 run_id、model、dimensions、targets；可选 max_solver_runs、random_seed、population_size、评分尺度 | SciPy 参数搜索，按改善/停滞/耗时动态领取额度，pymininec 计算每个候选的全部频点并在内存评分，只有最佳候选发布完整证据；不调用模型，不自动改变项目总限额 |
+| `antenna.get_optimization` | 优化的 run_id | 取回最后已发布的完整最佳与停止原因、重新核验数值证据；不恢复种群，不重新求解 |
 | `antenna.prepare_revision` | 已完成 source_run_id、新 targets；可选 installation/material | 从核验模型准备新输入；旧 run_id 不充当新结果，不启动 solver，不预留额度 |
 | `antenna.matching` | 已完成 evaluation、逐频 L 型网络 options | scikit-rf/SciPy 理想匹配；按频点调谐或切换，不等于固定多波段网络 |
 | `antenna.evaluate_matching` | 同设计 evaluation、固定 network、可选 max_swr | 同一组理想 H/F 元件逐点复算，不重新调谐、不插值；无 max_swr 时只报告数值 |
@@ -178,9 +178,11 @@ C:\absolute\antenna_design\.venv\Scripts\python.exe
 - random_seed 默认 0，population_size 为**总种群数**，省略时取 max(8, 2×自由参数数)，也可显式设为 5～256。这是低成本探索的启发式，不是最优种群或收敛保证；通过 SciPy 公开 init 接口传入。单 worker、polish=False；相同参数在本次搜索内复用，不跨请求仅凭几何套用缓存。
 - max_solver_runs 可省略。默认从剩余次数中留出最多两个全频点扫算的验证余量，搜索上限取其余次数与 4096 的较小值；余量不是独占预留，后续仍须查项目账本。显式上限必须在 1～4096 且不超过剩余次数，验证余量此时由调用者另留。候选机会最多 floor(搜索上限/频点数)，无效几何也占机会，实际频点准入才扣项目次数，旧基线复用不扣。
 - 资源批次与 SciPy 代数分开：公开 callback 每完成一整代比较最佳缺口评分，初始化不算一代。默认至少完成 minimum_generations=5 代，且连续 stagnation_generations=5 代没有超过 0.1% 和 1e-8 的改善才因停滞停止。每个完整候选实测耗时乘 1.25 的高水位限制后续准入；预算/时限仍可提前停止，不表示充分探索。
-- 参数搜索、所有频点与保存共享 worker 时限（最多 600 秒），预留 max(5 秒, 10%) 收尾余量；不够一个候选时主动结束。冷启动尚无估计的第一个候选及异常变慢的求解仍受父进程硬超时限制。预算回执公开硬上限、已领取次数、批次、停滞和实际耗时；一次 MCP 调用完成迭代，内部模型调用为零，不自行扩大项目限额/时限。
-- `.optimizations/<run_id>/request.json` 保存输入，progress.json 原子更新最佳完整候选与分配回执，batch-NNNN.json 记录续批时的改善依据；每个频点落在普通 `<run_id>-cNNNN-fN` 数值目录并有原证据清单。查询重验最佳输入、指标与 hash，用量从 SQLite 读取，避免中断漏计。不保存/恢复 SciPy 种群。
-- 搜索不为每个候选绘图；最佳 run_ids 可以 get_result/evaluate，随后用 render 在新编号补画，再 export。未完成候选留作诊断，不把不同候选的频点混合。best 与 baseline_score 表示是否改进，stop_reason 区分采样目标满足、停滞、时间/次数不足、优化器结束、失败和中断。
+- 参数搜索、所有频点与保存共享 worker 时限（最多 600 秒），预留 max(5 秒, 10%，首次发布实测耗时的 1.5 倍) 用于发布待写最佳、最终回执与父进程核验；不够一个候选时主动结束。冷启动尚无估计的第一个候选及异常变慢的求解仍受父进程硬超时限制；硬超时若落在收尾发布中途，取回的是上一份完整最佳。预算回执公开硬上限、已领取次数、批次、停滞和实际耗时；一次 MCP 调用完成迭代，内部模型调用为零，不自行扩大项目限额/时限。
+- 候选先在内存评分：每个频点仍先经 SQLite 准入再求解，但不再为评分发布完整目录、读回远场 JSON。`.optimizations/<run_id>/request.json` 保存输入；candidate-NNNN.json 只记参数、已准入 run_id、逐频关键指标（增益、F/B、R+jX、SWR）、评分或失败原因，不写远场和复电流。内存最多保留当前候选与待发布最佳的全频结果，不随候选总数累积原始数组。
+- 完整证据只属于最佳候选，在首次得到可评价结果、完整一代结束且最佳有改善、搜索收尾（次数/时间/停滞等停止）或找到达标候选时发布；没有改善不重复写，也不为归档重新求解。发布时先把该候选全部频点写入普通 `<run_id>-cNNNN-fN` 数值目录（与 solve 相同的文件与完成标记），核对输入身份、完成标记和 hash 后才原子替换 progress.json。切换前中断取回上一份完整最佳，此前没有最佳则 best 为 null；切换后丢回执直接取回新最佳。承诺的是找回最后已发布的最佳，不是恢复优化器种群。
+- project_status 把未入选候选标为 `summary_only`（下一步 get_optimization）；目录存在但没有完成标记是未完成，回执已引用的 run 缺失或哈希不符是已发布证据缺损，不退额度、不自动重放。查询重验最佳输入、指标与 hash，用量从 SQLite 读取，避免中断漏计。不保存/恢复 SciPy 种群。
+- 搜索不为候选绘图；最佳 run_ids 可以 get_result/evaluate，随后用 render 在新编号补画，再 export；网格复核与交付沿用这些已发布目录。旧搜索目录、旧回执和已发布 ZIP 保持原样。best 与 baseline_score 表示是否改进，stop_reason 区分采样目标满足、停滞、时间/次数不足、优化器结束、失败和中断。
 - 使用同一 AnyIO 根作用域管理优化子进程；宿主取消会停止并等待它退出，不新增 cancellation tree。断线/重启先 get_optimization，绝不重放同一优化编号；继续只能在明确的新预算下建立新搜索，原始输入和结果不覆盖。强杀服务仍可能留存 worker，interrupted 不等于已确认停止。
 
 完整交付使用同一输入加 title/purpose 调用 plan_design/design。服务自动留出两层全频网格复核次数；默认按原网格增加约 10%/20%，在 pulse 上限内选择两个更细偶数网格，也可显式指定。声明 mesh_tolerances 时必须给 impedance_ohm；gain_db/front_back_db 可按需求给出。只判断已声明的容差，所需方向数据低于数值下限时记录 incomplete_evidence；整个容差对象省略则只记录敏感性，不宣称收敛。工作流共享配置时限，搜索分配 65%，其余用于复核/绘图/交付；同步导出清理需等待线程退出，不杀线程。

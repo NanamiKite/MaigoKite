@@ -1,29 +1,53 @@
-"""Bounded SciPy search over a fixed antenna topology, with solver evidence per candidate.
+"""Bounded SciPy search over a fixed antenna topology that scores its candidates in memory.
 
 The optimizer chooses dimensions; pymininec computes performance. Each frequency
-uses the existing project admission ledger and artifact format. No model calls
-or population/checkpoint restoration are involved.
+uses the existing project admission ledger. Candidates are scored from numbers held
+in memory and logged as summaries; only the best candidate's complete evidence is
+published, after it is written and verified and before the receipt names it. No model
+calls or population/checkpoint restoration are involved.
 """
 
 from __future__ import annotations
 
 import math
 import os
+import re
 import traceback
+from collections.abc import Sequence
+from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from time import monotonic
-from typing import Annotated, Literal, Self
+from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 from pydantic import Field, FiniteFloat, StrictInt, model_validator
 
-from .artifacts import complete_bundle, compute_bundle, fail_bundle, prepare_bundle, write_json
-from .contracts import Contract, EngineeringRequest, InvalidCandidateError, Point, Positive, Wire
-from .evaluation import EvaluationInput, EvaluationResult, FrequencyTarget, criteria_hash, evaluate
+from .artifacts import publish_computed, write_json
+from .contracts import Contract, EngineeringRequest, Impedance, InvalidCandidateError, Point, Positive, Wire
+from .evaluation import (
+    ComputedPoint,
+    EvaluationInput,
+    EvaluationResult,
+    FrequencyTarget,
+    MetricComparison,
+    criteria_hash,
+    evaluate,
+    evaluate_computed,
+)
 from .identity import identify
-from .mcp_resources import MAX_METADATA_BYTES, read_artifact, read_bounded, read_manifest, run_path
+from .mcp_resources import (
+    MAX_METADATA_BYTES,
+    RUN_ID_PATTERN,
+    read_artifact,
+    read_bounded,
+    read_manifest,
+    run_path,
+)
 from .project_store import AdmissionError, ProjectStore, StatusInput
+
+if TYPE_CHECKING:
+    from .solver import Solution
 
 type StopReason = Literal[
     "in_progress",
@@ -119,6 +143,50 @@ class Candidate(Contract):
     evaluation: EvaluationResult
 
 
+class CandidateSample(Contract):
+    """Key numbers of one frequency; its far-field and current arrays are not retained."""
+
+    frequency_hz: Positive
+    run_id: str
+    forward_gain_dbi: MetricComparison
+    front_to_back_db: MetricComparison
+    model_input_impedance_ohm: Impedance | None = None
+    direct_swr_at_system_impedance: Positive | None = None
+    direct_swr_status: Literal["meets_target", "above_target", "unavailable", "not_evaluated"] = "not_evaluated"
+
+
+class CandidateRecord(Contract):
+    """Search log of one candidate; `became_best` led the search when evaluated.
+
+    Whether that leading candidate's evidence was published is decided by the receipt,
+    not by this record: only a published best owns complete evidence directories.
+    """
+
+    index: Annotated[int, Field(ge=1, le=4096)]
+    parameters: Annotated[tuple[FiniteFloat, ...], Field(min_length=1, max_length=24)]
+    run_ids: Annotated[tuple[Annotated[str, Field(pattern=f"^{RUN_ID_PATTERN}$")], ...], Field(max_length=6)]
+    score: Annotated[FiniteFloat, Field(ge=0)] | None
+    became_best: bool
+    failure: Annotated[str, Field(max_length=300)] | None = None
+    points: tuple[CandidateSample, ...] = ()
+
+
+@dataclass(frozen=True)
+class _PendingPoint:
+    run_id: str
+    request: EngineeringRequest
+    solution: Solution
+    solve_seconds: float
+
+
+@dataclass(frozen=True)
+class _PendingBest:
+    """A new best whose complete evidence exists only in memory until it is published."""
+
+    candidate: Candidate
+    points: tuple[_PendingPoint, ...]
+
+
 class SearchBudget(Contract):
     """Search-local allowances; every actual solve still needs a project ledger admission."""
 
@@ -157,6 +225,35 @@ def optimization_path(store: Path, run_id: str) -> Path:
     if parent.is_symlink() or parent.is_junction() or parent.resolve().parent != store:
         raise ValueError("Optimization directory must remain inside the project")
     return run_path(parent, run_id)
+
+
+_SEARCH_RUN = re.compile(r"^(?P<search>[a-z0-9][a-z0-9_-]{0,39})-c(?P<number>[0-9]{4})-f[1-6]$")
+
+
+def _record_path(root: Path, index: int) -> Path:
+    return root / f"candidate-{index:04d}.json"
+
+
+def candidate_disposition(store: Path, run_id: str) -> Literal["summary_only", "published", "unknown"]:
+    """Classify a search-owned admission from its receipts alone; never read or infer numerical evidence."""
+    match = _SEARCH_RUN.fullmatch(run_id)
+    if match is None:
+        return "unknown"
+    try:
+        root = optimization_path(store, match["search"])
+        if (root / "progress.json").is_file():
+            saved = OptimizationResult.model_validate_json(read_bounded(root, "progress.json", MAX_METADATA_BYTES))
+            if saved.best is not None and run_id in saved.best.run_ids:
+                return "published"
+        record = _record_path(root, int(match["number"]))
+        if record.is_file():
+            logged = CandidateRecord.model_validate_json(read_bounded(root, record.name, MAX_METADATA_BYTES))
+            if logged.index == int(match["number"]) and run_id in logged.run_ids:
+                return "summary_only"
+    except OSError, ValueError:
+        # Unreadable receipts leave the class open; get_optimization reports the damage.
+        return "unknown"
+    return "unknown"
 
 
 def _save(root: Path, result: OptimizationResult) -> None:
@@ -343,24 +440,7 @@ def get_optimization(store: Path, run_id: str, project: ProjectStore, *, active:
         query = OptimizeInput.model_validate_json(read_bounded(root, "request.json", MAX_METADATA_BYTES))
         if query.run_id != run_id:
             raise ValueError("Optimization request identity mismatch")
-        baseline_model = candidate_model(query, result.best.parameters)
-        check = query.model_copy(
-            update={
-                "model": baseline_model,
-                "targets": query.targets.model_copy(
-                    update={
-                        "points": tuple(
-                            point.model_copy(update={"run_id": saved_id})
-                            for point, saved_id in zip(query.targets.points, result.best.run_ids, strict=True)
-                        )
-                    }
-                ),
-            }
-        )
-        verified = _check_baseline(store, check, project)
-        if verified is None or not math.isclose(verified.score, result.best.score, rel_tol=1e-10, abs_tol=1e-10):
-            raise ValueError("Saved objective disagrees with published numerical evidence")
-        result = result.model_copy(update={"best": result.best.model_copy(update={"evaluation": verified.evaluation})})
+        result = result.model_copy(update={"best": _verified_best(store, query, result.best, project)})
     if result.stop_reason == "sampled_targets_met" and (
         result.best is None or not targets_satisfied(result.best.evaluation)
     ):
@@ -368,6 +448,70 @@ def get_optimization(store: Path, run_id: str, project: ProjectStore, *, active:
     if not active and result.stop_reason == "in_progress":
         result = result.model_copy(update={"stop_reason": "interrupted"})
     return result.model_copy(update={"solver_admissions": project.charged_search_attempts(run_id)})
+
+
+def _verified_best(store: Path, query: OptimizeInput, candidate: Candidate, project: ProjectStore) -> Candidate:
+    """Recheck a saved best against its published evidence; return it with disk-verified metrics."""
+    check = query.model_copy(
+        update={
+            "model": candidate_model(query, candidate.parameters),
+            "targets": query.targets.model_copy(
+                update={
+                    "points": tuple(
+                        point.model_copy(update={"run_id": saved_id})
+                        for point, saved_id in zip(query.targets.points, candidate.run_ids, strict=True)
+                    )
+                }
+            ),
+        }
+    )
+    verified = _check_baseline(store, check, project)
+    if verified is None or not math.isclose(verified.score, candidate.score, rel_tol=1e-10, abs_tol=1e-10):
+        raise ValueError("Saved objective disagrees with published numerical evidence")
+    return candidate.model_copy(update={"evaluation": verified.evaluation})
+
+
+def _publish_best(
+    root: Path,
+    store: Path,
+    query: OptimizeInput,
+    project: ProjectStore,
+    timeout: int,
+    result: OptimizationResult,
+    pending: _PendingBest,
+) -> OptimizationResult:
+    """Write the pending best's complete evidence, verify it, and only then switch the receipt."""
+    for item in pending.points:
+        destination = run_path(store, item.run_id)
+        if (destination / "completed.json").is_file():
+            # A retry after an interrupted publication reuses a frequency that is already complete.
+            manifest = read_manifest(destination)
+            saved = EngineeringRequest.model_validate_json(read_artifact(destination, manifest, "request"))
+            if saved != item.request:
+                raise ValueError("Published candidate evidence describes a different input")
+            continue
+        publish_computed(destination, item.request, item.solution, timeout=timeout, elapsed_seconds=item.solve_seconds)
+    # Every frequency is now complete and hash-checked; identity, input and score must still agree.
+    verified = _verified_best(store, query, pending.candidate, project)
+    updated = result.model_copy(update={"best": verified})
+    _save(root, updated)
+    return updated
+
+
+def _samples(solved: Sequence[_PendingPoint], evaluation: EvaluationResult) -> tuple[CandidateSample, ...]:
+    """Keep each frequency's key numbers of an evaluated candidate; arrays stay in memory only."""
+    return tuple(
+        CandidateSample(
+            frequency_hz=point.frequency_hz,
+            run_id=item.run_id,
+            forward_gain_dbi=point.forward_gain_dbi,
+            front_to_back_db=point.front_to_back_db,
+            model_input_impedance_ohm=point.model_input_impedance_ohm,
+            direct_swr_at_system_impedance=point.direct_swr_at_system_impedance,
+            direct_swr_status=point.direct_swr_status,
+        )
+        for item, point in zip(solved, evaluation.points, strict=True)
+    )
 
 
 class _SearchStoppedError(Exception):
@@ -382,9 +526,13 @@ def optimize(root: Path, *, timeout: int) -> None:
     from scipy.optimize import OptimizeResult, differential_evolution
     from scipy.stats import qmc
 
+    from .solver import solve
+
     started = monotonic()
-    # Leave time for the final receipt and parent-side evidence verification.
-    deadline = started + timeout - max(5, timeout * 0.1)
+    # Leave time for publishing a pending best, the final receipt and parent-side verification.
+    # The first publication measures how long that takes; see publish_pending.
+    reserve = max(5, timeout * 0.1)
+    deadline = started + timeout - reserve
     query = OptimizeInput.model_validate_json(read_bounded(root, "request.json", MAX_METADATA_BYTES))
     # Refuse a second worker invocation even if a caller manually invokes the
     # hidden CLI entry; a saved receipt is not a resumable SciPy population.
@@ -406,9 +554,24 @@ def optimize(root: Path, *, timeout: int) -> None:
     # Unusable geometry/metrics are worse than every finite score. They never
     # become the saved best candidate or a claim of target satisfaction.
     rejected_score = float("inf")
+    # `best` is the best scored candidate so far. Between publication points it is
+    # `pending`, whose complete evidence exists only in memory; `result.best` is
+    # always the last candidate whose evidence is complete on disk.
+    best: Candidate | None = result.best
+    pending: _PendingBest | None = None
+
+    def publish_pending() -> None:
+        nonlocal result, best, pending, deadline
+        if pending is None:
+            return
+        publish_started = monotonic()
+        result = _publish_best(root, store, query, project, timeout, result, pending)
+        best, pending = result.best, None
+        # The wrap-up publication must fit the reserve; widen it once its cost is known.
+        deadline = min(deadline, started + timeout - max(reserve, 1.5 * (monotonic() - publish_started)))
 
     def cost(vector: NDArray[np.float64]) -> float:
-        nonlocal result, budget, batch_score
+        nonlocal result, budget, batch_score, best, pending
         values = tuple(float(value) for value in vector)
         if values in cache:
             return cache[values]
@@ -423,7 +586,7 @@ def optimize(root: Path, *, timeout: int) -> None:
         ):
             raise _SearchStoppedError("time_limit")
         if result.candidate_attempts >= budget.granted_candidates:
-            current_score = result.best.score if result.best else None
+            current_score = best.score if best else None
             improved = current_score is not None and (
                 batch_score is None or batch_score - current_score > max(1e-8, abs(batch_score) * 0.001)
             )
@@ -462,8 +625,11 @@ def optimize(root: Path, *, timeout: int) -> None:
         candidate_started = monotonic()
         result = result.model_copy(update={"candidate_attempts": index, "budget": budget})
         _save(root, result)
-        run_ids = []
+        solved: list[_PendingPoint] = []
+        evaluation: EvaluationResult | None = None
+        score: float | None = None
         satisfied = False
+        failure: str | None = None
         try:
             try:
                 model = candidate_model(query, values)
@@ -472,44 +638,88 @@ def optimize(root: Path, *, timeout: int) -> None:
             for number, point in enumerate(query.targets.points, 1):
                 run_id = f"{query.run_id}-c{index:04d}-f{number}"
                 candidate = model.model_copy(update={"frequency_hz": point.frequency_hz})
+                # Admission still precedes every solve and is never refunded because
+                # the candidate fails or is not retained.
                 project.reserve_solve(run_id, candidate)
                 result = result.model_copy(update={"solver_admissions": result.solver_admissions + 1})
-                _save(root, result)
-                destination = run_path(store, run_id)
-                prepare_bundle(destination, candidate, timeout=timeout)
-                try:
-                    compute_bundle(destination, with_plots=False)
-                    complete_bundle(destination)
-                except BaseException as error:
-                    fail_bundle(destination, error)
-                    raise
-                run_ids.append(run_id)
-            evaluation = _evaluate_candidate(store, query, tuple(run_ids), project)
+                solve_started = monotonic()
+                solution = solve(candidate)
+                solved.append(_PendingPoint(run_id, candidate, solution, monotonic() - solve_started))
+            evaluation = evaluate_computed(
+                query.targets.model_copy(
+                    update={
+                        "points": tuple(
+                            point.model_copy(update={"run_id": item.run_id})
+                            for point, item in zip(query.targets.points, solved, strict=True)
+                        )
+                    }
+                ),
+                project.snapshot(StatusInput(limit=1)),
+                tuple(
+                    ComputedPoint(request=item.request, summary=item.solution.summary, field=item.solution.field)
+                    for item in solved
+                ),
+            )
             score = objective(query, evaluation)
             satisfied = targets_satisfied(evaluation)
         except AdmissionError as error:
             if error.code != "SOLVE_BUDGET_EXHAUSTED":
                 raise
-            raise _SearchStoppedError("budget_limit") from None
-        except InvalidCandidateError, np.linalg.LinAlgError:
-            traceback.print_exc()  # Only the operator log receives numerical/input diagnostics.
-            score = None
-        cache[values] = rejected_score if score is None else score
-        if score is None:
-            result = result.model_copy(update={"rejected_candidates": result.rejected_candidates + 1})
-        else:
-            candidate_result = Candidate(
-                index=index, parameters=values, score=score, run_ids=tuple(run_ids), evaluation=evaluation
+            write_json(
+                _record_path(root, index),
+                CandidateRecord(
+                    index=index,
+                    parameters=values,
+                    run_ids=tuple(item.run_id for item in solved),
+                    score=None,
+                    became_best=False,
+                    failure="budget_limit",
+                ),
             )
-            write_json(root / f"candidate-{index:04d}.json", candidate_result)
+            raise _SearchStoppedError("budget_limit") from None
+        except (InvalidCandidateError, np.linalg.LinAlgError) as error:
+            traceback.print_exc()  # Only the operator log receives numerical/input diagnostics.
+            failure = f"{type(error).__name__}: {error}"[:300]
+        cache[values] = rejected_score if score is None else score
+        run_ids = tuple(item.run_id for item in solved)
+        if evaluation is not None and score is None:
+            failure = failure or "unavailable_target_metric"
+        if evaluation is None or score is None:
+            result = result.model_copy(update={"rejected_candidates": result.rejected_candidates + 1})
+            write_json(
+                _record_path(root, index),
+                CandidateRecord(
+                    index=index,
+                    parameters=values,
+                    run_ids=run_ids,
+                    score=None,
+                    became_best=False,
+                    failure=failure,
+                    points=() if evaluation is None else _samples(solved, evaluation),
+                ),
+            )
+        else:
+            became_best = best is None or score < best.score or satisfied
+            write_json(
+                _record_path(root, index),
+                CandidateRecord(
+                    index=index,
+                    parameters=values,
+                    run_ids=run_ids,
+                    score=score,
+                    became_best=became_best,
+                    points=_samples(solved, evaluation),
+                ),
+            )
             changes: dict[str, object] = {}
             if values == initial:
                 changes["baseline_score"] = score
-            if result.best is None or score < result.best.score or satisfied:
-                changes["best"] = candidate_result
             result = result.model_copy(update=changes)
+            if became_best:
+                best = Candidate(index=index, parameters=values, score=score, run_ids=run_ids, evaluation=evaluation)
+                pending = _PendingBest(best, tuple(solved))
         if len(run_ids) == points_count:
-            # Use a high-water estimate of complete sweeps, including I/O and
+            # Use a high-water estimate of complete sweeps, including in-memory
             # evaluation. A cheap invalid candidate must not lower the estimate.
             budget = budget.model_copy(
                 update={
@@ -520,6 +730,10 @@ def optimize(root: Path, *, timeout: int) -> None:
             )
         budget = budget.model_copy(update={"elapsed_seconds": monotonic() - started})
         result = result.model_copy(update={"budget": budget})
+        if pending is not None and (result.best is None or satisfied):
+            # The first evaluable result, or one meeting every target, is published at
+            # once; later improvements wait for a generation boundary or the wrap-up.
+            publish_pending()
         _save(root, result)
         if satisfied:
             raise _SearchStoppedError("sampled_targets_met")
@@ -544,18 +758,21 @@ def optimize(root: Path, *, timeout: int) -> None:
             {
                 "generation": completed,
                 "candidate_attempts": result.candidate_attempts,
-                "best_score": result.best.score if result.best else None,
+                "best_score": best.score if best else None,
                 "stagnant_generations": stagnant,
             },
         )
         _save(root, result)
+        # A complete generation is a publication point, so the best on disk lags the
+        # search by at most one generation.
+        publish_pending()
         if completed >= query.minimum_generations and stagnant >= query.stagnation_generations:
             raise _SearchStoppedError("stagnation")
 
     reason: StopReason = "failed"
     try:
         cost(np.asarray(initial, dtype=np.float64))
-        if result.best is not None and targets_satisfied(result.best.evaluation):
+        if best is not None and targets_satisfied(best.evaluation):
             raise _SearchStoppedError("sampled_targets_met")
         bounds = [(item.lower, item.upper) for item in query.dimensions]
         population = qmc.scale(
@@ -581,4 +798,11 @@ def optimize(root: Path, *, timeout: int) -> None:
         reason = stopped.reason
     finally:
         budget = budget.model_copy(update={"elapsed_seconds": monotonic() - started})
+        try:
+            # The wrap-up publishes an improvement that is still only in memory. If
+            # that fails, the previous complete best stays and the stop is not clean.
+            publish_pending()
+        except Exception:
+            traceback.print_exc()
+            reason = "failed"
         _save(root, result.model_copy(update={"stop_reason": reason, "budget": budget}))

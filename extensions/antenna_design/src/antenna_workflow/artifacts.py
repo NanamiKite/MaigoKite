@@ -11,12 +11,16 @@ import time
 from contextlib import suppress
 from importlib import metadata
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from .contracts import ArtifactRef, EngineeringRequest, EngineeringSummary, FarField
 from .mcp_resources import MAX_METADATA_BYTES, MAX_RESOURCE_BYTES, ArtifactUnavailableError, read_bounded
 from .mmana import export_maa
+
+if TYPE_CHECKING:
+    from .solver import Solution
 
 NUMERICAL_FILES = {
     "request.json",
@@ -279,15 +283,10 @@ def fail_bundle(root: Path, error: BaseException) -> None:
             write_json(root / "failure.json", {"error_type": type(error).__name__, "completed": False})
 
 
-def compute_bundle(root: Path, *, with_plots: bool = True) -> None:
-    """Save a verified numerical phase before export/render; the parent publishes after cleanup."""
+def write_numerical(root: Path, request: EngineeringRequest, solution: Solution, elapsed_seconds: float) -> None:
+    """Write one already solved frequency; `elapsed_seconds` is the solver time kept in environment.json."""
     from mininec import mininec
 
-    from .solver import solve
-
-    request = EngineeringRequest.model_validate_json((root / "request.json").read_bytes())
-    started = time.monotonic()
-    solution = solve(request)
     pattern_dir = root / "pattern"
     pattern_dir.mkdir()
     write_json(pattern_dir / "far_field.json", solution.field)
@@ -326,7 +325,7 @@ def compute_bundle(root: Path, *, with_plots: bool = True) -> None:
             "dependencies": {item.metadata["Name"]: item.version for item in metadata.distributions()},
             "solver_sources_sha256": {path.name: digest(path) for path in sorted(source_root.glob("*.py"))},
             "adapter_sources_sha256": source_hashes,
-            "elapsed_seconds": time.monotonic() - started,
+            "elapsed_seconds": elapsed_seconds,
             "limits": {"solver_runs": 1, "llm_calls": 0, "max_pulses": request.max_pulses},
         },
     )
@@ -334,5 +333,28 @@ def compute_bundle(root: Path, *, with_plots: bool = True) -> None:
     # This marker is written before plotting so cancellation/renderer failure
     # cannot discard a complete numerical result. Parent publishes after cleanup.
     _mark_files(root, "numerical.json", NUMERICAL_FILES)
+
+
+def compute_bundle(root: Path, *, with_plots: bool = True) -> None:
+    """Solve into a verified numerical phase; the parent publishes after cleanup."""
+    from .solver import solve
+
+    request = EngineeringRequest.model_validate_json((root / "request.json").read_bytes())
+    started = time.monotonic()
+    solution = solve(request)
+    write_numerical(root, request, solution, time.monotonic() - started)
     if with_plots:
         render_bundle(root)
+
+
+def publish_computed(
+    root: Path, request: EngineeringRequest, solution: Solution, *, timeout: int, elapsed_seconds: float
+) -> EngineeringSummary:
+    """Publish numbers that were computed and scored in memory; the solver does not run again."""
+    prepare_bundle(root, request, timeout=timeout)
+    try:
+        write_numerical(root, request, solution, elapsed_seconds)
+        return complete_bundle(root)
+    except BaseException as error:
+        fail_bundle(root, error)
+        raise

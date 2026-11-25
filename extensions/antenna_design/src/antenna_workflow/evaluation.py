@@ -8,6 +8,8 @@ it cannot certify a bandwidth, simulate a matching network or grant permission.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
@@ -127,6 +129,15 @@ class EvaluationError(ValueError):
         self.code = code
 
 
+@dataclass(frozen=True)
+class ComputedPoint:
+    """Numbers of one freshly solved frequency; no artifact exists for them yet."""
+
+    request: EngineeringRequest
+    summary: EngineeringSummary
+    field: FarField
+
+
 def criteria_hash(query: EvaluationInput) -> str:
     """Identify acceptance criteria independently of artifact locations and proposed compute budget."""
     data = query.model_dump(mode="json", exclude={"points", "planned_new_solves"})
@@ -153,22 +164,14 @@ def _direct_swr(impedance: Impedance, reference: float) -> float | None:
     return (1 + reflection) / (1 - reflection) if reflection < 1 else None
 
 
-def _load_point(
-    store: Path, target: FrequencyTarget, query: EvaluationInput
-) -> tuple[PointEvaluation, DesignIdentity | None]:
-    if target.run_id is None:
-        return PointEvaluation(
-            frequency_hz=target.frequency_hz,
-            run_id=None,
-            forward_gain_dbi=_minimum(None, target.min_forward_gain_dbi),
-            front_to_back_db=_minimum(None, target.min_front_to_back_db),
-            direct_swr_status="unavailable" if query.max_direct_swr is not None else "not_evaluated",
-        ), None
-    root = run_path(store, target.run_id)
-    manifest = read_manifest(root)
-    request = EngineeringRequest.model_validate_json(read_artifact(root, manifest, "request"))
-    summary = EngineeringSummary.model_validate_json(read_artifact(root, manifest, "summary"))
-    field = FarField.model_validate_json(read_artifact(root, manifest, "far-field"))
+def _measure_point(
+    target: FrequencyTarget,
+    query: EvaluationInput,
+    request: EngineeringRequest,
+    summary: EngineeringSummary,
+    field: FarField,
+) -> PointEvaluation:
+    """Apply every saved-evidence rule to one frequency's numbers, whether loaded or just computed."""
     if not target.frequency_hz == request.frequency_hz == summary.frequency_hz == field.frequency_hz:
         raise EvaluationError("EVALUATION_EVIDENCE_MISMATCH", "Target, request and numerical frequencies must agree.")
     saved_swr = _direct_swr(summary.impedance_ohm, request.reference_impedance_ohm)
@@ -226,21 +229,69 @@ def _load_point(
         model_input_impedance_ohm=summary.impedance_ohm,
         direct_swr_at_system_impedance=swr,
         direct_swr_status=swr_status,
-        evidence=EvidenceReference(
-            request_uri=resource_uri(target.run_id, "request"),
-            request_sha256=manifest["request.json"].sha256,
-            summary_uri=resource_uri(target.run_id, "summary"),
-            summary_sha256=manifest["simulation.json"].sha256,
-            far_field_uri=resource_uri(target.run_id, "far-field"),
-            far_field_sha256=manifest["pattern/far_field.json"].sha256,
-        ),
         warnings=summary.warnings,
+    )
+
+
+def _load_point(
+    store: Path, target: FrequencyTarget, query: EvaluationInput
+) -> tuple[PointEvaluation, DesignIdentity | None]:
+    """Load one frequency from its published, hash-checked evidence and measure it."""
+    if target.run_id is None:
+        return PointEvaluation(
+            frequency_hz=target.frequency_hz,
+            run_id=None,
+            forward_gain_dbi=_minimum(None, target.min_forward_gain_dbi),
+            front_to_back_db=_minimum(None, target.min_front_to_back_db),
+            direct_swr_status="unavailable" if query.max_direct_swr is not None else "not_evaluated",
+        ), None
+    root = run_path(store, target.run_id)
+    manifest = read_manifest(root)
+    request = EngineeringRequest.model_validate_json(read_artifact(root, manifest, "request"))
+    summary = EngineeringSummary.model_validate_json(read_artifact(root, manifest, "summary"))
+    field = FarField.model_validate_json(read_artifact(root, manifest, "far-field"))
+    return _measure_point(target, query, request, summary, field).model_copy(
+        update={
+            "evidence": EvidenceReference(
+                request_uri=resource_uri(target.run_id, "request"),
+                request_sha256=manifest["request.json"].sha256,
+                summary_uri=resource_uri(target.run_id, "summary"),
+                summary_sha256=manifest["simulation.json"].sha256,
+                far_field_uri=resource_uri(target.run_id, "far-field"),
+                far_field_sha256=manifest["pattern/far_field.json"].sha256,
+            )
+        }
     ), identify(request)
+
+
+def computed_point(
+    target: FrequencyTarget, query: EvaluationInput, numbers: ComputedPoint
+) -> tuple[PointEvaluation, DesignIdentity]:
+    """Measure freshly computed numbers with the saved-evidence rules; nothing is read or referenced."""
+    if target.run_id is None:
+        raise ValueError("A computed point needs the run_id admitted for its solve")
+    return _measure_point(target, query, numbers.request, numbers.summary, numbers.field), identify(numbers.request)
 
 
 def evaluate(store: Path, query: EvaluationInput, snapshot: ProjectSnapshot) -> EvaluationResult:
     """Project immutable run evidence into target margins and a non-binding next-batch proposal."""
-    loaded = tuple(_load_point(store, point, query) for point in query.points)
+    return _evaluate(query, snapshot, tuple(_load_point(store, point, query) for point in query.points))
+
+
+def evaluate_computed(
+    query: EvaluationInput, snapshot: ProjectSnapshot, computed: Sequence[ComputedPoint]
+) -> EvaluationResult:
+    """Score a fully solved candidate in memory under the same rules, without evidence links."""
+    return _evaluate(
+        query,
+        snapshot,
+        tuple(computed_point(point, query, numbers) for point, numbers in zip(query.points, computed, strict=True)),
+    )
+
+
+def _evaluate(
+    query: EvaluationInput, snapshot: ProjectSnapshot, loaded: Sequence[tuple[PointEvaluation, DesignIdentity | None]]
+) -> EvaluationResult:
     identities = [identity for _, identity in loaded if identity is not None]
     physical_ids = {identity.physical_design_sha256 for identity in identities}
     if len(physical_ids) > 1:

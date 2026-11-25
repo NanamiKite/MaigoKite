@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { i18n, t } from '@/i18n'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useRunStore } from '@/stores/run'
@@ -19,8 +19,6 @@ const session = useSessionStore(),
   inbox = useInboxStore()
 const workspace = useWorkspaceStore(),
   router = useRouter()
-const creating = ref(false),
-  ready = ref(false)
 const pending = computed(() => inbox.items.filter(pendingItem).sort(pendingOrder))
 const records = computed(() =>
   session.sessions
@@ -86,35 +84,13 @@ function updated(value: string) {
 }
 async function refresh() {
   if (session.isLoading) return
-  ready.value = false
   await session.loadSessions()
-  ready.value = !session.isLoading && !session.error
 }
-watch(
-  () => session.isLoading,
-  (loading, previous) => {
-    if (previous && !loading) ready.value = !session.error
-  },
-)
-watch([ready, () => session.sessions.length, () => session.error], () => {
-  // Never redirect on loading/error or merely because all conversations are archived.
-  if (ready.value && !session.isLoading && !session.error && !session.sessions.length)
-    void router.replace('/chat')
-})
 onMounted(() => {
   void refresh()
 })
-async function create() {
-  if (creating.value) return
-  creating.value = true
-  try {
-    const item = await session.createSession()
-    await router.push('/chat/' + item.id)
-  } catch {
-    /* The existing store owns submission errors. */
-  } finally {
-    creating.value = false
-  }
+function create() {
+  void router.push('/chat')
 }
 </script>
 <template>
@@ -123,15 +99,13 @@ async function create() {
       <h1>{{ $t('工作记录') }}</h1>
       <button
         class="record-new"
-        :disabled="creating"
-        :aria-busy="creating || undefined"
         @click="create"
       >
         <IconSymbol
           name="compose"
           :size="18"
         />
-        {{ creating ? $t('正在创建') : $t('新建对话') }}
+        {{ $t('新建对话') }}
       </button>
     </header>
     <p
@@ -156,6 +130,12 @@ async function create() {
       <InkLoader />
       <InkLoader />
     </div>
+    <p
+      v-if="!session.isLoading && !session.error && !session.sessions.length"
+      class="record-archived"
+    >
+      {{ $t('还没有对话。发出第一条消息后，它会出现在这里。') }}
+    </p>
     <section
       v-if="pending.length"
       class="record-section record-pending"

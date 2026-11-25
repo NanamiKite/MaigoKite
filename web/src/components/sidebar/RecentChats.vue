@@ -9,9 +9,8 @@ import { useInboxStore } from '@/stores/inbox'
 import SessionItem from './SessionItem.vue'
 import WorkspaceDeleteButton from './WorkspaceDeleteButton.vue'
 import IconSymbol from '@/components/common/IconSymbol.vue'
-const props = withDefaults(defineProps<{ query?: string; creating?: boolean }>(), {
+const props = withDefaults(defineProps<{ query?: string }>(), {
   query: '',
-  creating: false,
 })
 const emit = defineEmits<{ select: []; create: [folderId: string] }>()
 const session = useSessionStore(),
@@ -27,31 +26,6 @@ const blockedIds = computed(
         .map((item) => item.sessionId),
     ),
 )
-function dateGroups(items: Conversation[]) {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const week = new Date(today)
-  week.setDate(week.getDate() - ((week.getDay() + 6) % 7))
-  return [
-    {
-      id: 'today',
-      label: '今天',
-      items: items.filter((item) => Date.parse(item.updated_at) >= +today),
-    },
-    {
-      id: 'week',
-      label: '本周',
-      items: items.filter(
-        (item) => Date.parse(item.updated_at) < +today && Date.parse(item.updated_at) >= +week,
-      ),
-    },
-    {
-      id: 'older',
-      label: '更早',
-      items: items.filter((item) => !(Date.parse(item.updated_at) >= +week)),
-    },
-  ].filter((group) => group.items.length)
-}
 const showAll = ref<Record<string, boolean>>({})
 const searching = computed(() => !!props.query.trim())
 const groups = computed(() => {
@@ -96,7 +70,6 @@ const groups = computed(() => {
         label,
         sessions: items,
         visible,
-        dates: dateGroups(visible),
         hidden: items.length - visible.length,
         matchedFolder,
       }
@@ -204,7 +177,6 @@ async function selectGroup(id: string) {
         </button>
         <button
           class="workspace-new"
-          :disabled="creating"
           :aria-label="$t('在「{0}」中新建对话', [group.label])"
           :title="$t('在「{0}」中新建对话', [group.label])"
           @click="emit('create', group.id)"
@@ -217,7 +189,6 @@ async function selectGroup(id: string) {
         <WorkspaceDeleteButton
           v-if="group.id"
           :folder="group"
-          :disabled="creating"
         />
       </header>
       <div
@@ -231,22 +202,13 @@ async function selectGroup(id: string) {
         >
           {{ session.showArchived ? $t('这个工作区还没有归档对话。') : $t('还没有对话') }}
         </p>
-        <section
-          v-for="date in group.dates"
-          :key="date.id"
-          class="session-date-group"
-        >
-          <h3 class="session-date-label">
-            {{ $t(date.label) }}
-          </h3>
-          <SessionItem
-            v-for="item in date.items"
-            :key="item.id"
-            :item="item"
-            :collapsed="false"
-            @select="emit('select')"
-          />
-        </section>
+        <SessionItem
+          v-for="item in group.visible"
+          :key="item.id"
+          :item="item"
+          :collapsed="false"
+          @select="emit('select')"
+        />
         <button
           v-if="group.hidden && !searching"
           class="show-more"

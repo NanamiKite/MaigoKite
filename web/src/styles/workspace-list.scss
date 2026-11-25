@@ -77,13 +77,6 @@
 .current .workspace-name {
   color: var(--ink);
 }
-.session-date-label {
-  margin: var(--space-5) 0 var(--space-2);
-  padding-left: var(--space-2);
-  color: var(--ink-2);
-  font: var(--weight-medium) var(--text-xs) var(--font-sans);
-  letter-spacing: var(--tracking-label);
-}
 .workspace-name {
   font-weight: var(--weight-semibold);
 }
@@ -96,7 +89,7 @@
 }
 .workspace-sessions {
   margin-left: var(--size-10);
-  padding-left: var(--size-6);
+  padding: var(--space-2) 0 0 var(--size-6);
   border-left: var(--hairline) solid var(--rule);
 }
 .workspace-empty {

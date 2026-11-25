@@ -321,10 +321,15 @@ async function send(
     }
     await controls
     if (controlError) throw new Error(controlError)
-    if (!id) {
-      const useMemory = draftMemory.value
-      const item = await session.createSession('', workspace.selectedId, draftSubagents.value)
-      id = item.id
+    if (id) {
+      await session.sendToSession(id, content, undefined, images)
+      resume()
+      return
+    }
+    const useMemory = draftMemory.value
+    const item = await session.createSession('', workspace.selectedId, draftSubagents.value)
+    id = item.id
+    try {
       await router.replace('/chat/' + id)
       await session.setPermissionMode(mode.value, id)
       if (useMemory) await session.manageSession(id, { memory_enabled: true })
@@ -333,8 +338,11 @@ async function send(
         draftThinking.value,
         id,
       )
+      await session.sendToSession(id, content, undefined, images)
+    } catch (reason) {
+      session.error = reason instanceof Error ? reason.message : String(reason)
+      throw reason
     }
-    await session.sendToSession(id, content, undefined, images)
     resume()
   } finally {
     sending.value = false

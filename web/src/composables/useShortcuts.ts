@@ -14,8 +14,7 @@ export function useShortcuts() {
     router = useRouter()
   let nodeIndex = -1
   async function newPage() {
-    const item = await session.createSession()
-    await router.push('/chat/' + item.id)
+    await router.push('/chat')
   }
   function onKey(event: KeyboardEvent) {
     if (event.isComposing || event.defaultPrevented) return

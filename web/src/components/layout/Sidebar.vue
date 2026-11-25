@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useSettingsStore } from '@/stores/settings'
 import { useUIStore } from '@/stores/ui'
+import { useWorkspaceStore } from '@/stores/workspace'
 import WorkspaceSelector from '@/components/sidebar/WorkspaceSelector.vue'
 import RecentChats from '@/components/sidebar/RecentChats.vue'
 import ResizeHandle from '@/components/common/ResizeHandle.vue'
@@ -15,26 +16,18 @@ defineProps<{ maximumWidth?: number }>()
 const session = useSessionStore(),
   settings = useSettingsStore(),
   ui = useUIStore(),
+  workspace = useWorkspaceStore(),
   router = useRouter()
-const creating = ref(false),
-  resizing = ref(false),
+const resizing = ref(false),
   searchOpen = ref(false),
   query = ref('')
 const searchInput = ref<HTMLInputElement | null>(null)
 const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'
 async function create(folderId?: string) {
-  if (creating.value) return
-  creating.value = true
-  try {
-    const item = await session.createSession('', folderId)
-    await router.push('/chat/' + item.id)
-    closeSearch()
-    closeOnNarrowScreen()
-  } catch {
-    /* Store exposes the failure. */
-  } finally {
-    creating.value = false
-  }
+  if (folderId !== undefined) workspace.select(folderId)
+  await router.push('/chat')
+  closeSearch()
+  closeOnNarrowScreen()
 }
 async function search() {
   if (ui.layout.sidebarCollapsed) ui.layout.toggleSidebar()
@@ -93,21 +86,19 @@ function closeOnNarrowScreen() {
       class="new-page"
       :title="$t('新页') + ' (' + mod + '+N)'"
       :aria-label="$t('新页')"
-      :disabled="creating"
-      :aria-busy="creating || undefined"
       @click="create()"
     >
       <IconSymbol
         name="compose"
         :size="18"
       />
-      <span v-if="!ui.layout.sidebarCollapsed">{{ creating ? $t('正在新建…') : $t('新页') }}</span>
+      <span v-if="!ui.layout.sidebarCollapsed">{{ $t('新页') }}</span>
       <kbd v-if="!ui.layout.sidebarCollapsed">{{ mod }} N</kbd>
     </button>
     <button
       class="sidebar-action"
-      :title="$t('搜索工作区和对话')"
       :aria-label="$t('搜索工作区和对话')"
+      :title="$t('搜索工作区和对话')"
       :aria-expanded="searchOpen && !ui.layout.sidebarCollapsed"
       aria-controls="session-search"
       @click="search"
@@ -195,7 +186,6 @@ function closeOnNarrowScreen() {
     <RecentChats
       v-show="!ui.layout.sidebarCollapsed"
       :query="query"
-      :creating="creating"
       @create="create"
       @select="closeOnNarrowScreen"
     />

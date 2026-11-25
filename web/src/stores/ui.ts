@@ -22,6 +22,7 @@ export interface Appearance {
   showContextUsage?: boolean
   hardwareAcceleration?: boolean
 }
+export const defaultAvatar = '助'
 export const accents: Array<{ id: Accent; label: string }> = [
   { id: 'stone', label: '石青' },
   { id: 'blue', label: '黛蓝' },
@@ -60,7 +61,7 @@ export const useUIStore = defineStore('ui', () => {
     accent: 'stone',
     texture: true,
     greetingName: '你',
-    avatar: '助',
+    avatar: defaultAvatar,
     capsuleShortcut: 'Alt+Space',
     showContextUsage: true,
     textSize: 'default',

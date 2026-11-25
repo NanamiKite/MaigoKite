@@ -5,7 +5,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useSettingsStore } from '@/stores/settings'
-import { useUIStore } from '@/stores/ui'
+import { defaultAvatar, useUIStore } from '@/stores/ui'
 import { useRunStore } from '@/stores/run'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useInboxStore } from '@/stores/inbox'
@@ -882,7 +882,16 @@ watch(
         class="workpaper-signature"
       >
         <span>
-          <AppIcon :size="24" />
+          <AppIcon
+            v-if="ui.appearance.avatar === defaultAvatar"
+            :size="24"
+          />
+          <span
+            v-else
+            class="signature-avatar"
+          >
+            {{ ui.appearance.avatar }}
+          </span>
           {{ settings.profile.assistantName }}
         </span>
         <router-link to="/overview">

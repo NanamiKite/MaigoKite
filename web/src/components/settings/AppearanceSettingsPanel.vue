@@ -4,6 +4,7 @@ import { useUIStore, accents, type Accent, type ThemeMode, type TextSize } from 
 import { useSettingsStore } from '@/stores/settings'
 import { desktopEffects } from '@/composables/useElectron'
 import { t, type Language } from '@/i18n'
+import AvatarInput from './AvatarInput.vue'
 import DeskBackgroundSettings from './DeskBackgroundSettings.vue'
 import EnterBehaviorField from './EnterBehaviorField.vue'
 import InkSelect from '@/components/common/InkSelect.vue'
@@ -140,15 +141,7 @@ async function saveShortcut() {
         data-settings-field="avatar"
       >
         <span>{{ $t('头像字') }}</span>
-        <input
-          class="avatar-input"
-          :value="ui.appearance.avatar"
-          @input="
-            ui.setAppearance({
-              avatar: Array.from(($event.target as HTMLInputElement).value)[0] || '助',
-            })
-          "
-        />
+        <AvatarInput class="avatar-input" />
       </label>
     </section>
     <section class="setting-group">

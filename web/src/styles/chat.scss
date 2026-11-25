@@ -112,6 +112,13 @@
   align-items: center;
   gap: var(--space-3);
 }
+.signature-avatar {
+  flex: none;
+  font-family: var(--font-serif);
+  font-size: var(--text-lg);
+  line-height: 1;
+  color: var(--ink);
+}
 .workpaper-signature a {
   @include mixins.text-action;
   color: var(--ink-2);

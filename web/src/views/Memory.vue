@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import { t } from '@/i18n'
 import { useMemoryStore } from '@/stores/memory'
 import { useSettingsStore } from '@/stores/settings'
-import { useUIStore } from '@/stores/ui'
+import { defaultAvatar, useUIStore } from '@/stores/ui'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { api, type UserMemory } from '@/api/client'
 import { memoryGroup } from '@/utils/work-records'
@@ -12,6 +12,7 @@ import MemoryGroup from '@/components/message/MemoryGroup.vue'
 import type { MemoryDraft } from '@/components/message/MemoryEditor.vue'
 import InkLoader from '@/components/common/InkLoader.vue'
 import AppIcon from '@/components/common/AppIcon.vue'
+import AvatarInput from '@/components/settings/AvatarInput.vue'
 import InkSelect from '@/components/common/InkSelect.vue'
 const memory = useMemoryStore(),
   settings = useSettingsStore(),
@@ -263,7 +264,7 @@ function retryName() {
       <div class="identity-profile">
         <div class="identity-avatar">
           <AppIcon
-            v-if="ui.appearance.avatar === '助'"
+            v-if="ui.appearance.avatar === defaultAvatar"
             :size="48"
           />
           <span
@@ -291,14 +292,7 @@ function retryName() {
         </button>
         <label>
           {{ $t('头像字') }}
-          <input
-            :value="ui.appearance.avatar"
-            @input="
-              ui.setAppearance({
-                avatar: Array.from(($event.target as HTMLInputElement).value)[0] || '助',
-              })
-            "
-          />
+          <AvatarInput />
         </label>
         <p
           v-if="settings.error"

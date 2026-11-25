@@ -4,7 +4,7 @@ import { nextTick, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useSettingsStore } from '@/stores/settings'
-import { useUIStore } from '@/stores/ui'
+import { defaultAvatar, useUIStore } from '@/stores/ui'
 import { useWorkspaceStore } from '@/stores/workspace'
 import WorkspaceSelector from '@/components/sidebar/WorkspaceSelector.vue'
 import RecentChats from '@/components/sidebar/RecentChats.vue'
@@ -62,7 +62,7 @@ function closeOnNarrowScreen() {
         v-if="ui.layout.sidebarCollapsed"
         class="brand-button"
       >
-        <AppIcon v-if="ui.appearance.avatar === '助'" />
+        <AppIcon v-if="ui.appearance.avatar === defaultAvatar" />
         <span
           v-else
           class="avatar"
@@ -71,7 +71,7 @@ function closeOnNarrowScreen() {
         </span>
       </span>
       <template v-else>
-        <AppIcon v-if="ui.appearance.avatar === '助'" />
+        <AppIcon v-if="ui.appearance.avatar === defaultAvatar" />
         <span
           v-else
           class="avatar"

@@ -61,6 +61,10 @@
   color: var(--accent);
   background: var(--accent-selected);
 }
+.drawer-control[aria-disabled='true'] {
+  cursor: progress;
+  opacity: var(--opacity-busy);
+}
 .drawer-tabs {
   display: flex;
   overflow-x: auto;

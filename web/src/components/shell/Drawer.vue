@@ -13,6 +13,11 @@ import FileExplorer from '@/components/layout/FileExplorer.vue'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import ResizeHandle from '@/components/common/ResizeHandle.vue'
 defineProps<{ maximumWidth?: number }>()
+interface DrawerPanel {
+  refresh?: () => void | Promise<void>
+  refreshLabel?: string
+  busy?: boolean
+}
 const ui = useUIStore(),
   workspace = useWorkspaceStore()
 const wide = ref(false),
@@ -20,6 +25,7 @@ const wide = ref(false),
   everOpened = ref(ui.drawerOpen)
 const tabList = ref<HTMLElement | null>(null)
 const content = ref<HTMLElement | null>(null)
+const panel = ref<DrawerPanel | null>(null)
 const scrollPositions: Partial<Record<typeof ui.drawerTab, number>> = {}
 let opener: HTMLElement | null = null
 const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'
@@ -72,6 +78,10 @@ async function moveTab(event: KeyboardEvent) {
   await nextTick()
   tabList.value?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus()
 }
+function refreshPanel() {
+  if (panel.value?.busy) return
+  void panel.value?.refresh?.()
+}
 </script>
 <template>
   <div
@@ -104,6 +114,20 @@ async function moveTab(event: KeyboardEvent) {
         </span>
       </div>
       <div class="drawer-controls">
+        <button
+          v-if="panel?.refresh && panel.refreshLabel"
+          class="drawer-control drawer-refresh"
+          type="button"
+          :title="panel.refreshLabel"
+          :aria-label="panel.refreshLabel"
+          :aria-disabled="panel.busy || undefined"
+          @click="refreshPanel"
+        >
+          <IconSymbol
+            name="refresh"
+            :size="18"
+          />
+        </button>
         <button
           class="drawer-control"
           :aria-label="wide ? $t('还原面板') : $t('放大面板')"
@@ -172,6 +196,7 @@ async function moveTab(event: KeyboardEvent) {
       <KeepAlive :max="5">
         <component
           :is="current.component"
+          ref="panel"
           :embedded="current.id === 'files' || undefined"
         />
       </KeepAlive>

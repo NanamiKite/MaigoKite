@@ -13,7 +13,11 @@ export function awaitFocus(card: HTMLElement | null): () => void {
     const targets = [
       node,
       pending?.querySelector<HTMLElement>('[data-await-action]:not(:disabled)'),
-      pending?.querySelector<HTMLElement>('.pending-heading button'),
+      pending
+        ? document.querySelector<HTMLElement>(
+            "#work-drawer .drawer-refresh:not(:disabled, [aria-disabled='true'])",
+          )
+        : undefined,
       document.querySelector<HTMLElement>('.composer textarea'),
     ]
     targets

@@ -211,6 +211,14 @@ watch(
   },
 )
 onUnmounted(cleanup)
+defineExpose({
+  get refresh() {
+    return session.activeSessionId ? load : undefined
+  },
+  get refreshLabel() {
+    return t('刷新运行状态')
+  },
+})
 </script>
 <template>
   <section class="jobs-tab">
@@ -219,19 +227,6 @@ onUnmounted(cleanup)
       :session-id="session.activeSessionId || ''"
       :turns="turns"
     >
-      <header>
-        <strong>{{ $t('运行') }}</strong>
-        <button
-          class="icon-button"
-          :title="$t('刷新运行状态')"
-          @click="load"
-        >
-          <IconSymbol
-            name="refresh"
-            :size="16"
-          />
-        </button>
-      </header>
       <p
         v-if="error || actionError"
         class="empty-copy"

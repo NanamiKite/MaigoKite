@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { t } from '@/i18n'
 import { useInboxStore } from '@/stores/inbox'
 import { useSessionStore } from '@/stores/session'
 import { useUIStore } from '@/stores/ui'
@@ -27,27 +28,21 @@ async function refresh() {
 onMounted(() => {
   void refresh()
 })
+defineExpose({
+  refresh,
+  get refreshLabel() {
+    return t('重新读取')
+  },
+  get busy() {
+    return loading.value
+  },
+})
 </script>
 <template>
   <section
     class="pending-tab"
     :aria-label="$t('等你处理')"
   >
-    <header class="pending-heading">
-      <span>{{ $t('等你处理') }}</span>
-      <small>{{ items.length }}</small>
-      <button
-        class="icon-button"
-        :disabled="loading"
-        :aria-label="$t('重新读取')"
-        @click="refresh"
-      >
-        <IconSymbol
-          name="refresh"
-          :size="16"
-        />
-      </button>
-    </header>
     <InkLoader v-if="loading && !items.length" />
     <div
       v-else-if="!items.length && !inbox.error"
@@ -122,19 +117,10 @@ onMounted(() => {
 .pending-tab {
   padding: var(--space-5);
 }
-.pending-heading,
 .pending-session {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-}
-.pending-heading {
-  margin-bottom: var(--space-5);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-}
-.pending-heading .icon-button {
-  margin-left: auto;
 }
 small {
   font-size: var(--text-xs);

@@ -10,6 +10,8 @@ const tabs = ref<ChildTab[]>([])
 const selected = ref('')
 const navigation = ref<HTMLElement | null>(null)
 const childPage = ref<HTMLElement | null>(null)
+const listPage = ref<HTMLElement | null>(null)
+const root = ref<HTMLElement | null>(null)
 const positions = new Map<string, number>()
 const current = computed(() => {
   const tab = tabs.value.find((item) => item.key === selected.value)
@@ -27,9 +29,10 @@ function select(key: string) {
 }
 async function focusSelected() {
   await nextTick()
-  const button = navigation.value?.querySelector<HTMLButtonElement>('[aria-selected="true"]')
-  button?.focus({ preventScroll: true })
-  button?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  const target =
+    navigation.value?.querySelector<HTMLButtonElement>('[aria-selected="true"]') ?? listPage.value
+  target?.focus({ preventScroll: true })
+  target?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
 }
 function open(turnId: string, childId: string) {
   const child = props.turns
@@ -74,16 +77,22 @@ function navigate(event: KeyboardEvent) {
 watch(
   () => props.sessionId,
   () => {
+    const held = root.value?.contains(document.activeElement)
     tabs.value = []
     selected.value = ''
     positions.clear()
+    if (held) void focusSelected()
   },
 )
 defineExpose({ open })
 </script>
 <template>
-  <div class="run-workspace">
+  <div
+    ref="root"
+    class="run-workspace"
+  >
     <nav
+      v-if="tabs.length"
       ref="navigation"
       class="run-view-tabs"
       role="tablist"
@@ -139,9 +148,11 @@ defineExpose({ open })
     <div
       v-show="!selected"
       :id="`${scope}-list`"
+      ref="listPage"
       class="run-page"
-      role="tabpanel"
-      :aria-labelledby="`${scope}-list-tab`"
+      :role="tabs.length ? 'tabpanel' : 'region'"
+      :aria-labelledby="tabs.length ? `${scope}-list-tab` : undefined"
+      :aria-label="tabs.length ? undefined : $t('运行记录')"
       tabindex="0"
     >
       <slot />

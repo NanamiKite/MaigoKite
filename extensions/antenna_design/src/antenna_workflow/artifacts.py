@@ -114,7 +114,11 @@ def worker_environment(plot_cache: str) -> dict[str, str]:
 
 
 def complete_bundle(root: Path) -> EngineeringSummary:
-    """Call only after worker exit and log closure; publish the completion marker last."""
+    """Publish a directory no writer is still changing; commit the completion marker last.
+
+    The CLI/MCP paths meet that condition by waiting for worker exit and log closure;
+    the optimization worker meets it in-process once its own writes are finished.
+    """
     _verified_files(root, "numerical.json", NUMERICAL_FILES)
     summary = EngineeringSummary.model_validate_json(read_bounded(root, "solution.json", MAX_METADATA_BYTES))
     try:

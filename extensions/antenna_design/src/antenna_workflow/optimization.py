@@ -273,7 +273,7 @@ def candidate_disposition(store: Path, run_id: str) -> Literal["summary_only", "
             if logged.index == int(match["number"]) and run_id in logged.run_ids:
                 return "summary_only"
     except OSError, ValueError:
-        # Unreadable receipts leave the class open; get_optimization reports the damage.
+        # Unreadable receipts leave the class undetermined.
         return "unknown"
     return "unknown"
 
@@ -580,26 +580,30 @@ def optimize(root: Path, *, timeout: int) -> None:
     # Unusable geometry/metrics are worse than every finite score. They never
     # become the saved best candidate or a claim of target satisfaction.
     rejected_score = float("inf")
-    # `best` is the best scored candidate so far. Between publication points it is
-    # `pending`, whose complete evidence exists only in memory; `result.best` is
-    # always the last candidate whose evidence is complete on disk.
-    best: Candidate | None = result.best
+    # A new best is held in memory as `pending` until a publication point writes and
+    # verifies its evidence. The receipt must never name a candidate whose complete
+    # evidence is not on disk, so `result.best` stays at the last published best;
+    # `pending` is empty whenever no better candidate is waiting.
     pending: _PendingBest | None = None
+
+    def leading() -> Candidate | None:
+        """The best scored candidate so far: the pending one, else the receipt's best."""
+        return pending.candidate if pending is not None else result.best
 
     def publish_pending() -> bool:
         """Publish the pending best; its own receipt save reports whether anything was published."""
-        nonlocal result, best, pending, deadline
+        nonlocal result, pending, deadline
         if pending is None:
             return False
         publish_started = monotonic()
         result = _publish_best(root, store, query, project, timeout, result, pending)
-        best, pending = result.best, None
+        pending = None
         # The wrap-up publication must fit the reserve; widen it once its cost is known.
         deadline = min(deadline, started + timeout - max(reserve, 1.5 * (monotonic() - publish_started)))
         return True
 
     def cost(vector: NDArray[np.float64]) -> float:
-        nonlocal result, budget, batch_score, best, pending
+        nonlocal result, budget, batch_score, pending
         values = tuple(float(value) for value in vector)
         if values in cache:
             return cache[values]
@@ -614,7 +618,8 @@ def optimize(root: Path, *, timeout: int) -> None:
         ):
             raise _SearchStoppedError("time_limit")
         if result.candidate_attempts >= budget.granted_candidates:
-            current_score = best.score if best else None
+            best_so_far = leading()
+            current_score = best_so_far.score if best_so_far else None
             improved = current_score is not None and (
                 batch_score is None or batch_score - current_score > max(1e-8, abs(batch_score) * 0.001)
             )
@@ -727,7 +732,8 @@ def optimize(root: Path, *, timeout: int) -> None:
                 ),
             )
         else:
-            became_best = best is None or score < best.score or satisfied
+            best_so_far = leading()
+            became_best = best_so_far is None or score < best_so_far.score or satisfied
             write_json(
                 _record_path(root, index),
                 CandidateRecord(
@@ -744,8 +750,10 @@ def optimize(root: Path, *, timeout: int) -> None:
                 changes["baseline_score"] = score
             result = result.model_copy(update=changes)
             if became_best:
-                best = Candidate(index=index, parameters=values, score=score, run_ids=run_ids, evaluation=evaluation)
-                pending = _PendingBest(best, tuple(solved))
+                pending = _PendingBest(
+                    Candidate(index=index, parameters=values, score=score, run_ids=run_ids, evaluation=evaluation),
+                    tuple(solved),
+                )
         if len(run_ids) == points_count:
             # Use a high-water estimate of complete sweeps, including in-memory
             # evaluation. A cheap invalid candidate must not lower the estimate.
@@ -769,8 +777,10 @@ def optimize(root: Path, *, timeout: int) -> None:
 
     def generation_finished(intermediate_result: OptimizeResult) -> None:
         nonlocal budget, result, generation_score
-        # SciPy calls this after a complete generation, never during its initial
-        # Latin-hypercube population. Resource batches are not search generations.
+        # SciPy picks the callback form by parameter name: only a lone parameter named
+        # `intermediate_result` receives an OptimizeResult; renaming it falls back to the
+        # old (x, convergence) call. It runs after a complete generation, never during the
+        # initial Latin-hypercube population. Resource batches are not search generations.
         current = float(intermediate_result.fun)
         improved = math.isfinite(current) and (
             generation_score is None or generation_score - current > max(1e-8, abs(generation_score) * 0.001)
@@ -781,12 +791,13 @@ def optimize(root: Path, *, timeout: int) -> None:
             generation_score = current
         budget = budget.model_copy(update={"generations_completed": completed, "stagnant_generations": stagnant})
         result = result.model_copy(update={"budget": budget})
+        best_so_far = leading()
         write_json(
             root / f"generation-{completed:04d}.json",
             {
                 "generation": completed,
                 "candidate_attempts": result.candidate_attempts,
-                "best_score": best.score if best else None,
+                "best_score": best_so_far.score if best_so_far else None,
                 "stagnant_generations": stagnant,
             },
         )
@@ -800,7 +811,8 @@ def optimize(root: Path, *, timeout: int) -> None:
     reason: StopReason = "failed"
     try:
         cost(np.asarray(initial, dtype=np.float64))
-        if best is not None and targets_satisfied(best.evaluation):
+        best_so_far = leading()
+        if best_so_far is not None and targets_satisfied(best_so_far.evaluation):
             raise _SearchStoppedError("sampled_targets_met")
         bounds = [(item.lower, item.upper) for item in query.dimensions]
         population = qmc.scale(

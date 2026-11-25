@@ -82,7 +82,7 @@
 - 负责范围：`optimize / design` 的候选评分与证据发布路径、`project_status` 的候选状态分类及对应文档。不处理求解器、采样精度、计费规则、旧产物清理、产品默认值；补画/ZIP 去重与通用扫频留到本路径验收之后。
 - 涉及文件：`src/antenna_workflow/evaluation.py`、`artifacts.py`、`optimization.py`、`mcp_server.py`、`skills/antenna-design/SKILL.md`、包 README、`docs/design/AntennaWorkflow.md`、`docs/project/Changelog.md`、`docs/project/Roadmap.md`。
 - 已完成：`evaluation.py` 把“从文件加载并校验”（`_load_point`）与“用数值计算指标”（`computed_point` / `evaluate_computed`）分开，二者共用 `_measure_point` 与 `_evaluate`；`artifacts.py` 拆出 `write_numerical` 并新增 `publish_computed`，可发布已算出的 `Solution` 而不重新求解。`optimization.py` 的候选在内存求解评分，只写 `candidate-NNNN.json` 摘要；完整证据在首次可评价、整代结束且有改善、干净收尾或达标时经 `_publish_best` 写入并核验，写下 `published-NNNN.json` 发布记录后才切换 `progress.json`，发布自带的回执保存即最终内容。收尾预留按首次发布实测耗时的 1.5 倍扩展。`project_status` 新增 `summary_only` 状态和 `get_optimization` 下一步，回执或发布记录已引用但目录缺失的 run 标 `corrupt`。
-- 已确认决定：`best` 在发布点之间可能是仅存在于内存的待发布候选，`result.best` 始终是磁盘证据完整的上一份最佳。只有干净停止才在收尾发布；异常路径不重试（半成品目录无法原地重试），保留上一份已提交最佳，发布失败时 stop_reason 记为 `failed`。发布记录先于回执切换写入，使曾被发布后又被替换的最佳在目录丢失时仍按证据缺损处理。数值目录的 `elapsed_seconds` 只计求解时间。
+- 已确认决定：搜索中的最佳由 `leading()` 从待发布候选 `pending` 或回执 `result.best` 派生，不单独维护可写副本；`result.best` 始终是磁盘证据完整的上一份最佳，回执不得引用未完成证据，`pending` 在没有更好的未发布候选时为空。只有干净停止才在收尾发布；异常路径不重试（半成品目录无法原地重试），保留上一份已提交最佳，发布失败时 stop_reason 记为 `failed`。发布记录先于回执切换写入，使曾被发布后又被替换的最佳在目录丢失时仍按证据缺损处理。数值目录的 `elapsed_seconds` 只计求解时间。
 - 验证证据：独立包 `ruff check src`、`ruff format --check src`（23 文件）、strict `mypy src`（22 模块）通过，环境按锁文件新建（Ruff 0.17.1、mypy 2.4.0）。未读取或修改测试源码。
 - 未验证项：薄线多频数值基线（逐频增益、前后比、R+jX、SWR、评分、最佳参数、准入次数与旧路径对比）、峰值内存与读写量/耗时实测、四类中断取回、取消等待、求解、GUI、Windows 与远程 CI 均未运行，需另行授权。
 - 下一步：获授权后先跑数值基准与中断验收；通过后再做补画/ZIP 去重和通用扫频。跨对话依赖：暂无。

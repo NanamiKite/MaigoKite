@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { t } from '@/i18n'
 import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useUIStore } from '@/stores/ui'
 import { useInboxStore } from '@/stores/inbox'
 import { usePulse } from '@/composables/usePulse'
+import { overlayPanel } from '@/utils/layout-media'
 import IconSymbol from '@/components/common/IconSymbol.vue'
 import SessionTitle from '@/components/common/SessionTitle.vue'
 import Pulse from './Pulse.vue'
@@ -15,9 +16,52 @@ defineProps<{ desktop?: boolean; sidebarOverlay?: boolean }>()
 const session = useSessionStore(),
   ui = useUIStore(),
   inbox = useInboxStore(),
-  route = useRoute()
-const { state } = usePulse()
+  route = useRoute(),
+  router = useRouter()
+const { state, offline, target } = usePulse()
 const currentId = computed(() => (route.name === 'Chat' ? String(route.params.id || '') : ''))
+const stateLabels = {
+  idle: '静息',
+  thinking: '思考',
+  acting: '行动',
+  waiting: '等你处理',
+  error: '出错',
+  offline: '离线',
+} as const
+const targetLabels = {
+  waiting: '「{0}」等你处理',
+  acting: '「{0}」正在行动',
+  thinking: '「{0}」正在思考',
+  error: '「{0}」出错',
+  offline: '「{0}」连接已断开',
+} as const
+function titleOf(id: string) {
+  return session.sessions.find((item) => item.id === id)?.title || t('未命名对话')
+}
+const pulseLabel = computed(() => {
+  const next = target.value
+  return next ? t(targetLabels[next.state], [titleOf(next.sessionId)]) : t(stateLabels[state.value])
+})
+const announced = computed(() => {
+  const next = target.value
+  return next && (next.state === 'acting' || next.state === 'thinking')
+    ? t('「{0}」正在处理', [titleOf(next.sessionId)])
+    : pulseLabel.value
+})
+const jumpable = computed(() => {
+  const next = target.value
+  return Boolean(next && (next.sessionId !== currentId.value || next.awaitId))
+})
+async function goToTarget() {
+  const next = target.value
+  if (!next) return
+  if (ui.drawerOpen && overlayPanel('drawer')) ui.drawerOpen = false
+  if (overlayPanel('sidebar') && !ui.layout.sidebarCollapsed) ui.layout.toggleSidebar()
+  await router.push({
+    path: '/chat/' + next.sessionId,
+    query: next.awaitId ? { await: next.awaitId } : undefined,
+  })
+}
 const title = computed(() =>
   route.name === 'Chat'
     ? session.activeSession?.title || t('新页')
@@ -47,7 +91,7 @@ function toggleDrawer() {
 <template>
   <header
     class="titlebar"
-    :class="{ offline: state === 'offline' }"
+    :class="{ offline }"
     :aria-label="$t('应用导航')"
   >
     <SidebarToggle
@@ -55,30 +99,34 @@ function toggleDrawer() {
       :pending-count="otherPending"
       :sidebar-overlay="sidebarOverlay"
     />
-    <Pulse
-      :state="state"
-      :size="12"
-    />
+    <span class="pulse-slot">
+      <button
+        v-if="jumpable"
+        class="pulse-target"
+        type="button"
+        :title="pulseLabel"
+        :aria-label="pulseLabel"
+        @click="goToTarget"
+      >
+        <Pulse
+          :state="state"
+          :size="12"
+          aria-hidden="true"
+        />
+      </button>
+      <Pulse
+        v-else
+        :state="state"
+        :size="12"
+      />
+    </span>
     <span
       class="sr-only"
       role="status"
       aria-live="polite"
       aria-atomic="true"
     >
-      {{
-        $t(
-          (
-            {
-              idle: '静息',
-              thinking: '思考',
-              acting: '行动',
-              waiting: '等你处理',
-              error: '出错',
-              offline: '离线',
-            } as const
-          )[state],
-        )
-      }}
+      {{ announced }}
     </span>
     <ConversationTabs v-if="route.name === 'Chat'" />
     <SessionTitle
@@ -154,6 +202,25 @@ function toggleDrawer() {
   position: absolute;
   inset: auto 0 0;
   background: var(--wait);
+}
+.pulse-slot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--space-4);
+  height: var(--space-4);
+}
+.pulse-target {
+  @include mixins.interactive-row;
+  position: absolute;
+  inset: calc(-1 * var(--space-3));
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: var(--hairline) solid var(--transparent);
+  border-radius: var(--radius-sm);
+  background: var(--transparent);
 }
 .title-actions {
   display: flex;

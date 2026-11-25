@@ -158,8 +158,8 @@ class CandidateSample(Contract):
 class CandidateRecord(Contract):
     """Search log of one candidate; `became_best` led the search when evaluated.
 
-    Whether that leading candidate's evidence was published is decided by the receipt,
-    not by this record: only a published best owns complete evidence directories.
+    Whether that leading candidate's evidence was then published is recorded separately
+    in `PublicationRecord`, not here.
     """
 
     index: Annotated[int, Field(ge=1, le=4096)]
@@ -169,6 +169,15 @@ class CandidateRecord(Contract):
     became_best: bool
     failure: Annotated[str, Field(max_length=300)] | None = None
     points: tuple[CandidateSample, ...] = ()
+
+
+class PublicationRecord(Contract):
+    """Complete, verified evidence of one candidate exists; written before the receipt names it."""
+
+    index: Annotated[int, Field(ge=1, le=4096)]
+    run_ids: Annotated[
+        tuple[Annotated[str, Field(pattern=f"^{RUN_ID_PATTERN}$")], ...], Field(min_length=1, max_length=6)
+    ]
 
 
 @dataclass(frozen=True)
@@ -234,8 +243,16 @@ def _record_path(root: Path, index: int) -> Path:
     return root / f"candidate-{index:04d}.json"
 
 
+def _publication_path(root: Path, index: int) -> Path:
+    return root / f"published-{index:04d}.json"
+
+
 def candidate_disposition(store: Path, run_id: str) -> Literal["summary_only", "published", "unknown"]:
-    """Classify a search-owned admission from its receipts alone; never read or infer numerical evidence."""
+    """Classify a search-owned admission from its receipts alone; never read or infer numerical evidence.
+
+    A publication record outlives the receipt's current best: evidence that was once
+    published and later lost is damaged, not a summary the policy chose to keep.
+    """
     match = _SEARCH_RUN.fullmatch(run_id)
     if match is None:
         return "unknown"
@@ -244,6 +261,11 @@ def candidate_disposition(store: Path, run_id: str) -> Literal["summary_only", "
         if (root / "progress.json").is_file():
             saved = OptimizationResult.model_validate_json(read_bounded(root, "progress.json", MAX_METADATA_BYTES))
             if saved.best is not None and run_id in saved.best.run_ids:
+                return "published"
+        publication = _publication_path(root, int(match["number"]))
+        if publication.is_file():
+            released = PublicationRecord.model_validate_json(read_bounded(root, publication.name, MAX_METADATA_BYTES))
+            if released.index == int(match["number"]) and run_id in released.run_ids:
                 return "published"
         record = _record_path(root, int(match["number"]))
         if record.is_file():
@@ -482,17 +504,21 @@ def _publish_best(
 ) -> OptimizationResult:
     """Write the pending best's complete evidence, verify it, and only then switch the receipt."""
     for item in pending.points:
-        destination = run_path(store, item.run_id)
-        if (destination / "completed.json").is_file():
-            # A retry after an interrupted publication reuses a frequency that is already complete.
-            manifest = read_manifest(destination)
-            saved = EngineeringRequest.model_validate_json(read_artifact(destination, manifest, "request"))
-            if saved != item.request:
-                raise ValueError("Published candidate evidence describes a different input")
-            continue
-        publish_computed(destination, item.request, item.solution, timeout=timeout, elapsed_seconds=item.solve_seconds)
+        publish_computed(
+            run_path(store, item.run_id),
+            item.request,
+            item.solution,
+            timeout=timeout,
+            elapsed_seconds=item.solve_seconds,
+        )
     # Every frequency is now complete and hash-checked; identity, input and score must still agree.
     verified = _verified_best(store, query, pending.candidate, project)
+    # This record is written only once nothing half-written can remain. It precedes the
+    # receipt switch so published evidence stays recognisable after a later best replaces it.
+    write_json(
+        _publication_path(root, pending.candidate.index),
+        PublicationRecord(index=pending.candidate.index, run_ids=pending.candidate.run_ids),
+    )
     updated = result.model_copy(update={"best": verified})
     _save(root, updated)
     return updated
@@ -560,15 +586,17 @@ def optimize(root: Path, *, timeout: int) -> None:
     best: Candidate | None = result.best
     pending: _PendingBest | None = None
 
-    def publish_pending() -> None:
+    def publish_pending() -> bool:
+        """Publish the pending best; its own receipt save reports whether anything was published."""
         nonlocal result, best, pending, deadline
         if pending is None:
-            return
+            return False
         publish_started = monotonic()
         result = _publish_best(root, store, query, project, timeout, result, pending)
         best, pending = result.best, None
         # The wrap-up publication must fit the reserve; widen it once its cost is known.
         deadline = min(deadline, started + timeout - max(reserve, 1.5 * (monotonic() - publish_started)))
+        return True
 
     def cost(vector: NDArray[np.float64]) -> float:
         nonlocal result, budget, batch_score, best, pending
@@ -730,11 +758,11 @@ def optimize(root: Path, *, timeout: int) -> None:
             )
         budget = budget.model_copy(update={"elapsed_seconds": monotonic() - started})
         result = result.model_copy(update={"budget": budget})
-        if pending is not None and (result.best is None or satisfied):
-            # The first evaluable result, or one meeting every target, is published at
-            # once; later improvements wait for a generation boundary or the wrap-up.
-            publish_pending()
-        _save(root, result)
+        # The first evaluable result, or one meeting every target, is published at once;
+        # later improvements wait for a generation boundary or the wrap-up. Publishing
+        # saves this very receipt, so no second replace is needed.
+        if not (pending is not None and (result.best is None or satisfied) and publish_pending()):
+            _save(root, result)
         if satisfied:
             raise _SearchStoppedError("sampled_targets_met")
         return cache[values]
@@ -762,10 +790,10 @@ def optimize(root: Path, *, timeout: int) -> None:
                 "stagnant_generations": stagnant,
             },
         )
-        _save(root, result)
         # A complete generation is a publication point, so the best on disk lags the
-        # search by at most one generation.
-        publish_pending()
+        # search by at most one generation. Publishing saves this very receipt.
+        if not publish_pending():
+            _save(root, result)
         if completed >= query.minimum_generations and stagnant >= query.stagnation_generations:
             raise _SearchStoppedError("stagnation")
 
@@ -798,11 +826,17 @@ def optimize(root: Path, *, timeout: int) -> None:
         reason = stopped.reason
     finally:
         budget = budget.model_copy(update={"elapsed_seconds": monotonic() - started})
-        try:
-            # The wrap-up publishes an improvement that is still only in memory. If
-            # that fails, the previous complete best stays and the stop is not clean.
-            publish_pending()
-        except Exception:
-            traceback.print_exc()
-            reason = "failed"
-        _save(root, result.model_copy(update={"stop_reason": reason, "budget": budget}))
+        result = result.model_copy(update={"stop_reason": reason, "budget": budget})
+        published = False
+        # Only a clean stop publishes an improvement still held in memory. After an
+        # exception the previous committed best stays: a half-written candidate cannot
+        # be retried in place and is not presented as recoverable.
+        if reason != "failed":
+            try:
+                # Publishing saves this receipt itself with the stop reason and the best.
+                published = publish_pending()
+            except Exception:
+                traceback.print_exc()
+                result = result.model_copy(update={"stop_reason": "failed"})
+        if not published:
+            _save(root, result)

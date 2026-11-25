@@ -327,22 +327,20 @@ async function send(
       return
     }
     const useMemory = draftMemory.value
-    const item = await session.createSession('', workspace.selectedId, draftSubagents.value)
+    const item = await session.createSession('', workspace.selectedId, draftSubagents.value, {
+      permissionMode: mode.value,
+      memoryEnabled: useMemory,
+      modelId: draftModel.value || settings.defaultModelId,
+      thinking: draftThinking.value,
+    })
     id = item.id
     try {
       await router.replace('/chat/' + id)
-      await session.setPermissionMode(mode.value, id)
-      if (useMemory) await session.manageSession(id, { memory_enabled: true })
-      await session.setConversationRuntime(
-        draftModel.value || settings.defaultModelId,
-        draftThinking.value,
-        id,
-      )
-      await session.sendToSession(id, content, undefined, images)
     } catch (reason) {
       session.error = reason instanceof Error ? reason.message : String(reason)
       throw reason
     }
+    await session.sendToSession(id, content, undefined, images)
     resume()
   } finally {
     sending.value = false

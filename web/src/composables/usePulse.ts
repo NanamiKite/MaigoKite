@@ -51,7 +51,9 @@ export function usePulse() {
     )
     if (active) return active
     if (offline.value) return 'offline'
-    return values.includes('error') ? 'error' : run.pulse(session.activeSessionId)
+    if (values.includes('error')) return 'error'
+    const current = states.value.find((item) => item.id === session.activeSessionId)
+    return current?.counted ? current.value : 'idle'
   })
   const target = computed<PulseTarget | null>((previous) => {
     const value = state.value

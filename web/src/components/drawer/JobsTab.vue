@@ -218,6 +218,9 @@ defineExpose({
   get refreshLabel() {
     return t('刷新运行状态')
   },
+  get busy() {
+    return loading.value
+  },
 })
 </script>
 <template>

@@ -24,6 +24,16 @@ const conversationDefaults = {
   forked_from_conversation_id: '',
   forked_from_message_id: '',
 }
+const conversationSettings = [
+  'permission_mode',
+  'memory_enabled',
+  'model_id',
+  'thinking',
+  'response_mode',
+  'max_subagent_calls',
+  'max_concurrent_subagents',
+  'subagent_model_ids',
+] as const
 const conversations: Conversation[] = [
   {
     ...conversationDefaults,
@@ -567,6 +577,9 @@ export async function mockRequest<T>(url: string, init?: RequestInit): Promise<T
         created_at: now(),
         updated_at: now(),
         message_count: 0,
+      }
+      for (const key of conversationSettings) {
+        if (body[key] !== undefined) Object.assign(conversation, { [key]: body[key] })
       }
       conversations.unshift(conversation)
       result = conversation

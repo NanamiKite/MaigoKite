@@ -71,17 +71,25 @@ function hideWhenHidden() {
 }
 function hide() {
   cancel()
-  if (!node) return
-  if (host) undesign(host)
-  host = null
-  node.classList.remove('is-visible')
-  node.setAttribute('aria-hidden', 'true')
   document.removeEventListener('keydown', hide)
   document.removeEventListener('pointerdown', hide, true)
   document.removeEventListener('scroll', follow, true)
   window.removeEventListener('resize', follow)
   window.removeEventListener('blur', hide)
   document.removeEventListener('visibilitychange', hideWhenHidden)
+  if (!node) return
+  if (host) undesign(host)
+  host = null
+  node.classList.remove('is-visible')
+  node.setAttribute('aria-hidden', 'true')
+}
+function listen() {
+  document.addEventListener('keydown', hide)
+  document.addEventListener('pointerdown', hide, true)
+  document.addEventListener('scroll', follow, true)
+  window.addEventListener('resize', follow)
+  window.addEventListener('blur', hide)
+  document.addEventListener('visibilitychange', hideWhenHidden)
 }
 function show(element: HTMLElement, value: string) {
   cancel()
@@ -94,12 +102,7 @@ function show(element: HTMLElement, value: string) {
   place()
   tooltipNode.classList.add('is-visible')
   tooltipNode.setAttribute('aria-hidden', 'false')
-  document.addEventListener('keydown', hide)
-  document.addEventListener('pointerdown', hide, true)
-  document.addEventListener('scroll', follow, true)
-  window.addEventListener('resize', follow)
-  window.addEventListener('blur', hide)
-  document.addEventListener('visibilitychange', hideWhenHidden)
+  listen()
 }
 
 export const vTooltip: ObjectDirective<HTMLElement, string | undefined> = {
@@ -109,8 +112,10 @@ export const vTooltip: ObjectDirective<HTMLElement, string | undefined> = {
     const enter = (event: PointerEvent) => {
       if (event.pointerType !== 'mouse' || !text.value) return
       cancel()
+      listen()
       timer = setTimeout(() => {
         if (texts.has(element) && text.value && onScreen(element)) show(element, text.value)
+        else if (!host) hide()
       }, hoverDelay)
     }
     const focus = () => {
@@ -118,7 +123,7 @@ export const vTooltip: ObjectDirective<HTMLElement, string | undefined> = {
     }
     const leave = () => {
       cancel()
-      if (host === element && !element.matches(':focus-visible')) hide()
+      if ((host === element && !element.matches(':focus-visible')) || !host) hide()
     }
     const unfocus = () => {
       if (host === element) hide()
@@ -151,6 +156,6 @@ export const vTooltip: ObjectDirective<HTMLElement, string | undefined> = {
     listeners.get(element)?.()
     listeners.delete(element)
     texts.delete(element)
-    if (host === element) hide()
+    if (host === element || !host) hide()
   },
 }

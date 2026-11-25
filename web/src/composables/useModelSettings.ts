@@ -241,11 +241,11 @@ export function useModelSettings() {
   const hasUnsavedDraft = computed(
     () =>
       mode.value === 'editor' &&
-      !persisting.value &&
       (original.value ? isDirty.value : draftFingerprint() !== openedFingerprint),
   )
 
   async function canLeave() {
+    if (persisting.value) return false
     return (
       !hasUnsavedDraft.value ||
       (await confirmAction(t('模型配置尚未保存，离开会丢失修改。继续？'), false))
@@ -402,6 +402,7 @@ export function useModelSettings() {
   }
 
   async function closeEditor() {
+    if (persisting.value) return
     if (
       hasUnsavedDraft.value &&
       !(await confirmAction(t('模型配置尚未保存，返回模型列表会丢失修改。继续？'), false))

@@ -297,6 +297,12 @@ export const useSessionStore = defineStore('session', () => {
     title = '',
     folderId = workspace.selectedId,
     subagents?: SubagentSettings,
+    config: {
+      permissionMode?: PermissionMode
+      memoryEnabled?: boolean
+      modelId?: string
+      thinking?: string
+    } = {},
   ) {
     try {
       const defaults = copySubagentSettings(subagents || useSettingsStore().subagentDefaults)
@@ -316,6 +322,10 @@ export const useSessionStore = defineStore('session', () => {
           max_subagent_calls: defaults.calls,
           max_concurrent_subagents: defaults.concurrent,
           subagent_model_ids: defaults.modelIds,
+          permission_mode: config.permissionMode,
+          memory_enabled: config.memoryEnabled,
+          model_id: config.modelId,
+          thinking: config.thinking,
         }),
       )
       showArchived.value = false

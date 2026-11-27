@@ -91,7 +91,8 @@ def _file_write_impl(
 
 FILE_WRITE_DESCRIPTION = (
     "Write or overwrite the contents of a file at the given path. "
-    "Creates parent directories if needed and supports configurable encoding."
+    "Creates parent directories if needed and supports configurable encoding. "
+    "Requires user approval in restricted permission modes."
 )
 
 

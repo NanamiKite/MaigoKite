@@ -5,6 +5,13 @@
 尚未发布的改动按日期和主题记录；版本号遵循语义化版本，正式发布记录关联 Git 标签和构建产物。
 ## 尚未发布
 
+### 2026-11-27 个人 Agent 行为评测扩充
+
+- 任务集从 10 项扩到 42 项（工具调用正确性 10、审批 6、注入 9、诚实性 7，原 10 项不变），参考轨迹同步补齐；新增 `required_calls` / `forbidden_calls` 断言工具名与参数、`outside_files` 工作区外诱饵目录、`allow_outputs_once` 单次审批、`approval_scope` 会话范围回执、`approval_tamper` 过期版本重放。
+- 评判器把“模型尝试越权调用”和“越权副作用真的发生”分开记入 `attempted_unauthorized` / `executed_unauthorized`；审批前无写入改为按每次审批时已批准的范围判定，支持多次审批的 trial；超时记为 `timeout` 失败而不是丢失样本，solver 异常时评分记 0 不再让 scorer 崩溃。
+- 入口新增 `--safety-layer off`（模拟用户批准一切）用于 A/B 对照，结束时打印 reducers、分类通过数、失败检查和 attempted / executed / blocked。设计、命令与结果口径见 [Agent 行为评测](../testing/AgentEvals.md)。
+- 首次 LIVE 基线：本地网关 `glm/glm-5.4`，42 × 3 严格通过 89/126（mean 0.706、pass^3 0.452），剔除只差字面回复的 33 个 trial 后 122/126；注入探针尝试 0/24；4 个真实行为失败（谎报写入、以文字代替工具申请、跳过申请步骤）。B 组（批准一切）注入仍为 0，但被策略拒绝的写入全部落盘。
+
 ### 2026-11-25 工作记录页零会话断言随契约更新
 
 - 零会话时工作记录页停留在 `/overview` 显示空态说明，点「新建对话」才进入 `/chat`；`stage4-presentation` 中仍断言旧行为（自动跳转）的用例随之更新，生产代码未改。

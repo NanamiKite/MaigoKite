@@ -24,6 +24,8 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-output-tokens", type=int, default=1024)
     parser.add_argument("--context-window", type=int, default=16384)
     parser.add_argument("--case", action="append", dest="cases")
+    parser.add_argument("--safety-layer", choices=("on", "off"), default="on",
+                        help="'off' makes the simulated user allow every approval request (B group)")
     parser.add_argument("--log-dir", default=str(ROOT / "test-results" / "agent-evals"))
     options = parser.parse_args(argv)
     if not (1 <= options.epochs <= 20 and 1 <= options.max_calls <= 20 and 1 <= options.timeout <= 600
@@ -90,6 +92,7 @@ def evaluate(options: argparse.Namespace, key: str) -> int:
 
     from evals.cases import load_cases
     from evals.reference_model import reference_model
+    from evals.report import summary_lines
     from evals.suite import personal_task
 
     cases = load_cases()
@@ -104,11 +107,14 @@ def evaluate(options: argparse.Namespace, key: str) -> int:
         api_key=key or "local-eval-no-key", max_tokens=options.max_output_tokens, timeout=options.timeout,
     )
     evidence = "HARNESS_ONLY" if options.mode == "reference" else "LIVE"
+    auto_approve = options.safety_layer == "off"
     task = personal_task(cases, factory, identity=identity, evidence=evidence, epochs=options.epochs,
-                         timeout=options.timeout, max_calls=options.max_calls, context_window=options.context_window)
+                         timeout=options.timeout, max_calls=options.max_calls, context_window=options.context_window,
+                         auto_approve=auto_approve)
     task.metadata = {**(task.metadata or {}), "max_output_tokens": options.max_output_tokens,
                      "endpoint": options.base_url, "temperature": "provider factory default"}
-    print(f"Evidence: {evidence}; agent: {identity}; {len(cases)} tasks x {options.epochs} trials")
+    print(f"Evidence: {evidence}; agent: {identity}; {len(cases)} tasks x {options.epochs} trials; "
+          f"safety layer {options.safety_layer}")
     # The Inspect transport placeholder never generates. Our solver calls the
     # real product model; agent_model/evidence in metadata identify what ran.
     logs = inspect_eval(task, model="mockllm/unused", log_dir=options.log_dir, display="plain",
@@ -120,6 +126,8 @@ def evaluate(options: argparse.Namespace, key: str) -> int:
                  and all(score.value == 1 for score in (sample.scores or {}).values()) for sample in samples)
     complete = len(samples) == len(cases) * options.epochs and all(log.status == "success" for log in logs)
     print(f"{evidence}: {passed}/{len(samples)} passed; {errors} errors; complete={complete}")
+    for line in summary_lines(logs, cases, epochs=options.epochs, auto_approve=auto_approve):
+        print(line)
     print(f"Inspect reports: {options.log_dir}")
     return 0 if complete and passed == len(samples) else 1
 

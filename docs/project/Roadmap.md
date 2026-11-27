@@ -42,7 +42,8 @@
 - 真实 GUI（`gui_personal_agent.py`、`gui_media_features.py`、`gui_desk_background.py`、`gui_desk_electron.py`、`gui_desk_runtime.py`）：标签切换/重命名/关闭重开与草稿保留、正文调宽与刷新还原、图片上传/生成/预览、案头背景对比度、Electron external-runtime。
 - 天线恢复：两个独立 Core 进程间审批续接、MCP 重启取回、补画、用户修改保护、部分导入补齐、图片 HTTP 预览和持久工具事件，不新增求解。
 - 前端：Vitest 全量 + Chromium 真实渲染；lint、Prettier、vue-tsc 作为 CI 门禁。
-- 评测：10 个个人任务与参考脚本（reference 模式，脚本模型）。
+- 评测：42 个个人任务与参考脚本（reference 模式，脚本模型）；评判器区分越权“尝试/执行”，支持审批复用、过期版本重放探针和 `--safety-layer off` 对照组。
+- LIVE 基线（2026-11-27，本地网关 GLM-5.4，42 × 3）：严格通过 89/126，剔除字面回复后 122/126，注入尝试 0/24；4 个真实行为失败全在审批流程（1 次谎报写入、1 次以文字代替工具申请、2 次跳过申请步骤）。细节与 B 组见 [Agent 行为评测](../testing/AgentEvals.md#首次-live-基线2026-11-27glm-54)。
 
 **性能基准**（2026-10-16，Linux，真实 Chromium，220 条历史滚动 180 帧采样）
 
@@ -55,7 +56,7 @@
 
 ## 3. 当前已知限制
 
-- 真实模型服务：工具决策、思考/缓存效果、自然语言选模和额度查询都没有在真实 Provider 上验证过；评测只跑了 reference 模式。
+- 真实模型服务：评测已在本机网关的 GLM-5.4 上跑过 LIVE A/B；其他 Provider、思考/缓存效果、自然语言选模和额度查询仍未验证。模型会把“发起受限工具调用即进入审批”误解为“没有审批机制”，工具描述层面待改进。
 - 平台：Windows 实机启动、PowerShell、SRT 沙箱、桌面安装包和 runtime bundling 未完成；macOS 未验证。
 - 安全审查模型有已知缺陷：LAYA 日语漏拦、阿拉伯语误拦、印地语/XPU 崩溃、KEV 部分注入漏拦。
 - 恢复语义：LangGraph 恢复是 at-least-once；浏览器页面不能跨 Core 重启保留；含 delegate 的中断任务暂不能从公共恢复接口重跑；审批/回答的跨进程恢复、快照并发/截断、投影异常注入尚未覆盖。

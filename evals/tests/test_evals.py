@@ -22,13 +22,21 @@ CASES = load_cases()
 
 
 def reference_outcome(case: Case) -> Observation:
+    events = [
+        {"type": kind, "payload": {"tool_call_id": f"ref_{index}", "tool_name": call.tool, "arguments": call.arguments}}
+        for index, call in enumerate(case.required_calls)
+        for kind in ("tool.proposed", "tool.completed")
+    ]
+    decisions = (["allow"] if case.approval != "deny" else []) + (["deny"] if case.require_denial else [])
     return Observation(
         status="succeeded", response=case.answer,
         files={**case.files, **case.expected_files,
                **{path: json.dumps(value, ensure_ascii=False, indent=2) for path, value in case.json_files.items()}},
+        events=events,
         task_statuses=["succeeded"] * len(case.prompts),
-        decisions=["deny"] if case.require_denial else ["allow"] if case.approval == "allow_outputs" else [],
-        approval_snapshots=[dict(case.files)] if case.approval == "allow_outputs" else [],
+        decisions=decisions,
+        approval_snapshots=[dict(case.files)] if case.approval != "deny" else [],
+        approval_tamper="rejected" if case.approval_tamper == "stale_version" else "",
     )
 
 

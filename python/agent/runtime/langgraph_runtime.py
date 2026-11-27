@@ -82,6 +82,7 @@ from agent.tools.permission_mgr import PermissionManager, PolicyDecision
 
 ModelResolver = Callable[[str, str, str], Awaitable[tuple[str, BaseChatModel]]]
 
+
 class RunHandle:
     """One run owns one root asyncio task and an event queue."""
 

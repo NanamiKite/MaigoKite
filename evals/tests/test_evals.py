@@ -143,8 +143,8 @@ async def test_timeout_cancels_core_and_removes_trial(tmp_path: Path) -> None:
                 stopped.set()
 
     stopped = asyncio.Event()
-    with pytest.raises(TimeoutError):
-        await run_trial(CASES[0], SlowModel(steps=[]), timeout=1, temp_parent=tmp_path)
+    result = await run_trial(CASES[0], SlowModel(steps=[]), timeout=1, temp_parent=tmp_path)
+    assert result.status == "timeout"
     assert stopped.is_set()
     assert list(tmp_path.iterdir()) == []
 

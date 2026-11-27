@@ -3,15 +3,15 @@
 > 本文说明独立天线包的工程契约、MMANA 兼容范围、方向图、材料和预算，以及求解器选择。
 > 当前采用未修改的 pymininec，通过公开接口适配，不自研数值内核。MaigoKite 是可选宿主，接入遵循 [运行时设计](AgentRuntime.md) 和 [MCP 集成](../agent-capabilities/mcp/mcp-integration.md)；领域包不依赖这些产品 API。
 
-当前实现包括 [独立 `antenna-design` 工程入口](../../extensions/antenna_design/README.md)、可选 MCP Server 和宿主结果适配。它接受显式 JSON 或受限 MAA 输入，通过公开 solver API 计算，保存复电流、原始远场、PNG/SVG 和完整性清单，并限制单次计算进程的运行时间。经批准后，宿主可将结果导入当前对话目录并展示图片。包不依赖主应用或 LangGraph；Linux 的计算、取消、取回和导入已有定向运行记录，不代表完整工程验证或 Windows 验收。
+当前实现包括 [独立 `antenna-design` 工程入口](../../extensions/antenna_design/README.md)、可选 MCP Server 和宿主结果适配。它接受显式 JSON 或受限 MAA 输入，通过公开 solver API 计算，保存复电流、原始远场、PNG/SVG 和完整性清单，并限制单次计算进程的运行时间。经批准后，宿主可将结果导入当前对话目录并展示图片。包不依赖主应用或 LangGraph；Linux 的计算、取消、取回和导入已有定向运行记录；完整工程验证和 Windows 尚未验收。
 
-已有数值可以取回、补画或导出，不必因缺图重新求解。数值阶段先保存并校验，绘图失败不丢弃完整数值；`render_status` 与工程验证状态分开。随包 Skill 用现有文件工具记录需求、输入版本和 run_id，供后续继续，不充当阶段执行器。MCP 工具超时可按服务设置。
+已有数值可以取回、补画或导出，不必因缺图重新求解。数值阶段先保存并校验，绘图失败不丢弃完整数值；`render_status` 与工程验证状态分开。随包 Skill 用现有文件工具记录需求、输入版本和 run_id，供后续继续，只做记录，不执行阶段。MCP 工具超时可按服务设置。
 
 一个操作员指定的结果根目录对应一个项目。独立 SQLite 保存求解准入和限额，准入先提交，失败或取消不退回，跨回合和重启保留；查询、复用和补画不扣次数。`antenna.project_status` 根据项目记录、当前 AnyIO owner 和产物校验返回状态，不另存一套 worker 状态机。LLM/token 预算、完整阶段准入和 AV680 加载结构支持仍未实现。
 
 2026-10-19 的求解器评估已完成 A01/A02、六例主频和 23 项多导线/扫频参考的对照，也检查了冻结接线的复电流幅相及五点材料表示。这些结果支持继续采用 pymininec，但正式工程验收 profile、方环缺失接点和更广的材料/结构覆盖尚未完成，不能称为全面兼容认证。详情见[工程评估](../../experiments/mmana_compatibility/ENGINEERING.md)及[实验范围](../../experiments/mmana_compatibility/README.md)。
 
-独立 MCP 已提供“规划次数→尺寸搜索→两档网格复核→补画→候选包”，内部不调用 LLM。自动需求访谈、工作流级 LLM/token 预算和完整制造验收仍未交付。Linux 恢复验收包括两个 Core 进程间审批续接、MCP 重启取回、补画/取消、冲突保护、图片 API 和历史工具事件；25 项恢复检查没有新增求解。后续搜索交付及固定匹配另有定向记录，不能与自然语言自主编排、完整 GUI、Windows 或强杀恢复混为一项通过，详见 [路线图](../project/Roadmap.md#2026-10-23-天线恢复与生产调用验收)。
+独立 MCP 已提供“规划次数→尺寸搜索→两档网格复核→补画→候选包”，内部不调用 LLM。自动需求访谈、工作流级 LLM/token 预算和完整制造验收仍未交付。Linux 恢复验收包括两个 Core 进程间审批续接、MCP 重启取回、补画/取消、冲突保护、图片 API 和历史工具事件；25 项恢复检查没有新增求解。后续搜索交付及固定匹配另有定向记录；自然语言自主编排、完整 GUI、Windows 和强杀恢复还没测，详见 [路线图](../project/Roadmap.md#1-已实现的核心能力)。
 
 绘图证据与计算证据分别记录：原 `environment.json` 随数值保留；`render-environment.json` 与 `render-source/antenna_workflow/` 记录当前绘图实现和依赖。补画准备失败在已创建的新目录内尽力保存安全失败回执，不覆盖源文件、不退还预留或自动重放。
 
@@ -23,9 +23,9 @@ CLI `connect` 生成本机 MCP + Skill 联合配置；宿主使用原设置 API 
 
 用户可微调频点并提供架设条件：`prepare_revision` 读取旧模型，显式更新 targets、刚体旋转、馈点高度、地面和材料；旧 run_id 不可继续充当新结果。建筑/屋顶/桅杆文字只保留为未模拟条件，不以自然语言注释替代物理模型。逐频匹配使用独立 `matching` 电路入口，复用 scikit-rf Circuit 与 SciPy least_squares；输入为已核验的原生 R+jX，输出拓扑和理想 L/C，并通过 design/export 进入报告及 ZIP。各频点须切换或调谐，不是固定多波段网络，不改变原辐射评价或制作状态。[成熟组件依据](https://scikit-rf-official.readthedocs.io/en/latest/examples/matching/Impedance%20Matching.html)
 
-固定元件复核使用 `evaluate_matching`：相同 L/C 应用于各个已保存的负载阻抗，不逐频重调、不猜测点间阻抗。可选 SWR 门槛来自调用方，缺省只报告数值。export.matching_checks 归档每组输入、逐点结果、辐射对照和原始证据，且要求与交付模型的物理 hash/系统阻抗一致。它验证的是理想电路的离散样本，不改变 radiation_status，也不证明连续带宽、元件损耗、公差、巴伦或功率。
+固定元件复核使用 `evaluate_matching`：相同 L/C 应用于各个已保存的负载阻抗，不逐频重调、不猜测点间阻抗。可选 SWR 门槛来自调用方，缺省只报告数值。export.matching_checks 归档每组输入、逐点结果、辐射对照和原始证据，且要求与交付模型的物理 hash/系统阻抗一致。它只验证理想电路的离散样本，不改变 radiation_status，也不覆盖连续带宽、元件损耗、公差、巴伦或功率。
 
-补充判断：四变体总场 RMS 主要受 CSV 的 0.01 dB 导出步长影响；候选同样保留两位小数后有 98.5%～100% 的有效样本与参考相同。该量级不构成继续修改内核或自研求解器的依据。保留电流/电抗差异和未覆盖语义，不把当前模型的方向图接近等同于全面 MMANA 兼容。
+补充判断：四变体总场 RMS 主要受 CSV 的 0.01 dB 导出步长影响；候选同样保留两位小数后有 98.5%～100% 的有效样本与参考相同。该量级不足以支持继续修改内核或自研求解器。保留电流/电抗差异和未覆盖语义；方向图接近只是其中一项，全面兼容还要看其他语义。
 
 ## 1. 产品目标与不可替代的交付条件
 
@@ -35,7 +35,7 @@ CLI `connect` 生成本机 MCP + Skill 联合配置；宿主使用原设置 API 
 
 首版范围是适合 thin-wire 方法的导线/细导体结构，覆盖 HF、6m、VHF、UHF 的适用模型。dipole、inverted-V、OCF/folded dipole、vertical/ground plane、J-pole、loop/delta/quad、Yagi、Moxon、collinear、phased array、加载/陷波、多频与自定义几何均属于目标范围，但不能把“几何能表达”标成“馈电、材料与数值行为已验证”。PCB、微带、喇叭、波导、复杂面导体、介质天线和手机内部天线不进入本后端。
 
-实现顺序固定为直接集成、组合现有组件、薄适配，最后才是补缺。只有现有组件不能满足已定义的 MMANA-GAL 可验证兼容性要求时，才补对应缺失部分；代码组织偏好不构成重写理由。
+实现顺序固定为直接集成、组合现有组件、薄适配，最后才是补缺。只有现有组件不能满足已定义的 MMANA-GAL 可验证兼容性要求时，才补对应缺失部分；代码组织偏好不足以重写。
 
 天线核心工作流不得依赖 MaigoKite 专有 Runtime API，也不得依赖 LangGraph、LangChain 的状态、消息或执行对象。同仓库开发不改变依赖方向：宿主适配领域包，领域包不导入宿主。LangGraph 仅可作为可替换的执行适配器，不是核心包的必装依赖。后续独立建仓只移动包、资料与构建元数据，不需要重新设计领域流程、数据契约或执行边界。
 
@@ -47,7 +47,7 @@ CLI `connect` 生成本机 MCP + Skill 联合配置；宿主使用原设置 API 
 - 可制作：具体材料、尺寸、公差、接头、馈电匹配、安装与调试说明。
 - 可观察：保留原始方向图、计算证据、阶段预算和实际用量，不能只返回自然语言与图片。
 
-“可验证”不等于“已实测”，“仿真收敛”不等于“满足需求”，“匹配良好”不等于“辐射效率良好”。实物验证另列状态，不由 LLM 自行宣布完成。
+“可验证”“已实测”“满足需求”“辐射效率良好”是不同状态；实物验证单独记录，由人确认。
 
 ## 2. 求解器评估结论
 
@@ -72,9 +72,9 @@ CLI `connect` 生成本机 MCP + Skill 联合配置；宿主使用原设置 API 
 3. **负载系数**：MMANA 帮助以 A 为 Laplace 分子、B 为分母；pymininec 的 `Laplace_Load(a, b)` 相反。必须按意义映射，不能按字段名字透传；L/C/Q 的频率语义还须单独验证。[MMANA 负载说明](https://hamsoft.ca/pages/mmana-gal/mmana-gal_basic_help/MMANA-GAL%20basic%20help.htm)、[pymininec Laplace_Load 源码](https://raw.githubusercontent.com/schlatterbeck/pymininec/master/mininec/mininec.py)
 4. **地面模型**：MMANA-GAL 公开帮助说明阻抗采用理想导电地面假设，实际地面参数用于远场；NEC2 GN 提供有限地面近似及 Sommerfeld/Norton。两者存在模型层差异，不能通过单位换算消除。[MMANA-GAL 帮助](https://hamsoft.ca/pages/mmana-gal/mmana-gal_basic_help/MMANA-GAL%20basic%20help.htm)、[NEC2 GN](https://www.nec2.org/part_3/cards/gn.html)
 5. **激励位置**：NEC EX 的 wire tag/segment 激励不是 MMANA pulse 表达式；翻译需要保存位置、方向和复电压的映射证据。[NEC2 EX](https://www.nec2.org/part_3/cards/ex.html)
-6. **原始 MMANA 不等于 GAL**：公开 MMANA 的 README 说明历史 C++ Builder 环境；计算源码仍直接写 GUI 日志。GAL 官方说明使用修改后的 MININEC3。不能只提取一个 `mininec3.cpp` 就宣称兼容。[MMANA README](https://github.com/ja7ude/MMANA)、[计算源码](https://github.com/ja7ude/MMANA/blob/master/mininec3.cpp)、[GAL 官方说明](https://gal-ana.de/basicmm/ru/)
+6. **原始 MMANA 与 GAL 不是同一实现**：公开 MMANA 的 README 说明历史 C++ Builder 环境；计算源码仍直接写 GUI 日志。GAL 官方说明使用修改后的 MININEC3。只提取一个 `mininec3.cpp` 不足以判断兼容。[MMANA README](https://github.com/ja7ude/MMANA)、[计算源码](https://github.com/ja7ude/MMANA/blob/master/mininec3.cpp)、[GAL 官方说明](https://gal-ana.de/basicmm/ru/)
 
-本次参考端采用用户于 2026-10-19 提供的 **MMANA-GAL v1.2.0.20**，候选求解器为 **pymininec 1.2.0**，两者版本不能混用。此前调查的其他 GAL 发布版不代表本次采集版本，也不要求用户升级后覆盖当前参考数据。版本来源和对应输入/结果 hash 记录在 [reference_identity.json](../../experiments/mmana_compatibility/reference_identity.json)。正式冻结 reference 时再补可执行文件 hash、配置和运行环境；当前版本信息足以继续差异分析，不以缺少二进制 hash 暂停数值调查。
+本次参考端采用用户于 2026-10-19 提供的 **MMANA-GAL v1.2.0.20**，候选求解器为 **pymininec 1.2.0**，两者版本不能混用。此前调查的其他 GAL 发布版不是本次采集版本，也不要求升级后覆盖当前参考数据。版本来源和对应输入/结果 hash 记录在 [reference_identity.json](../../experiments/mmana_compatibility/reference_identity.json)。正式冻结 reference 时再补可执行文件 hash、配置和运行环境；当前版本信息足以继续差异分析，缺少二进制 hash 不影响数值调查。
 
 来源许可也必须在采用前核清：原始 MMANA 仓库 LICENSE 是 LGPL-2.1 文本，而相关源码头声明 LGPL-3.0-or-later；GAL Basic 官方页面限定私人非商业用途。这里记录来源差异，不作许可证兼容性结论，不下载分发 GAL，不复制代码进入主项目。独立进程不自动消除许可证义务。[MMANA LICENSE](https://github.com/ja7ude/MMANA/blob/master/LICENSE)、[源码声明](https://github.com/ja7ude/MMANA/blob/master/mininec3.cpp)、[GAL 使用范围](https://gal-ana.de/basicmm/ru/)
 
@@ -102,18 +102,18 @@ CLI `connect` 生成本机 MCP + Skill 联合配置；宿主使用原设置 API 
 | xnec2c 内置优化 | 支持 batch/headless，Simplex/PSO、加权目标与 `.opt` 配置 | 如选 NEC 路线先评估；加权目标不是 Pareto 保证，最大迭代数也不是频点求解次数硬限额 [手册](https://www.xnec2c.org/) |
 | antenna-optimizer | 通过 PyNEC 与 PGApack/pgapy 做天线优化，已有多目标/NSGA-III、约束与馈线建模 | 适合 NEC 路线调查；不是可直接替换成任意 solver 的通用入口。需计入 pgapy/PyNEC 原生依赖成本，不与另一个优化框架同时默认安装 [项目](https://github.com/schlatterbeck/antenna-optimizer)、[依赖声明](https://raw.githubusercontent.com/schlatterbeck/antenna-optimizer/master/pyproject.toml) |
 | SciPy differential_evolution | 支持 bounds、constraints、rng 和 callback，适合将已有 solver 作为评价函数 | 不新写搜索算法；仅当后端自带优化不适合时组合。其单目标输出不能包装成真正 Pareto 前沿 [官方 API](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.differential_evolution.html) |
-| YAAS | 已有 `.maa` 导入、项目文件、NEC 导出和实测扫频比较；方向图功能属于其开发分支范围 | 导入限制为自由空间、单个居中无偏移源、无集中负载等，并明确采用均匀 NEC 网格近似 MMANA taper。可调查格式处理/拒绝规则复用，不能作为严格兼容核心；导入不代表支持 `.maa` 导出 [项目说明](https://github.com/ftomasczik/yaas-antenna-simulator) |
+| YAAS | 已有 `.maa` 导入、项目文件、NEC 导出和实测扫频比较；方向图功能属于其开发分支范围 | 导入限制为自由空间、单个居中无偏移源、无集中负载等，并明确采用均匀 NEC 网格近似 MMANA taper。可调查格式处理/拒绝规则复用，不能作为严格兼容核心；导入不支持 `.maa` 导出 [项目说明](https://github.com/ftomasczik/yaas-antenna-simulator) |
 | mcp-nec2-antenna | 九个工具覆盖五种建模模板、仿真、NEC 导出与查询 | 已列出的接口没有通用 wire 导入、`.maa` 往返或优化入口；先查扩展点，不将缺少入口误判为必须重写 NEC 调用 [工具列表](https://github.com/RFingAdam/mcp-nec2-antenna#tools) |
 
 这些是具体复用候选，不因 README 自称稳定或存在发布版本就判为已满足生产条件。采用时固定 release/commit、依赖锁和许可证清单，并核实 Python 3.14 与 Windows/Linux；网页指向 `main/master` 的本次调查不能充当可复现的构建锁。YAAS 文档声明的 Python 3.13 环境尤其不能直接计为本项目 3.14 验收通过。
 
 新增两个必须在适配入口暴露的行为：pymininec `Wire.compute_segments()` 捕获 `Taper_Error` 后会退回均匀分段，因此必须记录实际网格和回退，重新检查适用性/收敛，而非声称请求的 taper 已执行；其远场增益对低于阈值的样本使用 `-999`，应保留原始标记并转换为“低于数值下限”，不得当成真实 -999 dBi 或确定的物理零场。[对应实现](https://raw.githubusercontent.com/schlatterbeck/pymininec/master/mininec/mininec.py)
 
-求解器采用 pymininec，独立薄适配已实现；nec2c 仍是未接入的交叉检查候选。两个静态切面使用 matplotlib，后续交互 3D 优先复用现成工具。参数搜索已选择 SciPy；antenna-optimizer 的 PyNEC/PGApack 路线会额外引入求解器和原生依赖，不在当前路径同时安装。现有天线 MCP 绑定 NEC 不构成重建多 solver 平台的理由；目前也没有证据支持自研数值内核、优化算法或绘图库。
+求解器采用 pymininec，独立薄适配已实现；nec2c 仍是未接入的交叉检查候选。两个静态切面使用 matplotlib，后续交互 3D 优先复用现成工具。参数搜索已选择 SciPy；antenna-optimizer 的 PyNEC/PGApack 路线会额外引入求解器和原生依赖，不在当前路径同时安装。现有天线 MCP 绑定 NEC 不足以重建多 solver 平台；目前也没有证据支持自研数值内核、优化算法或绘图库。
 
 ### 2.5 采用组合与停止条件
 
-当前组合是 `pymininec + 必要的 MMANA 语义适配 + SciPy + matplotlib + 官方 MCP SDK`，匹配计算另复用 scikit-rf。它已有独立工程入口和参数搜索，不代表整个产品栈已通过 GAL 验证。NEC 路线仍作为独立对照候选；只有相应兼容 profile 通过，才能作为该范围的生产后端。
+当前组合是 `pymininec + 必要的 MMANA 语义适配 + SciPy + matplotlib + 官方 MCP SDK`，匹配计算另复用 scikit-rf。它已有独立工程入口和参数搜索，整个产品栈尚未通过 GAL 验证。NEC 路线仍作为独立对照候选；只有相应兼容 profile 通过，才能作为该范围的生产后端。
 
 | 方案 | 预期维护面与成本 | 决策门槛 |
 | --- | --- | --- |
@@ -121,7 +121,7 @@ CLI `connect` 生成本机 MCP + Skill 联合配置；宿主使用原设置 API 
 | 组合现有 solver、优化与绘图组件 | 中等适配成本，保留领域契约与数值语义映射，不维护数值内核 | 物理位置、连接、材料和场定义正确，独立网格收敛，工程结果满足选定 profile；否则暂停该 profile |
 | 提取原始 MMANA 计算部分 | 成本高，需承担历史平台耦合、数值维护与来源许可核对 | 必须先证明前两条路径不能满足关键语义，且提取确有收益；当前不进入实施 |
 
-成熟度分层判断：MCP 官方 SDK、LangGraph、SciPy、matplotlib 提供可复用基础设施；专业 solver/格式工具仍需各自的数值和平台证据；天线 MCP 的存在不等于它已经是满足本工作流的成熟完整实现。不以 star 数、README 示例或项目自述替代验证。
+成熟度分层判断：MCP 官方 SDK、LangGraph、SciPy、matplotlib 提供可复用基础设施；专业 solver/格式工具仍需各自的数值和平台证据；天线 MCP 的存在不表示它已经满足本工作流。star 数、README 示例或项目自述都不能替代验证。
 
 现有 MCP 的架构文档明确使用内存模型映射，重启丢失；当前 README 已声明从 Apache-2.0 改为 AGPL-3.0-or-later，而架构页仍保留旧许可文字。采用前必须锁定具体提交并核对 LICENSE，不能从旧说明推定可直接复制。这里不作许可证适用结论。[架构](https://github.com/RFingAdam/mcp-nec2-antenna/blob/main/docs/architecture.md)、[当前项目说明](https://github.com/RFingAdam/mcp-nec2-antenna)
 
@@ -154,15 +154,15 @@ MaigoKite adapter                      对应的薄 adapter
 
 领域层不新增常驻专家 Agent。需求、候选取舍、材料依据和结果判据属于领域契约；已接入的输入与求解预算由确定性代码检查，完整阶段准入仍是后续目标。调用模型、调度聊天、暂停与恢复由宿主承担。核心函数和类型不含 LangGraph、LangChain、MaigoKite 或前端 DTO，不注入整个 Runtime，也不重建通用执行引擎。
 
-同仓库的 `extensions/antenna_design/` 已建立独立 Python distribution：自有 `pyproject.toml`、`uv.lock`、LICENSE、README、输入示例和 `src/antenna_workflow/`。基础安装只含 Pydantic，求解/绘图放在 `engineering` extra，官方 MCP SDK 放在 `mcp` extra，不进入普通聊天默认安装。当前工程 CLI 与可选 MCP stdio 入口共用 worker；没有创建尚未实现的领域阶段、持久化或执行框架空壳。MaigoKite 结果 adapter 已位于主应用集成层，只按版本化 MCP 传输回执接线。
+同仓库的 `extensions/antenna_design/` 已建立独立 Python distribution：自有 `pyproject.toml`、`uv.lock`、LICENSE、README、输入示例和 `src/antenna_workflow/`。基础安装只含 Pydantic，求解/绘图放在 `engineering` extra，官方 MCP SDK 放在 `mcp` extra，不进入普通聊天默认安装。当前工程 CLI 与可选 MCP stdio 入口共用 worker。MaigoKite 结果 adapter 已位于主应用集成层，只按版本化 MCP 传输回执接线。
 
 MCP 当前注册 17 个高层工具，包括新增的 `get_design_state`；完整清单和参数只在[独立包说明](../../extensions/antenna_design/README.md#高层工具)维护。`solve` 一次只做一次数值计算；`optimize / design` 可在项目限额内执行多个候选和频点。单实例只有一个计算槽，默认 worker 时限 20 秒，宿主工具时限默认 30 秒，可分别配置。
 
-`get_result` 取回原 run_id，不需原始输入；`render` 将核验过的数值复制到新 output_run_id 后补画，不调用 solver、不改旧目录。数值完整但图片不完整时可先发布数值，缺图不进入资源清单。`cancel` 按运行编号和可选调用身份停止 worker，清理后才确认；活跃状态来自进程所有权，历史结果来自磁盘校验。Linux 已有真实 MCP/solver 和生产 Core 显式工具记录，不等于自然语言、GUI 或跨平台验收，也没有注册主应用专用天线模式。
+`get_result` 取回原 run_id，不需原始输入；`render` 将核验过的数值复制到新 output_run_id 后补画，不调用 solver、不改旧目录。数值完整但图片不完整时可先发布数值，缺图不进入资源清单。`cancel` 按运行编号和可选调用身份停止 worker，清理后才确认；活跃状态来自进程所有权，历史结果来自磁盘校验。Linux 已有真实 MCP/solver 和生产 Core 显式工具记录；自然语言、GUI 和跨平台尚未验收，也没有注册主应用专用天线模式。
 
-`antenna-design` 是本地 distribution 名，`antenna_workflow` 是导入命名空间，不表示已经公开发布。后续包内职责如下；这是实现边界，不要求一次创建全部目录或空类：
+`antenna-design` 是本地 distribution 名，`antenna_workflow` 是导入命名空间，尚未公开发布。后续包内职责如下；这是实现边界，不要求一次创建全部目录或空类：
 
-| 包内位置 | 拥有的职责 | 不应依赖 |
+| 包内位置 | 职责 | 依赖边界 |
 | --- | --- | --- |
 | `contracts` / `domain` | Brief、材料依据、候选、阶段准入、预算与结果判据 | MaigoKite、HTTP/UI、LangGraph 执行对象 |
 | 可选执行适配器 | 将领域步骤交给现有执行器；MaigoKite 可用 LangGraph，独立 CLI 不必使用它 | 核心反向导入、`AgentCore` 私有方法 |
@@ -179,11 +179,11 @@ LangGraph 依赖只存在于外部执行适配器，其 `thread_id`、interrupt�
 
 领域包及天线 MCP 不导入 `agent.core`、`agent.runtime`、`agent.repository`、权限管理器、全局配置或产品事件模块；不使用动态导入、环境探测或 `sys.path` 修改绕过边界。配置、模型调用能力、存储和受限文件访问由组合入口显式提供。导入包本身不启动服务、不连接 MaigoKite 数据库、不读取宿主密钥。
 
-随包 `skills/antenna-design/SKILL.md` 可通过 `antenna-design skill` 查看或导出，不要求安装 MaigoKite SkillRegistry；宿主可登记为 Skill。当前内容是输入整理、文件记录与恢复操作指引；已强制执行输入校验、MCP 项目累计求解准入、单次时间限制、结果完整性与宿主权限。确定性阶段准入、LLM/token 预算和工程兼容判据仍待实现，不能用 Skill 文本替代。MCP 不选择用户偏好或替 Agent 接受结果；不建插件市场、通用 DI、Capability Framework 或另一套 Agent Loop。
+随包 `skills/antenna-design/SKILL.md` 可通过 `antenna-design skill` 查看或导出，不要求安装 MaigoKite SkillRegistry；宿主可登记为 Skill。当前内容是输入整理、文件记录与恢复操作指引；已强制执行输入校验、MCP 项目累计求解准入、单次时间限制、结果完整性与宿主权限。确定性阶段准入、LLM/token 预算和工程兼容判据仍待实现，Skill 文本不能替代这些机制。MCP 不选择用户偏好或替 Agent 接受结果；不建插件市场、通用 DI、Capability Framework 或另一套 Agent Loop。
 
 ### 3.2 最小外部契约
 
-本节描述完整领域流程的目标契约，不表示所有边界已经编码。当前已接通工程 MCP、项目求解准入和宿主文件导入；独立的模型决策、Brief/阶段存储与问题映射仍待实现。
+本节描述完整领域流程的目标契约，并非所有边界都已编码。当前已接通工程 MCP、项目求解准入和宿主文件导入；独立的模型决策、Brief/阶段存储与问题映射仍待实现。
 
 仅为实际 I/O 定义小型 typed callable 或必要的 `Protocol`，使用 dataclass/Pydantic 与标准 JSON Schema；不为每个领域对象创建接口或通用 ServiceContainer。契约属于领域包，宿主实现适配：
 
@@ -219,8 +219,6 @@ LangGraph 依赖只存在于外部执行适配器，其 `thread_id`、interrupt�
 
 MaigoKite adapter 将项目显式绑定到当前工作区文件夹与对话；独立宿主只需提供项目位置和授权范围。跨对话复用须显式选项目，不能通过长期记忆隐式带入其他工作流。修改需求或材料产生新 revision；旧验证和图表保留可查但标为过期。
 
-软件开发的跨模型接续另见包内 [agent.md](../../extensions/antenna_design/agent.md)，按不同开发对话分别记录负责范围、文件、进度、验证和下一步。它不属于上述领域状态存储或产品运行能力；OB11 等设计案例的数据不充当软件开发进度，开发交接也不进入产品 Skill 或自动上下文注入。
-
 ### 3.4 MaigoKite reference host 接入状态与缺口
 
 以下区分已有宿主结果适配与尚未实现的领域流程约束，不将现有聊天系统缺少领域能力判作聊天缺陷。
@@ -230,7 +228,7 @@ MaigoKite adapter 将项目显式绑定到当前工作区文件夹与对话；�
 | [Core 组合模型、工具与 Runtime](../../python/agent/core.py)；[API Execution 持有 HTTP 协程](../../python/agent/api/execution.py) | 组合根、HTTP/WS、退出时取消并等待的宿主机制 | Core、扩展重载和 task resume 当前认的是聊天 Runtime；新增 runner 必须纳入同一准入/退出边界，不能只启动无人管理的后台 Task |
 | [Runtime `_start_turn` / `recover`](../../python/agent/runtime/langgraph_runtime.py) | 官方 LangGraph/checkpointer 的使用经验 | 新回合只继承 messages；公开恢复只允许文件工具或已完成结构化结果的投影。不能通过增加 AgentState 字段得到跨回合项目，不能直接扩大成任意 MCP replay |
 | [ChatModelRuntime `get_langchain_model`](../../python/agent/models/runtime.py) | 配置、凭证、Provider 与 Core 持有的客户端 | adapter 借用模型调用，不复制 Provider 包装、不关闭共享客户端；模型请求仍需纳入领域预算，不能借用一整个聊天回合 |
-| [MCPClient](../../python/agent/mcp/client.py)、[MCPSettings](../../python/agent/extensions.py) | 官方 SDK、stdio 连接、环境与凭证管理；同连接有界资源读取，天线适配使用公开 meta 与 cancel 操作取得停止回执 | 当前仅 stdio，默认请求 30 秒；通用 MCP 的本地取消仍不证明远端停止。天线停止未获确认时也必须提示未知。资源 URI 不能被浏览器直接打开，读取上限不是传输层内存配额 |
+| [MCPClient](../../python/agent/mcp/client.py)、[MCPSettings](../../python/agent/extensions.py) | 官方 SDK、stdio 连接、环境与凭证管理；同连接有界资源读取，天线适配使用公开 meta 与 cancel 操作取得停止回执 | 当前仅 stdio，默认请求 30 秒；通用 MCP 的本地取消不能证明远端停止。天线停止未获确认时也必须提示未知。资源 URI 不能被浏览器直接打开，读取上限不是传输层内存配额 |
 | [MCPToolWrapper](../../python/agent/tools/mcp_wrapper.py)、[结果适配](../../python/agent/integrations/antenna.py) | 工具发现、命名与 metadata；显式启用后，成功求解转为有界回执、校验的本地文件/图片引用 | 通用 MCP 仍保留原始 data；专用投影不把原始数组/日志写入上下文。项目求解预算在服务端，不能当作整个工作流的 token 预算 |
 | [ProductToolMiddleware](../../python/agent/runtime/product_tools.py)、[PermissionManager](../../python/agent/tools/permission_mgr.py) | 实时权限决策与现有审批审计 | middleware 依赖产品 RunContext；直接调用 MCPClient 会跳过它。adapter 必须桥接政策和审计，不导入到领域包；不能信任 server 的只读标注自行降权 |
 | [ask_user_question](../../python/agent/tools/native/ask_user_question.py)、[Runtime `answer_question`](../../python/agent/runtime/langgraph_runtime.py) | 现有问题卡片、回答校验及版本语义 | 问题恢复绑定 tool_call_id 和聊天 checkpoint；领域问题须由宿主映射到对应执行器的等待/恢复入口，不能伪造聊天 ToolCall 来续接 |
@@ -239,9 +237,9 @@ MaigoKite adapter 将项目显式绑定到当前工作区文件夹与对话；�
 
 首版采用本地 stdio 与明确授权的项目目录，因此可以复用工作区文件预览；不为此新增云端 artifact 服务。文件不在该目录时拒绝引用或显式导入并校验，不让前端自动下载任意 MCP URL。领域包不解释 MaigoKite 的 folder ID，宿主不将本机绝对路径写成可移植 artifact 身份。
 
-固定资源先核验再导入 `antenna-results/<结果内容标识>/`，每次读/写重新核对会话目录及权限，最后写导入回执。部分失败保留已核验文件，不把成功计算改成失败、不自动重算。修改冲突给出稳定错误码和相对文件位置；用户保留并移走冲突文件后，用 get_result 或 get_delivery 补齐对应结果。未新增宿主 Runtime、业务表或 HTTP 资源代理；独立服务有自己的项目数据库。Linux 已复跑导入和生产显式工具链，完整 GUI/Windows 未验收。
+固定资源先核验再导入 `antenna-results/<结果内容标识>/`，每次读/写重新核对会话目录及权限，最后写导入回执。部分失败保留已核验文件，不把成功计算改成失败、不自动重算。修改冲突给出稳定错误码和相对文件位置；用户保留并移走冲突文件后，用 get_result 或 get_delivery 补齐对应结果。独立服务有自己的项目数据库。Linux 已复跑导入和生产显式工具链，完整 GUI/Windows 未验收。
 
-剩余领域步骤、问题映射和预算准入不应转成核心对宿主或 LangGraph 的依赖。不能在外层聊天 Loop 再执行一遍同一工程调用或另行扣除一份 workflow 预算；结果适配也不代表完整领域工作流已完成。
+剩余领域步骤、问题映射和预算准入不应转成核心对宿主或 LangGraph 的依赖。不能在外层聊天 Loop 再执行一遍同一工程调用或另行扣除一份 workflow 预算；完整领域工作流尚未完成。
 
 ### 3.5 宿主入口与恢复路由
 
@@ -262,7 +260,7 @@ Core 创建 adapter 并提供借用的模型/MCP 能力；API Execution 持有�
 - 在同一版本及已支持的平台环境中，项目快照/artifact 可从宿主映射导出并由独立入口读取；已有预算不会重置。活跃模型连接不承诺跨进程接管；尚在运行的 MCP job 必须查询确认，未知状态不能自动重放。
 - 提取独立仓库时只调整发布位置、安装与宿主适配依赖，不修改领域 schema、阶段规则、MMANA 映射、预算语义或公共调用接口。可选适配依赖须明确声明，不能从包顶层导入，不能依靠主应用间接安装。
 
-独立工程包、CLI 与 MCP Server 已创建，不导入 `agent`、LangGraph、实验脚本，也不调整 `sys.path`。领域阶段、模型预算与执行适配仍待实现，宿主结果适配不代替它们。单次 solve 使用一个新目录、一次求解；optimize/design 可组合多次，但每个新频点都经过持久准入。完整数值保存在 artifact，CLI stdout / MCP 只返回有界摘要和引用；同编号同输入的完成结果复用不新增求解。
+独立工程包、CLI 与 MCP Server 已创建，不导入 `agent`、LangGraph、实验脚本，也不调整 `sys.path`。领域阶段、模型预算与执行适配仍待实现，宿主结果适配不能代替这些部分。单次 solve 使用一个新目录、一次求解；optimize/design 可组合多次，但每个新频点都经过持久准入。完整数值保存在 artifact，CLI stdout / MCP 只返回有界摘要和引用；同编号同输入的完成结果复用不新增求解。
 
 ## 4. Design Brief 与阶段规则
 
@@ -279,7 +277,7 @@ Brief 包含用途/频段/收发、设备、架设、空间、材料、偏好、
 | DESIGN_READY | 模型输入完整；适用性、材料依据及关键假设已检查 |
 | SIMULATING | 已为不可变 revision 提交计算，有 job 身份与计算预算 |
 | VALIDATING | 有真实完整结果，执行数值、兼容、需求与容差检查 |
-| VALIDATED | 当前 revision 的必需检查通过；条件性结论单列，不冒充全部通过 |
+| VALIDATED | 当前 revision 的必需检查通过；条件性结论单列 |
 | BUILD_READY | 制作包、材料、公差、装配与测量计划完整，且不存在阻断性未验证假设 |
 
 等待用户、失败与取消是执行状态，不扩充为大量设计阶段。改变方案回到适当阶段，不以 phase 字符串替代证据。`VALIDATED` 的 profile 覆盖验证与“当前这个设计已跑过 MMANA oracle”必须分别报告；没有 per-design 回执不能声称已在 GAL 实算通过。涉及 profile 外行为时阻止最终验证通过。
@@ -348,7 +346,7 @@ Agent 以这些指标解释方向性、仰角和使用场景，不据天线增�
 | 电感/电容/陷波器 | 实际 L/C、Q/ESR、工作频率、公差、自谐振和额定电压/电流/温升条件 | 不能以无限 Q 替代未知器件；损耗/功率承受不足列为阻断项 |
 | 制作与安装 | 下料/装配公差、搭接和接点、拉线/下垂、架设高度/方向、应力与户外防护 | 执行敏感性分析；未进行机械/热分析不得声称结构与功率安全已认证 |
 
-有限电导可利用 NEC LD；pymininec 有 skin-effect/insulation load，但这不证明所有管材、镀层、介质损耗都已支持。公开 `Insulation_Load` 接口只有半径与相对介电常数，不能凭它宣称已包含任意损耗角正切。模型能力应逐项声明。[NEC LD](https://www.nec2.org/part_3/cards/ld.html)、[pymininec 材料负载实现](https://raw.githubusercontent.com/schlatterbeck/pymininec/master/mininec/mininec.py)
+有限电导可利用 NEC LD；pymininec 有 skin-effect/insulation load，但目前只支持部分管材、镀层和介质损耗。公开 `Insulation_Load` 接口只有半径与相对介电常数，损耗角正切需要另行确认。模型能力应逐项声明。[NEC LD](https://www.nec2.org/part_3/cards/ld.html)、[pymininec 材料负载实现](https://raw.githubusercontent.com/schlatterbeck/pymininec/master/mininec/mininec.py)
 
 每条材料依据记录来源、日期/版本、单位、频率/温度等适用条件和测量不确定度。替换材料必须产生新 revision 并重算相关结果。至少比较标称值与关键尺寸/材料范围；结果对未知项敏感时，先提出测量或采购确认，不将假设冻结成已验证事实。
 
@@ -356,17 +354,17 @@ Agent 以这些指标解释方向性、仰角和使用场景，不据天线增�
 
 ## 8. MCP 接口与计算生命周期
 
-当前 MCP 工具涵盖项目查询、输入校验、评价、修订准备、参数搜索、匹配、取回/补画和候选包，实际注册名遵从既有 MCP 名称规范化，完整清单见[独立包说明](../../extensions/antenna_design/README.md#高层工具)。`model_create / sweep / pattern` 是后续候选，不宣称已注册；`.maa` 导入仍走明确的 CLI 子集。
+当前 MCP 工具涵盖项目查询、输入校验、评价、修订准备、参数搜索、匹配、取回/补画和候选包，实际注册名遵从既有 MCP 名称规范化，完整清单见[独立包说明](../../extensions/antenna_design/README.md#高层工具)。`model_create / sweep / pattern` 是后续候选，尚未注册；`.maa` 导入仍走明确的 CLI 子集。
 
 `plan_design` 只读规划最低/推荐次数并留两轮网格复核额度；`design` 在同一 MCP 工具调用及取消作用域内顺序组合已有 optimize、solve、render、export。不新建通用工作流状态机，不移动天线业务到 AgentCore。工作流总时限内搜索占 65%，余下时间用于复核与交付；这不是完成时间保证。搜索与两层网格证据绑定并进入 ZIP；容差缺失只记录敏感性，容差通过也不认证制作。宿主复用结果导入和 tool.started 活动更新，模型只接收紧凑摘要。
 
-2026-10-28 的边界收敛：`WorkflowState` 明确记录 `DESIGN_READY / SEARCH_RECORDED / VALIDATION_RECORDED / DELIVERED`，带输入、目标、物理方案与验证证据身份，由现有项目 SQLite 按 revision 原子写入。发布包与 SQLite 不假装跨存储原子提交：`get_design_state / get_delivery / export` 对“已发布包、未提交交付状态”核验原始输入、目标、所选结果、验证摘要及包完整性后幂等补记 DELIVERED；半成品不推进，冲突拒绝，相同并发提交可重复确认。它只修复已有交付元数据，不重新求解或重写历史包；无状态旧任务不推断阶段，重启不恢复 SciPy 种群。DELIVERED 仍是候选交付，不等于未来的 VALIDATED / BUILD_READY；完整 DISCOVERY/CONCEPT/Brief 流程仍未实现。本次仅静态检查，不把历史运行记录计作新版本行为验收。
+2026-10-28 的边界收敛：`WorkflowState` 明确记录 `DESIGN_READY / SEARCH_RECORDED / VALIDATION_RECORDED / DELIVERED`，带输入、目标、物理方案与验证证据身份，由现有项目 SQLite 按 revision 原子写入。发布包与 SQLite 不是跨存储原子提交：`get_design_state / get_delivery / export` 对“已发布包、未提交交付状态”核验原始输入、目标、所选结果、验证摘要及包完整性后幂等补记 DELIVERED；半成品不推进，冲突拒绝，相同并发提交可重复确认。它只修复已有交付元数据，不重新求解或重写历史包；无状态旧任务不推断阶段，重启不恢复 SciPy 种群。DELIVERED 仍是候选交付，不是 VALIDATED / BUILD_READY；完整 DISCOVERY/CONCEPT/Brief 流程仍未实现。
 
 交付评价同时汇总基础与细网格的辐射、直连 SWR 判据；任何已提供网格超标都进入紧凑回执、报告与下一步建议。网格容差失败/证据不足单独提示，不与目标达标或制作验收混为一谈。旧包未记录匹配汇总结论时返回未知，不按新版规则改写历史结果。
 
 物理身份包含有序几何、馈点和材料；仿真身份包含频率、地面、网格、激励、角采样与阻抗参考。扫频对照除频率外保持相同口径，网格对照只放开分段数，不能因为物理 hash 相同就混用计算条件。v2 评价和交付新增身份字段，旧 design_sha256 的算法不改；历史文件、哈希和 ZIP 原样保留。源码、依赖版本与数值 provenance 继续存于各 run 的 environment/manifest，不由新输入身份代替。
 
-优化语义固定为 `objective_mode=sampled_feasibility`：最小化显式门槛的归一化平方缺口，达到全部已请求采样约束后停止，不宣称最大增益或 Pareto 最优。增益/F/B 可省略，表示不参与目标；SWR 仅在显式直连且给出门槛时参与，至少要有一项约束。增益取指定方向的 total gain（非 peak/realized gain），F/B 为同仰角相反方位之差；scale 只影响搜索权重，不放宽工程门槛。目标身份排除证据路径和预算，参考指标与设计约束不能混用。
+优化语义固定为 `objective_mode=sampled_feasibility`：最小化显式门槛的归一化平方缺口，达到全部已请求采样约束后停止，不保证最大增益或 Pareto 最优。增益/F/B 可省略，表示不参与目标；SWR 仅在显式直连且给出门槛时参与，至少要有一项约束。增益取指定方向的 total gain（非 peak/realized gain），F/B 为同仰角相反方位之差；scale 只影响搜索权重，不放宽工程门槛。目标身份排除证据路径和预算，参考指标与设计约束不能混用。
 
 - `model_validate` 返回结构/语义/适用性检查，不等同于用户需求验收。
 - `optimize` 复用 SciPy differential_evolution，接收 seed model、dimensions/bounds、targets、random_seed，以及可选 population_size 和 max_solver_runs；每个候选保持同一几何，复核全部目标频点。只搜索孤立导线的长度/中心坐标，不搜索拓扑或匹配网络；内部零 LLM 调用，不接受可执行表达式或 shell 目标函数。算法、停止条件和限额见[独立包说明](../../extensions/antenna_design/README.md#有界尺寸优化)。
@@ -374,7 +372,7 @@ Agent 以这些指标解释方向性、仰角和使用场景，不据天线增�
 - 搜索的读写路径与普通 solve 分开：每个频点先经 SQLite 准入，再在 worker 内存中求解并按与磁盘证据相同的规则评分，不为评分发布目录或读回远场 JSON。未入选候选只留参数、逐频关键指标、评分或失败原因；完整证据只属于最佳候选，在首次可评价、整代结束且有改善、干净收尾或达标时才写入，核对输入身份、完成标记与 hash、写下发布记录后原子切换 progress.json。切换前中断取回上一份完整最佳，没有则明确无结果；异常失败不重试发布。这里承诺的是最后已发布的最佳，不是优化器状态。求解器、采样精度、计费规则和旧目录不变。
 - 提交身份由可信宿主生成并绑定项目/版本，不以模型编出的 ID 授权。重复提交先核对身份与参数；超时/重启查询结果，不盲目重复优化。
 - Server 持有并回收 solver 进程；请求取消只表示本地已停止等待，直到服务器确认计算已结束才标记 job cancelled。不承诺 SDK 当前没有的远端取消保证。
-- CPU、内存、时间、输出文件量与 solver_runs 需要分别限制，并说明 Windows/Linux 的实际能力。当前已有 worker 时限、求解准入和有界资源读取，但没有系统级 CPU/内存/磁盘配额；独立 MCP 进程不等于 OS 沙箱。
+- CPU、内存、时间、输出文件量与 solver_runs 需要分别限制，并说明 Windows/Linux 的实际能力。当前已有 worker 时限、求解准入和有界资源读取，但没有系统级 CPU/内存/磁盘配额；独立 MCP 进程不是 OS 沙箱。
 
 当前只返回有界 summary、重要 warnings/diagnostics 和授权 artifact 引用，完整矩阵通过文件读取，不进入 ToolMessage。未来若增加 `pattern` 的 cut/region 查询，应限制角域、极化、频率、分页和抽样数量；不能将这个目标写成现有接口。日志按失败诊断范围限量读取并脱敏。
 
@@ -416,7 +414,7 @@ MCP 2025-11-25 Tasks 仍标为 experimental，且其规范允许任务状态已 
 
 阶段资源只加载访谈、方案选择、建模、验证或制作中的必要部分。MMANA 格式、求解数学和材料数据按主题检索，首版使用领域包内资源/明确章节；宿主可将其展示为 Skill，但读取不依赖宿主注册表，不为此建设向量平台。固定前缀/工具 Schema 稳定排列，变化 state 放后部；不为缓存命中保留已失效材料或无关历史。
 
-优化器执行数百次计算只返回有限的最佳/Pareto 候选摘要与完整结果引用；solver log、迭代日志、矩阵、完整方向图默认永不进入 prompt。matplotlib 直接读取 artifact，不需要 LLM 给每个采样点写绘图指令；PNG 展示给用户也不意味着自动送进视觉模型。
+优化器执行数百次计算只返回有限的最佳/Pareto 候选摘要与完整结果引用；solver log、迭代日志、矩阵、完整方向图默认永不进入 prompt。matplotlib 直接读取 artifact，不需要 LLM 给每个采样点写绘图指令；PNG 展示给用户，不会自动送进视觉模型。
 
 `compact result` 至少包括 revision、状态、频率范围、最差/标称 SWR、馈点阻抗摘要、绝对增益、主瓣/切面波束宽度、F/B/副瓣及其定义、硬约束违反项、重要假设、材料风险、数值与兼容验证状态、artifact 引用和消耗。必须保留关键失败条件，不能因限长把 warnings 截掉伪装成功；超限改为分类摘要与细节引用。
 
@@ -480,12 +478,12 @@ logs/
 | --- | --- |
 | 阻抗 | 每频点 R/X、绝对和相对误差；近零分量不用相对误差单独裁决 |
 | SWR | 相同参考阻抗与参考面，保留原始值、无穷/无定义状态和带宽/谐振偏移 |
-| 电流 | 同激励下的馈点电流、沿导体的幅相分布及节点；相同网格可逐 pulse 比较，不同网格按物理位置分析，插值结果另存并标明，不冒充原始值 |
+| 电流 | 同激励下的馈点电流、沿导体的幅相分布及节点；相同网格可逐 pulse 比较，不同网格按物理位置分析，插值结果另存并标明，不当作原始值 |
 | 方向图 | 相同频率/角域/极化/地面下的原始场与切面；同角网格报告逐点绝对 dBi 差、RMS、最大误差，结合主后瓣/零陷位置判断工程影响 |
 | 派生指标 | 最大 gain、主瓣方向、切面波束宽度、F/B、主要副瓣差异；并列峰值不能强行认定唯一方向 |
 | normalized pattern | 归一化基准与 peak 的差异单列；不能分别归一化后掩盖绝对增益偏差 |
 
-规则网格的 RMS 定义为有效成对样本差值的均方根；如果另报球面积加权误差，单独标识权重，不能与普通 RMS 混用。深零点的 dB 差可能失真，应同时报告线性功率误差与预先声明的比较下限/掩码和有效点数；不删除失败角度或后调阈值。角采样不同时记录两端设置，优先补算共同角度；必要的插值/重采样另存并标识，不能宣称原始点相同。原始数据可比较不等于要求每个点相等。
+规则网格的 RMS 定义为有效成对样本差值的均方根；如果另报球面积加权误差，单独标识权重，不能与普通 RMS 混用。深零点的 dB 差可能失真，应同时报告线性功率误差与预先声明的比较下限/掩码和有效点数；不删除失败角度或后调阈值。角采样不同时记录两端设置，优先补算共同角度；必要的插值/重采样另存并标识，不能当作原始点相同。原始数据可比较，不要求每个点相等。
 
 两端使用各自适用网格，分别加密检查稳定性，再比较会影响制作或选择的结果：谐振偏移、目标频段 SWR/带宽、增益、主瓣方向、后瓣及材料损耗。误差阈值由用途、制造/测量精度和模型敏感性预先确定，不能根据刚算出的差异倒定。CSV 舍入区间只解释观测分辨率，不是兼容容差。约 0.003 dB 的导出误差、pulse 数不同或未复刻 DM 算法，均不能单独阻塞下一项工程验证；反之，图形看起来相似也不能覆盖错误的馈电、材料或地面假设。
 
@@ -511,23 +509,23 @@ A01 先请求 θ=0…180°、φ=0…355°、步长 5° 的完整自由空间网�
 
 每个样本包必须同时包含原始 `.maa`、GAL 原始数值导出、采集配置/版本/hash、明确的网格与源/负载位置，以及材料依据。候选 solver 的输入、原始输出、规范化结果和差异报告另存，不能覆盖 reference。如果无法导出内部 pulse 信息，只能用目标版本可取得的电流坐标等建立对应证据；仍无法确认时语义项保持 `not_evaluated`，不能把原始 MMANA 源码推断当作 GAL 的实际数据。
 
-采集前声明参考阻抗、增益/极化/角度定义、需要覆盖的模型特性与误差判据；阈值尚未批准时允许报告数值差异，不允许给 PASS。参考文件未到位时可以继续接口调查和格式分析，但不构造模拟 reference 来宣布兼容完成。A01 原始模型、成功日志、截图与电流/远场 CSV，以及 140/150 MHz、40/80 段四例的原始 CSV 均已比较。该批参考版本由用户报告为 v1.2.0.20；四例未提供 GAL 另存模型和直接 R/X 表，CSV 工况依赖文件名及关联输入。后续六例 HF 工程参考和 23 项多导线/扫频参考已包含实际版本/EXE hash、另存模型、日志、CSV 和设置证据，但不能据此追认旧 A01 未记录的环境身份。五点扫频、倒 V 接点、方环及 Yagi 已有对照；方环 CSV 缺一个 pulse、多线相位朝向和其他 topology 尚有边界，无完整 profile 准入通过记录。
+采集前声明参考阻抗、增益/极化/角度定义、需要覆盖的模型特性与误差判据；阈值尚未批准时允许报告数值差异，不允许给 PASS。参考文件未到位时可以继续接口调查和格式分析，但不构造模拟 reference 来宣布兼容完成。A01 原始模型、成功日志、截图与电流/远场 CSV，以及 140/150 MHz、40/80 段四例的原始 CSV 均已比较。该批参考版本由用户报告为 v1.2.0.20；四例未提供 GAL 另存模型和直接 R/X 表，CSV 工况依赖文件名及关联输入。后续六例 HF 工程参考和 23 项多导线/扫频参考已包含实际版本/EXE hash、另存模型、日志、CSV 和设置证据；旧 A01 未记录的环境身份无法追认。五点扫频、倒 V 接点、方环及 Yagi 已有对照；方环 CSV 缺一个 pulse、多线相位朝向和其他 topology 尚有边界，无完整 profile 准入通过记录。
 
 ## 11. 下一步选型门槛
 
-2026-10-19 后续进展：`-NextBatch` 的 **23/23 项参考已经回收并完成对照**，不需要重新采集。倒 V、闭合方环、三元 Yagi 的九次原计算后，追加六次固定网格诊断；原五工况 75 次计算继续复用。已有原生渐变分段将 Yagi 固定轴 F/B 差异从约 2.54 dB 缩小到 0.23 dB，不改尺寸或内核；均匀网格继续加密并非单调改善，不能据此宣称收敛或选择通用默认网格。完整 dB 差异、共同峰值线性功率诊断及原始数据一并保存，不通过删除深零陷获得 PASS。五工况粗谐振夹区一致，材料表示与多线复电流仍有明确限制。细节与产物见[工程评估](../../experiments/mmana_compatibility/ENGINEERING.md)。这些诊断仍保留在实验目录；后续独立工程入口位于 `extensions/antenna_design/`，两边均不引入 MaigoKite / LangGraph 依赖。
+2026-10-19 后续进展：`-NextBatch` 的 **23/23 项参考已经回收并完成对照**，不需要重新采集。倒 V、闭合方环、三元 Yagi 的九次原计算后，追加六次固定网格诊断；原五工况 75 次计算继续复用。已有原生渐变分段将 Yagi 固定轴 F/B 差异从约 2.54 dB 缩小到 0.23 dB，不改尺寸或内核；均匀网格继续加密并非单调改善，不足以判断收敛或选择通用默认网格。完整 dB 差异、共同峰值线性功率诊断及原始数据一并保存，不通过删除深零陷获得 PASS。五工况粗谐振夹区一致，材料表示与多线复电流仍有明确限制。细节与产物见[工程评估](../../experiments/mmana_compatibility/ENGINEERING.md)。这些诊断仍保留在实验目录；后续独立工程入口位于 `extensions/antenna_design/`，两边均不引入 MaigoKite / LangGraph 依赖。
 
 上述实验目录只评估求解器，不实现领域工作流、LangGraph 适配、项目数据库、MCP server、优化器或 UI。A01/A02 证据保留，固定波长改频与参考辅助网格只作诊断。HF 工程 75 次、原材料 2 次、多导线 9 次、网格诊断 6 次及材料五频点 5 次，累计 97 次候选工程计算，已与六例主频及新增 23 项 GAL 参考对照，没有扩展第二个 solver。后续 OB11 搜索与交付属于独立包的另一组运行记录，不能将两组次数或通过结论混用。
 
 求解器选型采用 pymininec：冻结接线及共同物理位置上的复电流对照支持现成渐变分段，五点材料增量支持明确的历史集中损耗适配；没有证据要求自研内核。独立包随后已有项目准入、搜索/交付、匹配和宿主接入的 Linux 定向记录，不再将它们整体列为待运行。下一步仍需补 Brief、完整阶段约束、模型预算和工程验证，不重开通用 Runtime 重构。复用边界见[工程评估](../../experiments/mmana_compatibility/ENGINEERING.md#选型结论与首个薄适配的边界)，实际运行范围见路线图；旧样本不追认未预定义阈值的 PASS。
 
-本批确认材料表示必须显式区分：GAL 铜预设与候选分布式复阻抗模型的总场差异约 0.15 dB；由历史 MMANA 材料线索出发，复用公共集肤接口计算整线电阻、再使用公共中心集中负载接口，原主频总场差异降至约 0.003 dB。新增五点的电阻增量也在 GAL 显示相减的舍入范围内；电抗仍有约 1.3 Ω 的基础差异。这支持窄适配，不支持把集中损耗默认当作更真实的材料模型，也不证明当前 GAL 的全部实现。领域结果必须记录所用材料表示及其依据，物理模式与 MMANA 表示不能静默互换。
+材料表示必须显式区分：GAL 铜预设与候选分布式复阻抗模型的总场差异约 0.15 dB；由历史 MMANA 材料线索出发，复用公共集肤接口计算整线电阻、再使用公共中心集中负载接口，原主频总场差异降至约 0.003 dB。新增五点的电阻增量也在 GAL 显示相减的舍入范围内；电抗仍有约 1.3 Ω 的基础差异。这支持窄适配；集中损耗不应默认当作更真实的材料模型，当前 GAL 的全部实现仍未验证。领域结果必须记录所用材料表示及其依据，物理模式与 MMANA 表示不能静默互换。
 
 工程评估暴露出需要保留的适用性边界：5 m 高的 7.1 MHz 水平导线低于 0.2λ，MININEC 的地面阻抗近似可能不能支撑现场制作判断。与 GAL 数值一致不消除共同的模型局限。有限电导候选的增益变化已可观察，但材料常数仍是示例，不替代用户材料来源、绝缘层和接头等实际条件。
 
 spike 回答能否正确表达工程条件、结果是否稳定、与 GAL 的差异是否改变设计决策。新工况没有 GAL 原始导出时保持 `AWAITING_REFERENCE`，仍可先完成候选侧计算和复算材料。DM1/DM2/SC/EC 的内部生成规则不再是必过门槛，也不因此新增网格框架。只有物理映射或工程结果的关键缺陷无法由现成 API 解决时才考虑补缺。
 
-优先核对已准备的语义案例，不反复扩大同一舍入误差的诊断。以下是后续选型门槛，不是本轮全部实施范围：
+优先核对已准备的语义案例，不反复扩大同一舍入误差的诊断。以下是后续选型门槛，不是全部实施范围：
 
 1. 冻结一个 GAL reference 版本与合法采集环境，建立原始数据/配置清单；先确认 `.maa`、CSV 与所需设置可完整导出。
 2. 对同一极简模型先比较文件、分段、pulse、激励和负载，不先调结果误差。pymininec 与原始 MMANA 都检查；NEC 路线用于区分适配错误与方法差异。

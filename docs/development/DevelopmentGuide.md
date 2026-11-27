@@ -15,9 +15,9 @@
 | `config/`、`scripts/` | 运行配置、开发/构建/测试脚本 |
 | `docs/` | 按 [文档索引](../README.md) 分配权威范围 |
 
-后端只运行一个 Python 进程，API 与 AgentCore 直接调用。现有运行时已经支持人工审批、受限文件任务恢复和单层只读子 Agent；持久工作流及更复杂的委派仍未实现，范围见 [运行时设计](../design/AgentRuntime.md#7-技能子任务与工作流边界)。
+后端只运行一个 Python 进程，API 与 AgentCore 直接调用。现有运行时已经支持人工审批、受限文件任务恢复和单层只读子 Agent；持久工作流及更复杂的委派还未实现，范围见 [运行时设计](../design/AgentRuntime.md#7-技能子任务与工作流边界)。
 
-早期无调用方的独立工作流/HITL、子 Agent 和 Recovery 骨架已移除，不代表上述现有能力被删除。判断功能是否可用，要看实际调用，不能只看目录或类名。不要在不同模块重复定义同一套类型、策略或协议。
+早期无调用方的独立工作流/HITL、子 Agent 和 Recovery 骨架已经移除，上面这些现有能力仍然保留。判断功能是否可用，看实际调用，不要只看目录或类名。同一套类型、策略或协议不要在不同模块重复定义。
 
 ## 2. 初始化
 
@@ -35,9 +35,9 @@ uv sync --locked --no-default-groups --python 3.14
 
 `--no-dev` 仅针对 dependency group，不能替代去掉 `--extra dev`。默认不添加 `--all-extras`。
 
-`vectorstores` 只用于尚未接入聊天的实验适配器，默认不安装，也不表示知识库功能已经交付。维护者修改依赖后须运行 `uv lock` 更新锁文件；依赖锁定成功不代表运行或发布验收通过。
+`vectorstores` 只用于尚未接入聊天的实验适配器，默认不安装；知识库功能还没有接入。修改依赖后运行 `uv lock` 更新锁文件。
 
-天线扩展是独立 distribution，不在根项目的 extras 中。需要它时，进入 `extensions/antenna_design/`，按[包说明](../../extensions/antenna_design/README.md)安装；其 `engineering` / `mcp` 依赖使用该目录自己的 `uv.lock` 和虚拟环境。普通 setup 不安装求解器，根项目检查也不等于已检查或运行该扩展。实验脚本与可安装包分开维护，不能把旧数值对照当作新入口的运行结果。
+天线扩展是独立 distribution，不在根项目的 extras 中。需要它时，进入 `extensions/antenna_design/`，按[包说明](../../extensions/antenna_design/README.md)安装；其 `engineering` / `mcp` 依赖使用该目录自己的 `uv.lock` 和虚拟环境。普通 setup 不安装求解器，根项目的检查也不覆盖这个扩展。实验脚本与可安装包分开维护，旧数值对照不能当作新入口的运行结果。
 
 也可以让 `setup.sh` / `setup.ps1` 安装应用所需依赖。默认 Python 只安装运行依赖，显式 `setup dev` 才包含 Python 开发工具。脚本优先使用 uv；没有 uv 时，用可用的 Python 3.14.x 创建项目环境，再通过 pip 安装同一清单。pip 安装不保证使用 uv 锁定的版本，也不会清除先前安装的开发工具，脚本会明确提示；不另写依赖卸载器。解释器命令名也不必是 `python3`：
 
@@ -87,7 +87,7 @@ npm 的 devDependencies 包含源码构建/启动所需的 Vite、TypeScript、E
 
 `start` 的默认目标是 web，默认模式是 dev。dev 启动 Python 后端和 Vue 热更新页面；桌面入口先编译 Electron，由 Electron 启动后端。桌面等待后端 `/health` 就绪以及开发模式下的 Web HTTP 响应，再创建窗口；退出时会取消等待。开发窗口与 Vite 均使用 `127.0.0.1:5173`，不依赖 localhost 的 IPv4/IPv6 解析顺序。桌面 built 直接加载 `web/dist/index.html`，不需要开发服务器。
 
-`built` 不自动编译。npm 和根目录构建命令共用 `scripts/lib/web-build.cjs`：开始前撤销所构建组件的成功记录，所有步骤成功后才写入对应输出目录的 `.maigokite-build.json`。启动前核对界面源码、资源、构建配置及锁文件的摘要，并确认入口产物完整；缺失、失败或过期时拒绝启动任何服务。旧版本没有记录，也需要重新构建。该记录只用于源码目录的启动保护，不是安装包验收或签名机制。
+`built` 不自动编译。npm 和根目录构建命令共用 `scripts/lib/web-build.cjs`：开始前撤销所构建组件的成功记录，所有步骤成功后才写入对应输出目录的 `.maigokite-build.json`。启动前核对界面源码、资源、构建配置及锁文件的摘要，并确认入口产物完整；缺失、失败或过期时拒绝启动任何服务。旧版本没有记录，也需要重新构建。该记录只用于源码目录的启动保护。
 
 Linux 可用 `bash scripts/build.sh desktop && bash scripts/start.sh desktop built`，保证仅在构建成功后启动。PowerShell 5.1 不支持 `&&`，改用 `if ($LASTEXITCODE -eq 0) { .\scripts\start.ps1 desktop built }` 接在 build 命令后；Web 入口同理。
 
@@ -118,7 +118,7 @@ Linux 桌面启动会在 `$XDG_DATA_HOME/applications`（未设置或不是绝�
 
 ### 从旧后端升级
 
-先退出旧版整套进程，再执行 setup、build 和 start。Go 网关和 8081 gRPC 服务已移除，无需修复 GOROOT。保留原配置和 SQLite 路径，会话、任务、审批和 LangGraph checkpoint 原地沿用；不在新旧版本之间同时共享打开数据库。Windows 凭证通过受限兼容读取迁移，Linux/macOS 沿用原服务/账号；系统密钥链需可访问，不退回明文。此迁移未做实机验收。
+先退出旧版整套进程，再执行 setup、build 和 start。Go 网关和 8081 gRPC 服务已移除，无需修复 GOROOT。保留原配置和 SQLite 路径，会话、任务、审批和 LangGraph checkpoint 原地沿用；不在新旧版本之间同时共享打开数据库。Windows 凭证通过受限兼容读取迁移，Linux/macOS 沿用原服务/账号；系统密钥链需可访问，不退回明文。
 
 ### Electron installation：编译成功但运行时缺失
 
@@ -167,15 +167,15 @@ setup 检查 `ELECTRON_INSTALL_PLATFORM` / `ELECTRON_INSTALL_ARCH` 及对应 npm
 Electron 成套启动会为其后端生成一次性随机凭据，不需要用户配置。独立调试 built `file://` 页面与外部后端时，必须在启动两者前提供相同的 `MAIGOKITE_DESKTOP_TOKEN`（32 字节随机值的 64 位小写十六进制编码）；不持久保存或打印该值。后端会消费并移除环境项，不向工具继承。没有凭据时不允许通过 `Origin: null` 连入，不能通过恢复 CORS 的无条件 null/file 放行来兼容旧客户端。`VITE_MOCK=1` 的纯 UI 调试不调用真实 API，不需要这个凭据。
 
 PowerShell 禁止执行脚本时，确认源码可信后可使用进程级 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start.ps1 web`；脚本不更改全局执行策略。
-这些脚本不自动运行软件测试。脚本与调用链已做静态核对，但 Windows 实机运行和整套退出仍待验收；静态检查不能代替启动验证或安装包验收。
+这些脚本不运行软件测试。Windows 实机启动和整套退出还没有完整验证过。
 
 配置、生效范围和凭证管理见 [配置指南](../user-guide/Configuration.md)。
 
 ## 4. 质量与构建入口
 
-测试源码、Vitest 配置和 `scripts/run_tests.sh` 随 Git 分发；生成的报告与缓存不提交。新克隆需先安装对应开发依赖，再执行下表中的测试入口。未执行或收集失败的测试不能记为通过，覆盖范围与证据口径见 [测试与验收](../testing/TestPlan.md)。
+测试源码、Vitest 配置和 `scripts/run_tests.sh` 随 Git 分发；生成的报告与缓存不提交。新克隆需先安装对应开发依赖，再执行下表中的测试入口。覆盖范围与证据口径见 [测试与验收](../testing/TestPlan.md)。
 
-生产构建使用 `vue-tsc --noEmit -p tsconfig.build.json`，保留应用、Electron 与 Vite 配置的严格类型检查，不纳入测试文件或 Vitest 配置。生产构建成功不能替代测试通过。
+生产构建使用 `vue-tsc --noEmit -p tsconfig.build.json`，保留应用、Electron 与 Vite 配置的严格类型检查，不纳入测试文件或 Vitest 配置。
 
 | 入口 | 范围 |
 | --- | --- |
@@ -195,19 +195,17 @@ uv run --no-sync mypy python/agent
 
 这不会启动向量服务或把预留模块接入 Core；普通应用安装仍不需要这些可选依赖。检查环境可以通过 `UV_PROJECT_ENVIRONMENT` 放在独立目录，避免改变日常运行环境。不能用全局忽略缺失导入替代完整检查环境。
 
-报告须写明检查范围与实际结果；检查失败应保留非零退出码，不能记为“工具缺失”或“跳过”。平台限制和安装包验收要求见 [构建与发布指南](../deployment/ReleaseGuide.md)。
+检查失败时保留非零退出码。平台限制和安装包要求见 [构建与发布指南](../deployment/ReleaseGuide.md)。
 
 HTTP 请求模型在 `python/agent/api/contracts.py`，FastAPI 提供 `/openapi.json`；不再维护 Proto 与跨语言生成代码。事件 DTO 继续见 [API 设计](../design/API.md)。新增持久字段仍须覆盖空库与旧库升级。
 
 ## 5. 修改规则
 
-- 修改前依据用户需求、接口文档、生产实现和调用方确定预期行为与验收标准，并核对当前 CI 配置和检查入口。不能改完后以测试结果倒推需求或重新定义验收标准。
-- 开发过程中不读取测试源码，包括断言、夹具、快照和辅助实现；搜索限定在生产源码、文档与配置，不能借全仓搜索、历史版本或代理转述绕过。CI 失败报告只用于定位线索，修复须有独立的产品行为或接口依据。
-- 测试执行仍需用户授权，运行授权不包含读取或修改测试源码；该限制不改变 CI 的测试收集范围，不删除、排除或跳过用例。完整授权约束见 [AGENTS.md](../../AGENTS.md#4-测试与运行授权)。
+- 修改前先确认预期行为：看接口文档、生产实现和调用方，再动手。
 - Python：公开边界写类型，异步资源由明确生命周期持有，取消后等待资源清理；不创建通用 DI、插件或取消框架替代已有组件。
 - Vue：使用 TypeScript 与清晰的组件/store 边界；卸载清理订阅，渲染不可信 Markdown 前消毒，渲染进程不获 Node/Shell 权限。
-- 工具、副作用、权限、恢复修改必须覆盖对应失败路径；日志不记录敏感凭证、完整环境和隐藏思维链。
-- 成熟实现优先。新增自研基础设施须说明替代调查、关键需求和长期维护收益，不能因已有代码就默认沿用。
+- 工具、副作用、权限、恢复的修改要覆盖失败路径；日志不记录敏感凭证、完整环境和隐藏思维链。
+- 优先复用成熟实现。新增基础设施前先调查替代方案，并说明长期维护成本。
 
 ### Python 编码约束
 
@@ -227,12 +225,18 @@ HTTP 请求模型在 `python/agent/api/contracts.py`，FastAPI 提供 `/openapi.
 
 ### 改动收尾
 
-- 逐项核对本次 diff 的导入、行长、变量类型与调用方契约，并检查取消、异常和资源所有权是否因修改而改变。格式修正不夹带权限策略或执行逻辑变更。
-- 静态检查与行为测试分别报告。使用第 4 节既有入口和 CI，不新增自动测试钩子；在用户限制执行检查或测试时遵守限制，完成生产源码审阅并明确记录未运行项，不宣称门禁通过。
-- 已知诊断必须修复或明确列为未解决项，不能沿用旧提交的通过记录为新改动背书。保留其他会话的未提交改动，不顺手格式化无关文件或降低测试断言。
+- 提交前核对 diff 的导入、行长、变量类型与调用方契约，并检查取消、异常和资源所有权是否因修改而改变。格式修正不夹带权限策略或执行逻辑变更。
+- 静态检查与行为测试分别报告，使用第 4 节的入口和 CI。
+- 已知诊断要修复，或明确列为未解决项。保留其他会话的未提交改动，不顺手格式化无关文件或降低测试断言。
 
 ## 6. 提交与文档
 
 使用短生命周期目标分支，保持改动可审阅；Conventional Commits 可用 `feat/fix/docs/refactor/test/chore/perf`，scope 按模块。不得把示例 Git reset/force push 当作自动清理步骤。
 
-提交或 PR 须说明改动、验证范围、未验证项，以及对兼容性和回滚的影响。协议变化更新 API，表变化更新 Database，运行机制变化更新 AgentRuntime，验收状态更新 Roadmap；不要另建内容重复的文档。只有实测证据才能标记“通过”，编译和测试不能代替发布包验收。
+提交或 PR 说明改动、验证范围、未验证项，以及对兼容性和回滚的影响。协议变化更新 API，表变化更新 Database，运行机制变化更新 AgentRuntime，验收状态更新 Roadmap；不要另建内容重复的文档。发布包需要单独验收。
+
+## 7. 已知限制
+
+- Windows 实机启动、PowerShell 脚本和整套退出还没有完整验证。
+- 旧后端到 Python 后端的凭证迁移还没有在实机上验证过。
+- 桌面安装包尚未就绪，目前建议从源码启动。

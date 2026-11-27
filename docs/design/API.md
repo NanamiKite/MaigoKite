@@ -116,7 +116,7 @@ GET    /workspaces/{workspace_id}/conversations/{conversation_id}/snapshot
 分岔的首次执行沿用现有产品历史导入入口，不恢复源任务；文件仍共享，源会话删除不删除分岔。GUI 从已保存助手回复下方的「⋯ → 从此处分叉新对话」传入该回复的 `message_id`，不再由会话管理默认从末尾分岔；不是逐节点执行 Fork 或文件回滚。
 请求键只在本次页面内保留；刷新后先查看会话列表，不保证找回原键。分岔删除后不保留去重墓碑。
 
-发送消息可带 `Idempotency-Key`（1–128 个无空格可打印 ASCII 字符）。键按工作区、会话、主体隔离，内容指纹覆盖 content 与 attachments；新请求返回 202，相同键/相同内容返回原任务的 200 `{task_id, conversation_id, status, replayed: true}` 和 `Idempotency-Replayed: true`，不同内容返回 409。返回旧任务不会重新发模型请求、写消息或广播历史事件；中断/失败任务也不会因重发键自动恢复。相同文本的新操作必须用新键。省略键保持旧行为；GUI 已为每次逻辑提交生成键，网络/5xx 错误时保留原键，用户点击确认才重试。4xx 明确拒绝会释放键；成功回执后刷新失败不等于提交失败。键仅保留在当前页面会话内，刷新页面后应先查询任务记录，不保证找回原键。服务端的键随任务保留，删除会话/任务后不再保留去重记录。正常 GUI 发送/完成与刷新已有定向验收，图片 API 也验证了相同键返回原任务；提交结果不明后的人工重试和幂等并发故障不在该通过范围。
+发送消息可带 `Idempotency-Key`（1–128 个无空格可打印 ASCII 字符）。键按工作区、会话、主体隔离，内容指纹覆盖 content 与 attachments；新请求返回 202，相同键/相同内容返回原任务的 200 `{task_id, conversation_id, status, replayed: true}` 和 `Idempotency-Replayed: true`，不同内容返回 409。返回旧任务不会重新发模型请求、写消息或广播历史事件；中断/失败任务也不会因重发键自动恢复。相同文本的新操作必须用新键。省略键保持旧行为；GUI 已为每次逻辑提交生成键，网络/5xx 错误时保留原键，用户点击确认才重试。4xx 明确拒绝会释放键；成功回执后刷新失败时，提交仍然有效。键仅保留在当前页面会话内，刷新页面后应先查询任务记录，不保证找回原键。服务端的键随任务保留，删除会话/任务后不再保留去重记录。正常 GUI 发送/完成与刷新已有定向记录，图片 API 也验证了相同键返回原任务；提交结果不明后的人工重试和幂等并发故障尚未覆盖。
 
 `snapshot` 返回 `messages / tasks / approvals / questions / last_sequence / truncated`，其中 approvals/questions 只含待处理项，嵌套审批和问题沿用已发布的 JSON 字符串字段（`arguments_json / options_json`），客户端 API 边界将审批参数和问题选项转换为界面 DTO。在单 Core 的同一个 Repository 锁内读取，每类最多 200 条最新记录并按时间返回，条目合用约 900 KB 序列化预算；省略时明确 `truncated: true`。这解决多个列表分开读取的观察窗口，不提供跨进程一致性或完整事件快照。GUI 已先订阅并缓冲，再取快照、补拉历史并按 event_id 合并；快照水位内的活动卡片与未完成回复仍回放，但不得覆盖较新的任务状态或重新触发排队发送。待审批/待回答卡片直接使用真实快照水位，不制造伪事件。`truncated` 会提示较早记录可能不完整，客户端不能因缺少某个待处理 ID 就关闭对应卡片。接线不等同于断线恢复验收。
 
@@ -157,7 +157,7 @@ GET    /workspaces/{workspace_id}/conversations/{conversation_id}/snapshot
 
 上面的路径仍受既有本机访问和工作区授权边界约束。不新增多模态 Runtime，不表示所有模型均支持图片输入，也不包含任意厂商原生图片输出、图生图/蒙版编辑、视频或音频。
 
-2026-10-15 已运行真实 Core/SDK 与 Web/Chromium 定向验收；图片上传/引用/重启、两种生图协议、审批/取消/失败与基础预览通过。当时发现 SVG 本地 `<use href="#…">` 被净化器移除。**2026-10-16 局部放行 `use` 后，原失败单测与真实 GUI 复验均通过，并新增 `xlink:href`、非法/外部引用过滤和实际渲染像素检查，SVG 缺陷关闭。** 历史失败数字保留。真实服务、密钥链、旧库迁移和 Windows 不在通过范围，准确回执见 [当前验收状态](../project/Roadmap.md#当前验收状态)。
+2026-10-15 已运行真实 Core/SDK 与 Web/Chromium 定向验收；图片上传/引用/重启、两种生图协议、审批/取消/失败与基础预览通过。当时发现 SVG 本地 `<use href="#…">` 被净化器移除。**2026-10-16 局部放行 `use` 后，原失败单测与真实 GUI 复验均通过，并新增 `xlink:href`、非法/外部引用过滤和实际渲染像素检查，SVG 缺陷关闭。** 历史失败数字保留。真实服务、密钥链、旧库迁移和 Windows 还没测，见 [已知限制](../project/Roadmap.md#3-当前已知限制)。
 
 协议参考：[OpenAI 图片输入说明](https://developers.openai.com/api/docs/guides/images-vision)、[Responses 生图工具](https://developers.openai.com/api/docs/guides/tools-image-generation)。
 
@@ -190,7 +190,7 @@ DELETE /workspaces/{workspace_id}/approvals/{approval_id}/authorization
 
 授权列表返回 `{"authorizations":[...]}`，项包括 `approval_id / conversation_id / task_id / scope / expires_at / resource`；撤销返回 204。两接口要求 owner 且校验主体，不删除原审批审计；任务/会话授权最长 8 小时。每次执行重新核对权限和回执，详见 [工具权限](../agent-capabilities/security/tool-permission.md#窄范围复用)。
 
-GUI 审批卡已接 scope 选择，只展示该审批版本允许的选项；会话管理接授权列表与撤销。快照额外解析 `reuse_scope_json` 为同一 DTO。完全访问显式确认后发送 `danger_full_access`，旧自动模式仅保留显示，不冒充完全访问。本次没有运行交互验收。
+GUI 审批卡已接 scope 选择，只展示该审批版本允许的选项；会话管理接授权列表与撤销。快照额外解析 `reuse_scope_json` 为同一 DTO。完全访问显式确认后发送 `danger_full_access`，旧自动模式仅保留显示，不冒充完全访问。
 
 #### 结构化任务结果
 
@@ -235,7 +235,7 @@ Schema 须为 JSON Schema 2020-12，根类型为 object，最多 16 KiB / 32 层
 
 Schema 随任务准入固定保存，审批/提问续接和重启恢复读取同一份约束；同 Schema 的提交也不会共享下一任务的执行状态。结果、对应助手消息和成功状态同事务提交，停止先提交则不保存结果，成功先提交则停止不撤销结果。事件通知晚于事务；通知失败后以查询结果与快照为准。
 
-若最终 checkpoint 已完成而结果事务尚未提交，最新 interrupted 任务可经既有 owner/version 恢复入口只补存结果，不重放工具；仍未完成的执行保留现有文件读写恢复限制，不新增浏览器/MCP 副作用重放。`structured_output / task_result` 能力位表示后端入口已接通，不表示所有 Provider 已实测。前端配置入口、自动串联步骤及运行验收本批不包含。
+若最终 checkpoint 已完成而结果事务尚未提交，最新 interrupted 任务可经既有 owner/version 恢复入口只补存结果，不重放工具；仍未完成的执行保留现有文件读写恢复限制，不新增浏览器/MCP 副作用重放。`structured_output / task_result` 能力位表示后端入口已接通，真实 Provider 尚未全部实测。前端配置入口、自动串联步骤及运行验收不在当前范围。
 
 ### 3.4 用户记忆与数据摘要
 
@@ -275,7 +275,7 @@ POST /workspaces/{workspace_id}/extension-settings/apply
 
 `skills` 返回实际启用的声明式技能元数据，`mcp-servers` 返回实际加载的 stdio Server 状态和工具名，不把期望启用当作已经连接。
 
-三个 `extension-settings` 接口只允许个人工作区 owner（Core 同时要求 `workspace_id=personal`）。GET/PUT/apply 返回同一个快照：`config / active_config / applied_revision / reload_required / reloading / runtime_ready / servers / skills / skill_errors / extension_error`。其中 skills 包括停用的已扫描元数据；config 是期望配置，active_config 仅含上次生效配置的 `revision / mcp_servers`，不重复返回 Skill 正文；extension_error 提示应用或资源清理失败。应用新版本要求 Skill 扫描成功且所有启用 MCP 已连接；已应用的 revision 不保证连接持续健康，仍须检查逐项状态。`runtime_ready=false` 时不宣称聊天链可运行。
+三个 `extension-settings` 接口只允许个人工作区 owner（Core 同时要求 `workspace_id=personal`）。GET/PUT/apply 返回同一个快照：`config / active_config / applied_revision / reload_required / reloading / runtime_ready / servers / skills / skill_errors / extension_error`。其中 skills 包括停用的已扫描元数据；config 是期望配置，active_config 仅含上次生效配置的 `revision / mcp_servers`，不重复返回 Skill 正文；extension_error 提示应用或资源清理失败。应用新版本要求 Skill 扫描成功且所有启用 MCP 已连接；已应用的 revision 不保证连接持续健康，仍须检查逐项状态。`runtime_ready=false` 时聊天链可能不可用。
 
 PUT 完整替换 `config`（2 MiB 上限）：`revision / mcp_servers / skill_directories / skills / disabled_skills`，校验通过后递增 revision，写现有 `workspace_settings` 并记审计，不操作运行中的进程。MCP 项包括 `namespace / transport=stdio / command / args / cwd / enabled / env_allowlist / secret_env / enabled_tools / disabled_tools / result_adapter / request_timeout_seconds`；托管 Skill 项包括 `name / content / enabled`，每个 Markdown 最大 256 KiB。只接受声明字段，不接受原始 env/secret 值。
 
@@ -289,13 +289,13 @@ PUT 完整替换 `config`（2 MiB 上限）：`revision / mcp_servers / skill_di
 
 apply 默认接受 `{"revision": <保存后的版本>}`，应用新配置。API 按 `secret_env` 从现有密钥链读取引用 `mcp.<namespace>.<ENV_NAME>`，在进程内传递凭证给 Core。Core 拒绝旧版本、重复应用或仍有运行/待审批/待回答的任务（409）；无效配置 400，非 owner 403。
 
-同一接口接受 `{"revision": <active_config.revision>, "restore_only": true}`，只恢复已生效配置中缺失的 MCP 连接、复用健康连接及已加载 Skill；允许等待审批/回答，不允许活动运行，不应用尚未生效的编辑。缺凭证或连接失败按服务器报告，已恢复服务保留可用；返回 200 不代表全部恢复。新聊天可尝试恢复可选扩展，部分失败不阻断聊天；文件任务恢复、回答提问及原生工具批准不启动无关 MCP，也不以所有启用连接恢复为前置条件。MCP 批准仅要求目标服务与确切工具可用，失败不消费决定。checkpoint、审批 hash/version 和每次工具权限仍由 Runtime 校验，后续调用不可用工具不会因此被放行。拒绝审批无需恢复 MCP 连接。
+同一接口接受 `{"revision": <active_config.revision>, "restore_only": true}`，只恢复已生效配置中缺失的 MCP 连接、复用健康连接及已加载 Skill；允许等待审批/回答，不允许活动运行，不应用尚未生效的编辑。缺凭证或连接失败按服务器报告，已恢复服务保留可用；返回 200 只表示请求已接受，仍需检查逐项状态。新聊天可尝试恢复可选扩展，部分失败不阻断聊天；文件任务恢复、回答提问及原生工具批准不启动无关 MCP，也不以所有启用连接恢复为前置条件。MCP 批准仅要求目标服务与确切工具可用，失败不消费决定。checkpoint、审批 hash/version 和每次工具权限仍由 Runtime 校验，后续调用不可用工具不会因此被放行。拒绝审批无需恢复 MCP 连接。
 
 配置或进程异常有逐项状态，不能用 HTTP 200 推断全部连接成功；基础 Runtime 或新配置准备失败返回错误并保留原配置、聊天入口及健康连接，只关闭本次新建资源。准备成功再释放被替换的旧资源。Core 持有应用任务到清理完成，调用方断线不提前开放新运行；请求超时后先 GET 查看 reloading/结果，不盲目重发 apply。
 
 凭证沿用 3.6 的 POST/PUT/DELETE 接口；值不进入扩展配置/GET/审计。更新/删除凭证不改活动进程环境，下次显式 apply 或重建缺失连接时生效；restore_only 不替换健康连接的凭证。复用连接的内存凭证快照取自该 client 实际启动环境，不把并发请求读到的新密钥误记为已生效；显式 apply 同样按实际环境比较，凭证变化时准备替换连接。卸载配置不删除程序、目录或凭证。当前只支持本地 stdio 与 Markdown/目录技能，不是技能包安装、版本授权或 Grant 平台，扩展边界见 [技能](../agent-capabilities/skills/skill-lifecycle.md)。
 
-配置保存/应用、失败保留健康版本、Skill 读取及 Core 重启加载生效配置已通过真实进程验收；凭证重启/轮换、并发恢复/应用中断、扫描故障及设置 GUI 全流程不在该通过范围，见 [当前验收状态](../project/Roadmap.md#当前验收状态)。
+配置保存/应用、失败保留健康版本、Skill 读取及 Core 重启加载生效配置已通过真实进程验收；凭证重启/轮换、并发恢复/应用中断、扫描故障及设置 GUI 全流程尚未覆盖，见 [已知限制](../project/Roadmap.md#3-当前已知限制)。
 
 ### 3.6 设置、模型和凭证引用
 
@@ -395,7 +395,7 @@ API 密钥的注入提示返回 `risk_probability: 1.0` 并转换为 `risk_score
 
 安全确认的提问选项含独立的 `value` 与 `label`：新记录提交 `safety.continue / safety.stop`，运行时只用标识决定继续或停止，GUI 按标识翻译标签。回答仍走原提问 API、版本检查和 LangGraph 恢复；未知选项拒绝提交。普通模型提问继续允许自由文本。升级前没有 `value` 的安全确认保留原记录，仅在读取此类旧回执时兼容原确切回答；不改写 checkpoint。历史消息保存可读标签，提问回执保存决策标识。
 
-`capabilities.safety_review` 表示配置与运行时审查能力可用。启用后，主模型每次调用前审查新增的人类提示词；可信模型跳过审查，审查失败保守拦截，高于阈值时复用结构化提问/恢复链路等待人工决定。接口和 GUI 测试已完成，KEV 与 LAYA HTTP 联调已完成；完整端到端验收仍待执行。验收记录见 [交付路线与状态](../project/Roadmap.md)。
+`capabilities.safety_review` 表示配置与运行时审查能力可用。启用后，主模型每次调用前审查新增的人类提示词；可信模型跳过审查，审查失败保守拦截，高于阈值时复用结构化提问/恢复链路等待人工决定。接口和 GUI 测试已完成，KEV 与 LAYA HTTP 联调已完成；完整端到端尚未验收。验收记录见 [交付路线与状态](../project/Roadmap.md)。
 
 读取凭证只返回引用和元数据，不返回敏感凭证值。
 
@@ -407,11 +407,11 @@ API 密钥的注入提示返回 `risk_probability: 1.0` 并转换为 `risk_score
 窗口未知时，窗口、输入预算和容量压缩阈值均为 null；不把旧的 32000 产品默认值冒充容量。
 容量已知时，预算为窗口减输出预留和安全余量，不再对所有模型套用 32000 上限。
 此接口不返回对话用量，客户端必须从当前会话的执行回执取得用量，不能借用其他会话。
-本次接口和恢复链路为源码接入状态，未运行测试或真实 Provider 验收。
+
 
 **会话思考控制。** `models/{model_id}/thinking` 返回 `kind: effort | toggle | unavailable`、
 `options: string[]`、`default`、`source` 和 `reason`；列表由 Core 确认，前端不按模型名称猜测。
-`default` 为空表示默认值未知，不等于关闭思考。查询只读取能力资料，不发生成请求、不自动加载模型。
+`default` 为空表示默认值未知，关闭思考需要显式配置。查询只读取能力资料，不发生成请求、不自动加载模型。
 API 在读取能力、保存显式思考设置之前，沿用 OS 凭证存储恢复所选模型的 Core 内存凭证，
 不启动 MCP/Skill，不返回 Secret。
 
@@ -429,7 +429,7 @@ LM Studio 仅原生 API 暴露的 on/off 尚不映射到兼容接口，返回 `n
 
 模型目录支持多选及手动追加 ID；每个选中模型仍为独立配置。设置页一次提交 `POST models/actions/batch`，不再逐项复制凭证、保存和删除。请求包含 `operation_id`（一次编辑的 UUID）、`expected_revision`（打开编辑页时的目录版本）、`profiles`、`removed_ids` 和可选服务 `api_key`。新配置的 `id` 留空，由后端根据编辑标识及模型 ID 分配稳定标识；已有配置保留原 ID、默认项及独立生成设置。
 
-后端复用现有模型变更锁，先校验整批输入和容量，再保存、最后删除；目录版本不符返回 `409 MODEL_CATALOG_CHANGED`，不写入。GET models、设置默认项及批量响应都携带 `revision`。新增项的密钥只从本批涉及的同工作区、同协议、同规范化地址配置复用，已有独立凭证不被空输入覆盖；明确填写新密钥则应用到本批模型。地址/协议改变仍先撤销旧凭证。
+后端复用现有模型变更锁，先校验整批输入和容量，再保存、最后删除；目录版本不符返回 `409 MODEL_CATALOG_CHANGED`，不写入。GET models、设置默认项及批量响应都携带 `revision`。新增项的密钥只从本次涉及的同工作区、同协议、同规范化地址配置复用，已有独立凭证不被空输入覆盖；明确填写新密钥则应用到这些模型。地址/协议改变仍先撤销旧凭证。
 
 `reuse_credentials` 表示本次编辑是否要求沿用已配置服务密钥，默认 true；无密钥服务由设置页明确提交 false。要求复用但无法取得来源密钥时，在任何写入/删除之前返回错误，不能静默创建无密钥配置再移除旧来源。页面只提交此意图，不选择或复制各模型的凭证；协议/地址改变后不能沿用原服务密钥。
 
@@ -464,16 +464,16 @@ SQLite 与 OS 密钥链不具备共同事务。可预期的部分失败返回实
 `runtime-status` 是工作区所有者可见的只读投影，返回规范化工作区根目录及来源、单一 `backend` 服务状态和版本、即时生效项与需重启项。它不修改部署配置，也不声称能够检测运行期间手工编辑的外部 YAML。
 
 响应包含 `sandbox: {platform, backend, status, reason, network_isolation, cpu_memory_limits, hint}`，另含 `scope / other_boundaries / per_process_rlimits_available / captured_log_limit_bytes / disk_quota`。
-这是宿主能力而非当前对话的授权结果：Linux 通过带断网、禁用嵌套 user namespace 和去除 capabilities 的最小 bubblewrap 启动探测才返回 `available`；探测在线程中执行、单次最多 2 秒，结果在后端进程内缓存。修改系统配置后需重启后端重新探测。它不保证特定工作区挂载成功，也不代表完全访问任务启用了隔离。
-Linux 区分 `bubblewrap_not_installed / bubblewrap_incompatible / bubblewrap_permission_denied / bubblewrap_launch_failed / bubblewrap_probe_timeout / bubblewrap_probe_failed`；提示为固定安全文本，不回显原始进程 stderr。其他平台未接入返回 `native_backend_not_integrated`。Windows 为 `backend: srt-windows, experimental: true`：未启用/缺依赖返回 `unavailable` 与 `windows_sandbox_disabled / dependency_unavailable`；配置启用且本地依赖存在返回 `unverified / verification_on_execute`，不冒充 `available`。Windows 设置查询不启动 sandbox 进程或修改 ACL；账户、WFP 与路径授权由实际命令启动时的官方 SDK 校验。增加 `dns_isolation=false / interactive_stdin=false / read_boundary=dedicated_account_acl_and_explicit_denies`。Windows 的 `network_isolation=false` 表示状态查询未验证，不是命令可绕过网络策略。
+这是宿主能力而非当前对话的授权结果：Linux 通过带断网、禁用嵌套 user namespace 和去除 capabilities 的最小 bubblewrap 启动探测才返回 `available`；探测在线程中执行、单次最多 2 秒，结果在后端进程内缓存。修改系统配置后需重启后端重新探测。它不保证特定工作区挂载成功；完全访问任务是否启用隔离以实际执行为准。
+Linux 区分 `bubblewrap_not_installed / bubblewrap_incompatible / bubblewrap_permission_denied / bubblewrap_launch_failed / bubblewrap_probe_timeout / bubblewrap_probe_failed`；提示为固定安全文本，不回显原始进程 stderr。其他平台未接入返回 `native_backend_not_integrated`。Windows 为 `backend: srt-windows, experimental: true`：未启用/缺依赖返回 `unavailable` 与 `windows_sandbox_disabled / dependency_unavailable`；配置启用且本地依赖存在返回 `unverified / verification_on_execute`，不会返回 `available`。Windows 设置查询不启动 sandbox 进程或修改 ACL；账户、WFP 与路径授权由实际命令启动时的官方 SDK 校验。增加 `dns_isolation=false / interactive_stdin=false / read_boundary=dedicated_account_acl_and_explicit_denies`。Windows 的 `network_isolation=false` 表示状态查询未验证；命令仍受网络策略约束。
 
-`scope=command_processes`，不是整个 Agent 的安全状态。`other_boundaries.file_search` 说明跨平台受控搜索，其他项说明进程内文件策略、MCP 宿主进程与 Chromium 原生沙箱；这些说明不代表对应依赖已安装或启动成功。Windows 沙箱进程日志/停止沿用原 API，进程快照的 `stdin_available=false`；不得将内部停止管道投影为用户 stdin。
+`scope=command_processes`，不是整个 Agent 的安全状态。`other_boundaries.file_search` 说明跨平台受控搜索，其他项说明进程内文件策略、MCP 宿主进程与 Chromium 原生沙箱；对应依赖是否安装、能否启动，以实际运行为准。Windows 沙箱进程日志/停止沿用原 API，进程快照的 `stdin_available=false`；不得将内部停止管道投影为用户 stdin。
 
 响应另含 `file_search: {status, backend: "ripgrep", requires_process_sandbox: false, verified: false, reason, hint}`。发现工作区之外的可信可执行文件时 `status=available` 并附 `executable`，否则 `status=unavailable, reason=trusted_ripgrep_not_found`。此项仅做 PATH/文件检查，不启动搜索进程；`available` 表示依赖已发现，不是搜索执行验收通过。与 `sandbox.status` 独立，受限命令不可用不能解释为普通文件搜索不可用。API 启动日志也报告这两项。
 
 命令工具失败结果可附 `data.sandbox_reason`，例如 `executable_outside_sandbox` 表示程序已安装但不在命令可读范围，区别于 `COMMAND_UNAVAILABLE`。已执行命令的结果附 `network_authorized`，表示本次策略是否授权联网，不表示网络连通性或请求已成功。Linux 工具链只读目录与缓存策略来自启动 YAML，不是模型参数、客户端授权或新的设置写入接口；宿主能力探测不验证每个工作区的这些目录。
 
-`per_process_rlimits_available` 仅表示 Linux 系统位置存在 prlimit；是否配置见启动 YAML，实际应用失败时命令不会执行。它不是 cgroup/Job Object 总资源配额，因此原 `cpu_memory_limits` 继续为 `false`。`captured_log_limit_bytes=8388608` 表示单次命令捕获日志总量上限，`disk_quota=false` 明确没有工作区磁盘配额。工具结果新增 `output_limit_exceeded / output_bytes_limit / process_limits`；`process_limits` 的零值表示未额外施加该限制，超量输出返回 `COMMAND_OUTPUT_LIMIT`。旧客户端可忽略新增字段；本批未修改设置界面。
+`per_process_rlimits_available` 仅表示 Linux 系统位置存在 prlimit；是否配置见启动 YAML，实际应用失败时命令不会执行。它不是 cgroup/Job Object 总资源配额，因此原 `cpu_memory_limits` 继续为 `false`。`captured_log_limit_bytes=8388608` 表示单次命令捕获日志总量上限，`disk_quota=false` 明确没有工作区磁盘配额。工具结果新增 `output_limit_exceeded / output_bytes_limit / process_limits`；`process_limits` 的零值表示未额外施加该限制，超量输出返回 `COMMAND_OUTPUT_LIMIT`。旧客户端可忽略新增字段。
 
 #### 本地用量与可查询额度（2026-10-13）
 
@@ -524,7 +524,7 @@ context 事件补全，无法确定的单独列为未归属记录，不按当前
 
 额度响应为 `{kind, values: [{currency, amount}], checked_at}`；金额用十进制字符串，未提供金额时
 values 为空，不算成零或无限。多配置不相加余额，前端可选择本次查询所使用的模型配置。
-当前为源码接入状态，未运行测试、构建或真实供应商查询。
+
 
 ### 3.7 工作区文件与变更
 
@@ -563,18 +563,18 @@ POST 接口为用户显式文件操作，限工作区所有者；不作为 Agent
 | `GET /jobs?conversation_id=...` | `{jobs: [...]}`，真实命令进程与已保存的结束结果，最多 100 条命令调用范围内的记录 |
 | `POST /jobs/{job_id}/stop` | 终止本 Core 持有的进程句柄并等待退出，返回 204；不是取消整个 Agent 任务 |
 | `POST /jobs/{job_id}/input` | `{"text":"一行输入\n","eof":false}`；向获批的交互式命令发送最多 4096 字节，或以空 text/eof=true 关闭输入；确认后返回 204，不自动重试 |
-| `POST /tasks/{task_id}/resume` | 工作区所有者显式恢复被进程中断的文件任务，正文 `{"version":当前任务版本}`；确认接受后返回 202，不代表完成 |
+| `POST /tasks/{task_id}/resume` | 工作区所有者显式恢复被进程中断的文件任务，正文 `{"version":当前任务版本}`；确认接受后返回 202，完成看任务终态 |
 
-**能力边界。** `approval_note / approval_detail / task_inspection / file_change_events / process_list / process_stop` 为本批支持项。
-2026-10-11 增加 `process_input`，每个 job 返回 `stdin_available`。GUI 必须同时检查进程 live、stdin_available 和能力标志，不能把历史记录当成可操作进程。输入正文不保存到审计或对话，响应丢失不代表未送达；进程自行回显的输出仍可能包含输入。当前是有超时的标准管道，不提供 PTY 或断线后恢复进程。
+**能力边界。** `approval_note / approval_detail / task_inspection / file_change_events / process_list / process_stop` 为当前支持项。
+2026-10-11 增加 `process_input`，每个 job 返回 `stdin_available`。GUI 必须同时检查进程 live、stdin_available 和能力标志，不能把历史记录当成可操作进程。输入正文不保存到审计或对话，响应丢失时无法确认是否送达；进程自行回显的输出仍可能包含输入。当前是有超时的标准管道，不提供 PTY 或断线后恢复进程。
 `structured_questions / task_input / structured_plan / context_estimate` 在 Core 的唯一 LangGraph Runtime 就绪时为 true；关闭或未就绪时不对外宣称可执行。这些标志表示后端能力，工具仍可能被工作区配置停用。
 
-`scoped_memory` 同样跟随 Runtime 就绪，表示提供两层显式开关控制的请求记忆投影，不代表某个文件夹/对话已开启，也不代表已实现自动提取。
-`session_approval / task_approval / approval_authorization_revocation / permission_boundary_v2 / conversation_fork` 在 Runtime 就绪时为 true，表示支持上述新接口/语义，不代表前端已完成联调或主机沙箱可用。`auto_review / model_context_percentage / turn_rollback / automatic_memory_events` 为 false。回合回滚和审核 Agent 不在本批范围。
+`scoped_memory` 同样跟随 Runtime 就绪，只表示提供两层显式开关控制的请求记忆投影；文件夹/对话开关和自动提取另行判断。
+`session_approval / task_approval / approval_authorization_revocation / permission_boundary_v2 / conversation_fork` 在 Runtime 就绪时为 true，表示支持上述新接口/语义；前端联调和主机沙箱另行验证。`auto_review / model_context_percentage / turn_rollback / automatic_memory_events` 为 false。回合回滚和审核 Agent 不在当前范围。
 
 **显式任务恢复。** `task_resume` 在 Runtime 就绪时为 true，表示提供受限恢复入口，不表示所有 interrupted 任务均可重放。API 先按现有凭证入口补齐 Core 的进程内模型密钥，再直接调用 `AgentCore.resume_task(workspace_id, task_id, principal_id, version)`。Core 只接受所有者、最新版本、最新会话回合、无活跃运行、未归档且存在未完成 checkpoint 的 `interrupted` 任务；等待审批的任务继续使用 Approval API，不走这个接口。旧任务无 checkpoint 也按不可恢复处理；状态/版本/checkpoint 不满足返回 409，越权返回 403，任务不在工作区内返回 404。
 
-首版恢复只接受保留的 checkpoint 中工具调用均为 `file_read / file_write` 的任务，以及这两种直接 `/tool` 命令。保留历史若包含旧回合的其他工具也会保守拒绝；命令、Browser、MCP 等不自动重放。恢复不等于重新授权：未批准的调用仍暂停等待，已批准的调用仍核对当前策略及审批 hash/version。文件内容匹配时可零写入核对；不同内容可能被再次覆盖，接口不提供外部编辑冲突保护、回滚或 exactly-once 保证。调用者应先检查目标文件，确认重放意图。
+首版恢复只接受保留的 checkpoint 中工具调用均为 `file_read / file_write` 的任务，以及这两种直接 `/tool` 命令。保留历史若包含旧回合的其他工具也会保守拒绝；命令、Browser、MCP 等不自动重放。恢复不会重新授权：未批准的调用仍暂停等待，已批准的调用仍核对当前策略及审批 hash/version。文件内容匹配时可零写入核对；不同内容可能被再次覆盖，接口不提供外部编辑冲突保护、回滚或 exactly-once 保证。调用者应先检查目标文件，确认重放意图。
 
 接受事件 `task.resumed` 使用既有 AgentEvent DTO 和持久 event_id/sequence/occurred_at，payload 包含 `execution_resumed: true` 与本次 `trace_id`。API 收到该请求的确认才返回 202，后续事件透传原 WS 通道；并发拒绝请求不会冒领其他恢复请求的事件。执行与订阅分离：断线不取消；用户停止与 Core shutdown 都取消并等待同一根任务。UI 不接触 checkpoint/continuation，不新增前端状态机。验收范围见 [交付路线与状态](../project/Roadmap.md)。
 
@@ -591,17 +591,17 @@ GUI 的收件箱与活动卡片已接入问题选项、自由文本及“回答�
 Alt+Enter 显式加入下一回合待发列表；等待审批或提问时只能稍后发送，或就地处理卡片。
 驳回理由通过 Approval API 的 note 保存并交给模型。`deny` 只拒绝该操作，`scope` 必须为 `once`；任务继续或等待同批下一项审批，不发布 `task.cancelled`。批次审阅完成后，被拒绝调用通过既有 `tool.failed`（`error_code=APPROVAL_REJECTED`）投影，产品工具状态为 `denied`。续接失败另发 `task.failed`，拒绝决定仍有效；显式 cancel 才停止整轮。
 权限策略拒绝或工具未启用时，同样不执行工具，但使用 `tool.failed` 的 `error_code=TOOL_DENIED`、`denied=true`，工具记录为 `denied`，审计为 `tool.denied`；不得与用户驳回审批或工具执行后失败混淆。
-阶段 3a 的补充输入、计划恢复与运行抽屉已进行真实 API/Core 验收，见
-[UI 设计的阶段 3a 记录](agent-ui-design.md#10-阶段-3a--数据链路)。
-该验收不代表审批/回答的跨进程恢复通过；Mock 未实现问题续接，返回空问题列表。
+补充输入、计划恢复与运行抽屉已做真实 API/Core 验收，记录见
+[UI 设计的数据链路一节](agent-ui-design.md#10-数据链路)。
+审批/回答的跨进程恢复尚未验证；Mock 未实现问题续接，返回空问题列表。
 
-**插话。** 仅接受当前活跃的普通模型任务，不接受 `/tool` 或正在等待交互的任务。content 最多 10000 字符，每任务最多 20 条未消费输入；幂等键最多 128 字节，同键不同内容返回 409。`task.input.queued` 是接收回执；下一模型步骤在原生 middleware 中追加 `HumanMessage`，包含该输入的模型调用成功返回后才保存可见用户消息并发出 `task.input.consumed`。预算拒绝、失败和取消不冒充已消费；Provider 可能已收到但响应丢失的情况仍不能确认，`not_consumed` 不是“服务端一定没收到”的证明。`consumed` 也不保证后续工具或整个任务成功。尚未开始的旧工具提议会收到未执行结果，让模型读取新输入后重新判断；不抢停已经开始的工具或模型流。若当前回合结束前未确认消费，查询状态为 `not_consumed`，不自动新建回合或重发。客户端按 input ID 合并状态，不能因迟到的 queued 回执把 consumed 状态改回 queued。
+**插话。** 仅接受当前活跃的普通模型任务，不接受 `/tool` 或正在等待交互的任务。content 最多 10000 字符，每任务最多 20 条未消费输入；幂等键最多 128 字节，同键不同内容返回 409。`task.input.queued` 是接收回执；下一模型步骤在原生 middleware 中追加 `HumanMessage`，包含该输入的模型调用成功返回后才保存可见用户消息并发出 `task.input.consumed`。预算拒绝、失败和取消都不会标记为已消费；Provider 可能已收到但响应丢失的情况仍不能确认，`not_consumed` 不能证明服务端一定没收到。`consumed` 也不保证后续工具或整个任务成功。尚未开始的旧工具提议会收到未执行结果，让模型读取新输入后重新判断；不抢停已经开始的工具或模型流。若当前回合结束前未确认消费，查询状态为 `not_consumed`，不自动新建回合或重发。客户端按 input ID 合并状态，不能因迟到的 queued 回执把 consumed 状态改回 queued。
 
 **计划与上下文。** 计划直接复用 LangChain `TodoListMiddleware / write_todos`；`plan.updated.items` 是 `{content, status}` 数组，status 为 `pending / in_progress / completed`，只作用于当前任务，不是工作区 TODO。`context.updated` 提供 `call_id / model_name / estimated_input_tokens / input_budget_tokens / measurement`；本地估算为 `estimate`，显式超限回执提供的输入计数为 `provider`，沿用 `estimated_input_tokens` 字段兼容现有消费者，不表示计费成功。`model_context_window / context_percent` 在容量已知时有值，否则为 null，绝不把产品预算冒充模型窗口。
 
 正式调用的 `context.updated.memory` 为可选对象：`included_count / candidate_count / ids / estimated_tokens / token_limit`，不含记忆原文。`candidate_count` 是通过两层开关和归属筛选后有界查询的条目数（最多 100），不是总库存；未启用时为 0。`estimated_input_tokens` 已包含参考区，不能再加一次 `memory.estimated_tokens`。压缩前的预检和辅助摘要不提供此字段，不据此覆盖本次正式调用的收据。
 
-容量附加字段：`capacity_source` 包括 `lmstudio.loaded_instance / ollama.loaded_instance / ollama.model_info / model_profile / provider_metadata / provider_error / models.dev / sdk_profile / route_config / route_default / null`，分别表示加载实例、Ollama 模型资料、显式模型覆盖、当前服务资料、拒绝回执、当前路由目录/SDK 资料、YAML 路由默认值、内置路由假定值和未知。目录是资料上限，不冒充实际加载窗口；未知远端路由默认容量为 262,144，`route_default` 对应 `capacity_status=assumed`，不是实测。`capacity_status` 还可为 `known / cached / unknown / model_catalog_unavailable / metadata_unavailable / unsupported_metadata / unauthorized / not_loaded / model_not_found / ambiguous_instance`；`capacity_checked_at` 为 UTC 解析/观测时间。`output_reserved_tokens / safety_margin_tokens / compaction_trigger_tokens` 分别是输出预留、估算余量和自动压缩阈值，均不是已消耗 token。`purpose` 区分 `response / summary`。压缩前和正式调用前均可发布，预检的 `context_*` call ID 不是模型调用次数，只有 `model.call.started` 才代表请求开始；不能对多个 `context.updated` 求和。模型真实计费计数继续通过既有 `model.usage` 提供。
+容量附加字段：`capacity_source` 包括 `lmstudio.loaded_instance / ollama.loaded_instance / ollama.model_info / model_profile / provider_metadata / provider_error / models.dev / sdk_profile / route_config / route_default / null`，分别表示加载实例、Ollama 模型资料、显式模型覆盖、当前服务资料、拒绝回执、当前路由目录/SDK 资料、YAML 路由默认值、内置路由假定值和未知。目录是资料上限，实际加载窗口以服务端为准；未知远端路由默认容量为 262,144，`route_default` 对应 `capacity_status=assumed`，不是实测值。`capacity_status` 还可为 `known / cached / unknown / model_catalog_unavailable / metadata_unavailable / unsupported_metadata / unauthorized / not_loaded / model_not_found / ambiguous_instance`；`capacity_checked_at` 为 UTC 解析/观测时间。`output_reserved_tokens / safety_margin_tokens / compaction_trigger_tokens` 分别是输出预留、估算余量和自动压缩阈值，均不是已消耗 token。`purpose` 区分 `response / summary`。压缩前和正式调用前均可发布，预检的 `context_*` call ID 不是模型调用次数，只有 `model.call.started` 才代表请求开始；不能对多个 `context.updated` 求和。模型真实计费计数继续通过既有 `model.usage` 提供。
 
 容量未知时不按产品默认预算触发模型压力压缩，也不发布伪造阈值。明确的服务端超限错误可以
 触发一次强制原生摘要，再重试一次；只在尚无可见 Token、历史实际缩减且当前输入保留时进行。
@@ -613,31 +613,31 @@ Alt+Enter 显式加入下一回合待发列表；等待审批或提问时只能�
 
 模型配置使用可选 `context_window`（正的安全整数；省略/0 表示没有模型覆盖），从设置页获取的服务目录按精确模型 ID 保存，经既有 REST / Repository 传递，无数据库增列。换服务或换模型不能沿用另一模型的容量。
 
-Runtime 使用 Core 已拥有的官方 SDK 查询当前服务 `/models`，读取精确模型项的 `context_window / context_length / contextWindow / max_model_len`。LM Studio 加载实例接口只对 `models.routes` 中明确设置 `metadata_api: lmstudio` 的 compatible 路由启用，不凭端口或本地地址探测。models.dev/SDK 资料只适用于已识别的当前路由，不跨厂商匹配模型 ID，也不把目录内 localhost 样例当作本机服务身份；自定义 Anthropic/OpenAI 协议地址不等于官方路由。
+Runtime 使用 Core 已拥有的官方 SDK 查询当前服务 `/models`，读取精确模型项的 `context_window / context_length / contextWindow / max_model_len`。LM Studio 加载实例接口只对 `models.routes` 中明确设置 `metadata_api: lmstudio` 的 compatible 路由启用，不凭端口或本地地址探测。models.dev/SDK 资料只适用于已识别的当前路由，不跨厂商匹配模型 ID，也不把目录内 localhost 样例当作本机服务身份；自定义 Anthropic/OpenAI 协议地址与官方路由分开处理。
 
-无资料的远端接入使用 `models.routes[].default_context_window`，未配置时采用 262,144 的 `assumed` 回退，本地/Ollama 无默认云端回退。输出上限与旧产品预算仍不冒充窗口。持久容量记录使用内部 `capacity_policy / catalog_route`，本次策略升级使旧推断缓存失效，不删除聊天和用量。
+无资料的远端接入使用 `models.routes[].default_context_window`，未配置时采用 262,144 的 `assumed` 回退，本地/Ollama 无默认云端回退。输出上限与旧产品预算不当作窗口。持久容量记录使用内部 `capacity_policy / catalog_route`，本次策略升级使旧推断缓存失效，不删除聊天和用量。
 
 `context.updated` 保持 `model_id / model_key`：后者为 `[provider, normalized_base_url, model, context_window_or_null]` 的紧凑 JSON，仅用于配置关联，不含密钥。前端同时匹配配置 ID 与该关联值；旧事件缺少关联值时不把历史容量套到当前配置，新请求发布新的观测。路由配置由现有 YAML 读取，不新增 REST 字段或设置系统。
 
-压缩状态通过 `context.compaction.started / failed / skipped` 与既有 `context.compacted` 发布。started 带 `before_tokens / input_budget_tokens / model_context_window / measurement`；failed 带 `message / error_type / model_context_window` 且保留原历史；skipped 的 `reason=no_compressible_history` 不代表完成压缩。前端按事件投影独立压缩状态，不从普通“思考中”推断；窗口仪表保留 measurement、容量来源、获取状态与观测时间，未知窗口只显示已有 Token 计数/估算、不绘制占用比例。聊天过程与底部显示压缩失败原因，关闭窗口用量显示不隐藏失败反馈。本次前端接入未运行测试或真实服务验收，后端没有手动压缩接口，界面不提供该按钮。
+压缩状态通过 `context.compaction.started / failed / skipped` 与既有 `context.compacted` 发布。started 带 `before_tokens / input_budget_tokens / model_context_window / measurement`；failed 带 `message / error_type / model_context_window` 且保留原历史；skipped 的 `reason=no_compressible_history` 只表示没有可压缩历史。前端按事件投影独立压缩状态，不从普通“思考中”推断；窗口仪表保留 measurement、容量来源、获取状态与观测时间，未知窗口只显示已有 Token 计数/估算、不绘制占用比例。聊天过程与底部显示压缩失败原因，关闭窗口用量显示不隐藏失败反馈。后端没有手动压缩接口，界面不提供该按钮。
 
 用量汇总中，旧记录若缺少 `call_id` 或调用开始回执，`calls / failed_calls` 返回 null（未知），不能显示为“0 次调用”。已收到的 token 小计和 `reported_calls` 仍可查询，但不是完整账单或调用次数的估计。
 
 压缩触发的 `reason` 区分 `pressure`（模型步骤前）、`input_pressure`（补充输入后的最终请求）和 `provider_overflow`（服务端明确拒绝）。根任务取消时用既有 `context.compaction.skipped`、`reason=cancelled` 结束压缩展示，再发布任务终态；不把取消记作压缩成功。摘要调用也发布 `model.call.completed`、`purpose=summary`，即使服务未返回用量计数。
 
-`context.compacted` 只在 LangGraph 持久上下文确认包含该摘要后发布，摘要模型返回不等于压缩提交。取消恰好发生在提交后时，允许先报告已确认的压缩、再报告任务取消；无法确认提交时发布 skipped/failed（失败原因 `checkpoint_unconfirmed`），保留原始聊天记录。checkpoint 的完整内容不对外推送。
+`context.compacted` 只在 LangGraph 持久上下文确认包含该摘要后发布，摘要模型返回不表示压缩已提交。取消恰好发生在提交后时，允许先报告已确认的压缩、再报告任务取消；无法确认提交时发布 skipped/failed（失败原因 `checkpoint_unconfirmed`），保留原始聊天记录。checkpoint 的完整内容不对外推送。
 
-MCP 失败沿用工具事件：`MCP_UNAVAILABLE` 表示本次请求未发送；`MCP_OUTCOME_UNKNOWN` 表示连接/超时后没有可靠回执，不能断言远端未执行，也不得自动重试。两者通过现有 `user_hint / action` 指向 `/integrations`，模型可继续其他获准操作，不将整个任务直接标为失败。
+MCP 失败沿用工具事件：`MCP_UNAVAILABLE` 表示本次请求未发送；`MCP_OUTCOME_UNKNOWN` 表示连接/超时后没有可靠回执，远端可能已执行，不要自动重试。两者通过现有 `user_hint / action` 指向 `/integrations`，模型可继续其他获准操作，不将整个任务直接标为失败。
 
 浏览器取消后的关闭未确认时，沿用 `tool.failed` 的 `TOOL_CLEANUP_PENDING / user_hint` 提醒用户检查实际结果，随后任务仍按取消结束，不把取消转换成可继续执行的普通失败。该提示不表示 Chromium 已停止：对应页面已禁止继续调用，context/profile 所有权保留到公开 close 事件或 Core 关闭处理；禁止自动重试原动作。关闭等待上限 10 秒，后台回收可继续处理未确认资源。
 
 浏览器页面在重启、主动关闭或空闲回收后失效，工具返回 `BROWSER_SESSION_EXPIRED`，沿用 `tool.failed.error_code / user_hint` 提醒重新打开 URL、必要时复用原命名 profile；不自动重试旧句柄或重放上传、下载和点击。进程输入超时/断管仍通过原有错误响应告知“无法确认送达，不要自动重发”；已退出、未启用 stdin 与输入结果不确定分别使用经过筛选的产品提示，不返回第三方异常原文。
 
-**文件变更。** `file_write / file_edit` 成功后发出任务归属的 `file.changed`：`path / tool_call_id / diff / diff_truncated / added / removed / before_hash / after_hash`。Diff 是单次工具操作前后的证据，不是整个回合净变化，不应将同文件多次修改的行数相加冒充净变化。前后内容各最多读取 256 KB，差异文本最多 64000 字符；二进制、无法读取或行数过多时 `diff_truncated: true`，无法计算的行数/hash 为 null。命令、MCP 或外部程序修改文件不在此事件覆盖内，仍使用现有工作区 Git Diff。发生写入后、事件提交前的崩溃可能缺少该投影；重放已满足内容的写入不会伪造原始 before image。同字节核对成功的 `file_write` 仍通过标准工具投影返回结果：`tool.completed.data` 含 `reconciled: true / bytes_written: 0 / size_bytes`，`file.changed` 含可选 `reconciled: true`，并以 `before_hash: null / diff_truncated: true` 表示原始差异不可恢复，不表示产生了新的磁盘写入。本批不提供文件回滚快照。
+**文件变更。** `file_write / file_edit` 成功后发出任务归属的 `file.changed`：`path / tool_call_id / diff / diff_truncated / added / removed / before_hash / after_hash`。Diff 是单次工具操作前后的证据，不是整个回合净变化，不应将同文件多次修改的行数相加冒充净变化。前后内容各最多读取 256 KB，差异文本最多 64000 字符；二进制、无法读取或行数过多时 `diff_truncated: true`，无法计算的行数/hash 为 null。命令、MCP 或外部程序修改文件不在此事件覆盖内，仍使用现有工作区 Git Diff。发生写入后、事件提交前的崩溃可能缺少该投影；重放已满足内容的写入不会伪造原始 before image。同字节核对成功的 `file_write` 仍通过标准工具投影返回结果：`tool.completed.data` 含 `reconciled: true / bytes_written: 0 / size_bytes`，`file.changed` 含可选 `reconciled: true`，并以 `before_hash: null / diff_truncated: true` 表示原始差异不可恢复，不表示产生了新的磁盘写入。当前不提供文件回滚快照。
 
 **进程。** job ID 使用真实命令的 tool_call ID，只允许停止当前 Core 持有且属于该工作区的句柄，客户端不能提交任意 PID。日志通过 GET 轮询，不是新增日志 WebSocket 协议；`log_tail` 为 stdout/stderr 各约 4000 的尾部片段。POSIX 使用不移动子进程文件偏移的 `pread` 读取；无 `pread` 的平台 `live_logs_available: false`，只提供已有完成输出。仍沿用现有执行超时、进程组终止及平台限制；这不是 detached background scheduler，不保证跨 Core 重启接管进程。
 
-权限拒绝、版本冲突、任务已结束等情况不会以空列表/假成功代替真实写入结果。前端已接入相关端点和事件映射，但接线和 Mock 演示不等于真实 Python API 已联调通过；验收范围见 [交付路线与状态](../project/Roadmap.md)。
+权限拒绝、版本冲突、任务已结束等情况不会以空列表/假成功代替真实写入结果。前端已接入相关端点和事件映射；真实 Python API 联调范围见 [交付路线与状态](../project/Roadmap.md)。
 
 ## 4. 命令语义
 
@@ -651,7 +651,7 @@ MCP 失败沿用工具事件：`MCP_UNAVAILABLE` 表示本次请求未发送；`
 
 生命周期只允许一个 worker。HTTP 入口完成输入与工作区归属校验，Core 决定执行、审批、取消及恢复；客户端不能自选可信 principal。请求体上限 2 MiB，系统文件/凭证操作在工作线程中完成，HTTP 断线不取消已接纳任务。
 
-原有会话、消息、任务、审批与事件 JSON 保持兼容；`runtime-status` 的 `gateway / agent_core` 合并为 `backend`，前端按单服务状态展示。Web 构建版由同一后端提供页面，未知 API 地址不返回 SPA 页面。迁移后已补真实 Core HTTP/WS、审批重启与文件恢复、Web 构建及指定 GUI 场景验收；不代表全部 API、平台或安装包通过，见 [当前验收状态](../project/Roadmap.md#当前验收状态)。
+原有会话、消息、任务、审批与事件 JSON 保持兼容；`runtime-status` 的 `gateway / agent_core` 合并为 `backend`，前端按单服务状态展示。Web 构建版由同一后端提供页面，未知 API 地址不返回 SPA 页面。迁移后已补真实 Core HTTP/WS、审批重启与文件恢复、Web 构建及指定 GUI 场景验收；全部 API、平台和安装包尚未完整验收，见 [已知限制](../project/Roadmap.md#3-当前已知限制)。
 
 ## 6. WebSocket 事件
 
@@ -744,7 +744,7 @@ risk_score / threshold / skipped / skip_reason / blocked / reason`。`skipped: t
 事件先写入任务事件日志再转发，客户端按 `event_id` 去重。拦截后的暂停复用既有任务状态事件
 （`task.waiting_approval` / `task.interrupted`），不新增审批资源；人工决定通过既有任务恢复或取消接口
 提交，结果由 `task.*` 状态事件回执，`review_id` 用于把决定关联回该次审查。本事件由运行时审查接入后
-开始发送，本批仅定义契约。
+开始发送，这里只定义契约。
 
 重复聊天提交由 Core 返回 `replayed` 回执，API 转为 HTTP 200，不持久化、不广播为 UI 事件，也不向前端泄漏 LangGraph 类型。
 
@@ -778,4 +778,4 @@ risk_score / threshold / skipped / skip_reason / blocked / reason`。`skipped: t
 - Event 使用 `schema_version`。
 - 请求模型与 JSON DTO 的兼容性独立于内部实现语言；不再维护 Proto。
 - Breaking change 必须新增版本并记录 ADR。
-- Markdown 示例应接受机器契约校验；当前没有完整自动文档校验流水线，不能把要求写成已通过。
+- Markdown 示例应接受机器契约校验；当前没有完整自动文档校验流水线。

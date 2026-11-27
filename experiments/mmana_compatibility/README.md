@@ -1,10 +1,10 @@
 # MMANA 工程兼容性评估
 
-当前窄 spike 已形成技术选型结论：**采用未修改的 pymininec，明确子集的[独立薄适配入口](../../extensions/antenna_design/README.md)已编码，不提取或重写内核。** 新入口本轮只做静态检查，尚未行为/数值验收。最近追加的五次材料计算与复电流分析见 `artifacts/closure-review-20261019/`；馈点身份、冻结接线下的幅相与五点材料趋势已有证据，方环缺行、通用模型和实物适用范围仍显式限制。技术选型完成不等于生产兼容验收通过。
+当前窄 spike 已形成技术选型结论：**采用未修改的 pymininec，明确子集的[独立薄适配入口](../../extensions/antenna_design/README.md)已编码，不提取或重写内核。** 新入口尚未完成行为/数值验收。最近追加的五次材料计算与复电流分析见 `artifacts/closure-review-20261019/`；馈点身份、冻结接线下的幅相与五点材料趋势已有证据，方环缺行、通用模型和实物适用范围仍显式限制。技术选型完成，生产兼容验收尚未通过。
 
-六例工程主频参考和最新 **23/23 项多导线/扫频参考**已经通过 [Windows 自动采集](windows/README.md) 收齐并完成数值对照，详见[工程评估](ENGINEERING.md)。参考包含 GAL 1.2.0.20 的实际 EXE hash、另存模型、原始电流/远场和设置证据；GUI 脚本仅用于开发采集，不进入生产 MCP。五点扫频已对照，完整细频 `-Sweep` 未运行。
+六例工程主频参考和最新 **23/23 项多导线/扫频参考**已经通过 [Windows 自动采集](windows/README.md) 收齐并完成数值对照，详见[工程评估](ENGINEERING.md)。参考包含 GAL 1.2.0.20 的实际 EXE hash、另存模型、原始电流/远场和设置证据；GUI 脚本仅用于开发采集，不进入生产 MCP。五点扫频已对照，完整细频 `-Sweep` 尚未运行。
 
-三个多导线模型（倒 V / 方环 / 三元 Yagi）在原 **9 次候选求解**后追加 **6 次有界网格诊断**，全部复用公共 solver API。Yagi 使用独立原生渐变分段后，固定轴 F/B 差异由约 2.54 dB 缩小为 0.23 dB；没有拟合尺寸或复制 GAL 分段。报告在 `artifacts/next-reviewed-20261019/` 与 `artifacts/geometry-refinement-20261019/`，详情见[后续批次](ENGINEERING.md#后续批次多导线与有界扫频)。**本批无需再次运行 Windows 采集**；新增复电流比较见文首，方向图深零陷、接线覆盖和材料表示仍有明确边界，不是普适兼容认证。
+三个多导线模型（倒 V / 方环 / 三元 Yagi）在原 **9 次候选求解**后追加 **6 次有界网格诊断**，全部复用公共 solver API。Yagi 使用独立原生渐变分段后，固定轴 F/B 差异由约 2.54 dB 缩小为 0.23 dB；没有拟合尺寸或复制 GAL 分段。报告在 `artifacts/next-reviewed-20261019/` 与 `artifacts/geometry-refinement-20261019/`，详情见[后续批次](ENGINEERING.md#后续批次多导线与有界扫频)。不需要再次运行 Windows 采集；新增复电流比较见文首，方向图深零陷、接线覆盖和材料表示仍有明确边界，不是普适兼容认证。
 
 目标是在明确支持的模型范围内正确表达物理条件，输出能在 MMANA-GAL 中验证的工程结果。A01/A02 用简单导线诊断馈点、坐标和数值差异；后续检查材料、负载、地面、扫频及各自网格的收敛。不是复制 GAL 的 pulse 编排或求解器浮点结果，也不实现工作流、MCP、优化器、LangGraph、数据库或通用 MAA 转换器。
 
@@ -12,7 +12,7 @@
 
 - `.maa` 可读写，物理几何、连接、材料、地面、源/负载的位置和单位不能变。两端的离散网格可以不同，保存实际网格并分别检查加密后的稳定性。
 - 核对会改变设计决定的结果：阻抗、谐振与 SWR 带宽、主后瓣/增益、电流分布和材料损耗。工程误差标准按用途、制造与测量条件预先确定，不以小数末位相同为标准。
-- 原始方向图和电流仍是一等证据；同网格逐点差异是有效的诊断方法，不是唯一验收方式，更不代表要求每个点相等。不同网格的对照必须说明物理位置和必要的重采样。
+- 原始方向图和电流仍是一等证据；同网格逐点差异是有效的诊断方法，不是唯一验收方式，也不要求每个点相等。不同网格的对照必须说明物理位置和必要的重采样。
 - 现有约 0.003 dB 的 RMS 不再驱动常数补偿或网格逆向。自动分段算法未复刻不阻塞材料/地面验证；不能表达物理馈点、负载或模型不收敛，才构成需要处理的问题。
 
 历史 JSON、脚本快照及数值差异保持原样；新的工程验收口径不把旧 `DIFFERENCES_RECORDED` 偷改为 PASS。当前是继续采用 pymininec 做工程评估，不是宣称任意 MMANA 模型“完全兼容”。
@@ -96,7 +96,7 @@ uv pip install --python <spike-python> pymininec==1.2.0 numpy==2.5.4 scipy==1.18
 
 ## 2026-10-19 候选计算记录
 
-在 Linux x86_64、Python 3.14.5 上完成候选计算，未运行 MMANA-GAL、未运行项目软件测试。初次计算后的导出因误用另一几何类型的属性失败；修正为读取 Wire 的实际 segments 后重新计算，成功生成完整产物。初次不完整输出不作为证据。
+在 Linux x86_64、Python 3.14.5 上完成候选计算，没有运行 MMANA-GAL 和项目软件测试。初次计算后的导出因误用另一几何类型的属性失败；修正为读取 Wire 的实际 segments 后重新计算，成功生成完整产物。初次不完整输出不作为证据。
 
 | 项目 | pymininec 候选结果 |
 | --- | --- |
@@ -184,7 +184,7 @@ uv pip install --python <spike-python> pymininec==1.2.0 numpy==2.5.4 scipy==1.18
 - 两张图均包含绝对 dBi 与各自峰值归零的 normalized dB；−40 dB 仅为绘图下限，不修改数值证据。
 - `currents.png` / `.svg`：逐 pulse 电流实部/虚部；`current-differences.csv`、`pattern-differences.csv` 保留逐点差异，`comparison.json` 保存统计与来源 hash。
 
-这次只读取已有候选数据并绘图，未重跑 solver、未运行项目测试。使用现有系统 Python 3.10.12 / matplotlib 3.5.1，不改变主项目 Python 3.14 或依赖；候选求解仍来自此前独立 Python 3.14.5 / pymininec 1.2.0 环境。复算比较时使用新的输出目录：
+这次只读取已有候选数据并绘图，没有重跑 solver 和项目测试。使用现有系统 Python 3.10.12 / matplotlib 3.5.1，不改变主项目 Python 3.14 或依赖；候选求解仍来自此前独立 Python 3.14.5 / pymininec 1.2.0 环境。复算比较时使用新的输出目录：
 
 ```text
 <comparison-python> experiments/mmana_compatibility/compare.py \
@@ -231,23 +231,21 @@ uv pip install --python <spike-python> pymininec==1.2.0 numpy==2.5.4 scipy==1.18
 
 `compare.py` 另输出候选自身两位小数的舍入 RMS，以及舍入后与参考相同的样本数。新增这些字段的批次保存在 `artifacts/rounding-analysis-20261019/`，没有覆盖前面的分析产物。这使后续报告能够区分导出分辨率与有工程意义的求解偏差，而不只重复打印一个很小的 RMS 数字。
 
-![145 MHz / 80 段的逐 pulse 电流残差](artifacts/batch-analysis-20261019/mesh-145MHz-N80/current-residuals.png)
-
-![140 MHz 水平切面：绝对与归一化方向图](artifacts/batch-analysis-20261019/frequency-140MHz-N20/azimuth.png)
+145 MHz / 80 段的逐 pulse 电流残差图在 `artifacts/batch-analysis-20261019/mesh-145MHz-N80/current-residuals.png`，140 MHz 水平切面的绝对与归一化方向图在 `artifacts/batch-analysis-20261019/frequency-140MHz-N20/azimuth.png`。
 
 ## A02 馈电、坐标与自动分段
 
 [semantics.py](semantics.py) 复用 `probe.py` 和 pymininec 1.2.0，固定原半径、频率、激励和自由空间条件，只进行两次求解；没有内部 LLM 调用。程序核对原候选输入及 solver 源码 hash。完整候选结果在 `artifacts/semantics-20261019/`，包含原始电流、远场、solver 文本、环境、输入、PNG/SVG 和 manifest。
 
-| 案例 | 候选状态与结果 | 本轮参考核对 |
+| 案例 | 候选状态与结果 | 参考核对 |
 | --- | --- | --- |
 | `A02-offset-uniform20` | 19 pulse；源坐标 `(0.15,0,0)` m；Z ≈ `90.505657+j4.600240 Ω` | 另存模型、截图、电流相互印证；总场 RMS 0.002794 dB |
 | `A02-oblique-uniform20` | 19 pulse；中心源；Z ≈ `72.961721+j5.795923 Ω` | XYZ 对应；V/H/Total 高度接近，总场 RMS 0.002892 dB |
-| `A02-auto-segmentation` | 原采集时未计算；本轮新增参考辅助候选，Z ≈ `74.565239+j11.226422 Ω` | GAL 实测 41 pulse；公开 taper 接口可表达本例，段数仍来自参考，总场 RMS 0.002772 dB |
+| `A02-auto-segmentation` | 原采集时未计算；新增参考辅助候选，Z ≈ `74.565239+j11.226422 Ω` | GAL 实测 41 pulse；公开 taper 接口可表达本例，段数仍来自参考，总场 RMS 0.002772 dB |
 
 斜向导线保持 1 m 长，与原 X 轴候选相比，ΔR≈`+0.000544 Ω`、ΔX≈`+0.005002 Ω`。保留这个数值差异，不声称旋转后逐位相同，也不据此修改 solver。5° 角网格的采样峰值与连续空间峰值不同；对称导线不指定唯一主瓣或虚构 F/B。
 
-三例 `.maa`、`-gal.maa`、电流/方向图 CSV 和截图均已从 `/mnt/hgfs/vmSnycFile/mmana-a02-semantics-20261019/` 收齐，输入与另存模型数值参数一致，不需要重做。完整比较、图表与参考快照在 `artifacts/semantics-review-20261019/`；本轮复用前两例结果，仅新增一次 taper 求解。详见 [SEMANTICS.md](SEMANTICS.md)。
+三例 `.maa`、`-gal.maa`、电流/方向图 CSV 和截图均已从 `/mnt/hgfs/vmSnycFile/mmana-a02-semantics-20261019/` 收齐，输入与另存模型数值参数一致，不需要重做。完整比较、图表与参考快照在 `artifacts/semantics-review-20261019/`；复用前两例结果，仅新增一次 taper 求解。详见 [SEMANTICS.md](SEMANTICS.md)。
 
 当前 A02 已记录差异，不再等待参考。自动分段明确标为参考辅助诊断：42 段来自 GAL 实测，不是配置到段数的通用规则。该规则不再是下一项必过门槛，后续采用独立原生网格检查工程结果。不能把 DM2 直接作为 pymininec `max_t`；旧产物和说明快照保持不变。
 

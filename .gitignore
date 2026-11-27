@@ -71,3 +71,16 @@ playwright-report/
 
 # Docker secrets
 docker/secrets/
+
+# AI assistant scaffolding (local only)
+/AGENTS.md
+/CLAUDE.md
+/GEMINI.md
+/implementation_plan.md
+/.ai/
+/.agents/
+/.codex/
+/.cursor/
+/.claude/
+/.gemini/
+/extensions/antenna_design/agent.md

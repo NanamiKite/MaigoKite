@@ -21,7 +21,7 @@ loopback/Origin 限制不是完整设备认证。Electron 管理的后端现在�
 
 AccessPolicy 和 ToolPolicy 都需通过。模型/技能/MCP 自报能力不能授权；具体参数、范围、摘要值/版本和单次审批规则只在工具权限文档维护。
 
-`exec_command` 的受限模式要求可用的系统沙箱，默认不批准联网。Linux 使用网络 namespace，Windows SRT 不隔离系统 DNS，不能统称完全断网。沙箱不可用时不自动回退到宿主执行；进程内文件工具的路径校验也不等于完整 OS 隔离。
+`exec_command` 的受限模式要求可用的系统沙箱，默认不批准联网。Linux 使用网络 namespace，Windows SRT 不隔离系统 DNS，不能统称完全断网。沙箱不可用时不自动回退到宿主执行；进程内文件工具的路径校验也不是完整 OS 隔离。
 
 MCP 程序由部署者显式配置并信任，当前使用最小环境和受限 cwd；全面资源隔离与独立 Grant 尚未交付。详见 [MCP](../agent-capabilities/mcp/mcp-integration.md)。
 
@@ -36,7 +36,7 @@ MCP 程序由部署者显式配置并信任，当前使用最小环境和受限 
 | MCP stdio | 部署者显式信任程序、最小环境、工具调用审批 | 服务进程的宿主文件/网络权限限制；cwd 不是 chroot |
 | Browser | Playwright 启用 Chromium 原生沙箱，独立 profile 和产品 URL/文件策略 | Playwright driver/浏览器父进程的工作区隔离、完整网络出口隔离 |
 
-嵌套遮蔽只针对启动扫描时已存在的已知敏感名称，不识别改名凭证、硬链接别名或秘密内容，也不防止并发的宿主进程在扫描和挂载之间更改目录。扫描不完整时拒绝启动，而不是忽略错误后执行。不能据此宣称完整防泄露。
+嵌套遮蔽只针对启动扫描时已存在的已知敏感名称，不识别改名凭证、硬链接别名或秘密内容，也不防止并发的宿主进程在扫描和挂载之间更改目录。扫描不完整时拒绝启动，而不是忽略错误后执行。无法保证完整防泄露。
 
 Windows 原生后端只通过公开 SDK 接入，普通安装依赖不修改系统账户/ACL/防火墙；管理员安装与卸载必须显式确认。同一用户的 MaigoKite 沙箱命令串行运行，不与其他 SRT 客户端并用。详情与上游限制见 [工具权限](../agent-capabilities/security/tool-permission.md) 和 [配置指南](../user-guide/Configuration.md#windows-原生命令沙箱)。
 
@@ -50,7 +50,7 @@ Windows 原生后端只通过公开 SDK 接入，普通安装依赖不修改系�
 - MCP 只继承显式 allowlist；不能把核心服务全部环境或所有模型 Key 下发第三方进程。
 - 轮换/撤销应更新后续调用，活动运行实例的共享客户端安全关闭由核心服务生命周期处理，见 [智能体运行时设计](../design/AgentRuntime.md)。
 
-没有明确部署和验收前，不宣称加密文件降级、外部敏感凭证 Manager 或动态 SkillGrant 已实现。
+加密文件降级、外部敏感凭证 Manager 和动态 SkillGrant 尚未实现。
 
 ## 5. 网络与 Electron
 
@@ -60,7 +60,7 @@ Electron 主进程用 Node `crypto.randomBytes(32)` 为本次启动生成随机�
 
 桌面模式的 HTTP、预检和 WebSocket 请求都必须通过该验证，不能通过伪造 localhost Origin 或省略 Origin 降级绕过。LocalBoundary 位于 CORS 外侧，校验 ASGI 直接连接地址、Host、来源和凭据后才进入 CORS 或业务路由；比较使用 `secrets.compare_digest`。只有已验证的桌面请求才可获得 `Access-Control-Allow-Origin: null`，无凭据的 `null` 请求返回 403，WebSocket 在接受前以 1008 拒绝。
 
-Electron 本地页面的 WebSocket 实际发送 `Origin: file://`，它仅在本次桌面凭据验证成功时可通过；来源字符串本身不建立信任。带路径的 file URL、无凭据/错误凭据的 file 来源继续拒绝；HTTP/OPTIONS 的 file 来源仍不放行，CORS 保持不变。10 月 31 日在隔离的 Linux Electron 44.8.0 中复现修复前的拒绝，并验证修复后增量和终态事件可达；这不等于完整客户端、预检、重定向或安装包验收。
+Electron 本地页面的 WebSocket 实际发送 `Origin: file://`，它仅在本次桌面凭据验证成功时可通过；来源字符串本身不建立信任。带路径的 file URL、无凭据/错误凭据的 file 来源继续拒绝；HTTP/OPTIONS 的 file 来源仍不放行，CORS 保持不变。10 月 31 日在隔离的 Linux Electron 44.8.0 中复现修复前的拒绝，并验证修复后增量和终态事件可达；完整客户端、预检、重定向和安装包尚未验收。
 
 主进程复用 Electron `webRequest.onBeforeSendHeaders`，仅对主窗口/胶囊窗口的已允许主 frame，以及自有后端或开发代理的 API/health 地址附加凭据；子 frame 和未知窗口不授权。每个目标重新计算请求头，跨地址重定向不保留凭据。主进程健康探测与工作区查询显式携带相同凭据。该机制不能防止已攻陷的应用主 frame、同 OS 用户的恶意程序或调试器读取进程内存，也不替代远程设备认证。
 
@@ -80,4 +80,4 @@ Electron 本地页面的 WebSocket 实际发送 `Origin: file://`，它仅在本
 
 ## 7. 验收边界
 
-关键安全场景以 [测试与验收](../testing/TestPlan.md) 为唯一测试清单。当前代码防护、未实现能力与待验收项必须分别说明，不能用统一当前有效标签或勾选清单暗示全部安全承诺成立。
+关键安全场景以 [测试与验收](../testing/TestPlan.md) 为唯一测试清单。当前代码防护、未实现能力与未验收项分别说明，不要用统一标签或勾选清单暗示全部安全承诺成立。

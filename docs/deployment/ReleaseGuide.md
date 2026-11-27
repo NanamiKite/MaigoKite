@@ -1,7 +1,7 @@
 # 构建与发布指南
 
 > 本文说明源码构建、桌面制品、发布门禁和回滚。
-> 桌面安装包尚未完成运行资源打包与验证（runtime bundling）。本页检查项是发布要求，不是已通过的验收结果。
+> 桌面安装包尚未完成运行资源打包与验证（runtime bundling）。本页检查项是发布要求，不是验收结果。
 
 ## 1. 当前可生成什么
 
@@ -10,9 +10,9 @@
 | `bash scripts/build.sh all` / `scripts/build.ps1 all` | Web 资源与 Electron 编译；不构建 Python 安装运行时 |
 | `build.sh web` / `build.ps1 web` | Web 静态资源，启动用对应的 `start web built` |
 | `build.sh desktop` / `build.ps1 desktop` | Web + Electron，启动用对应的 `start desktop built`，直接加载本地 HTML |
-| `build.sh python` / `build.ps1 python` | 从根项目生成 wheel/sdist，不等于带解释器和依赖的可执行运行时 |
+| `build.sh python` / `build.ps1 python` | 从根项目生成 wheel/sdist，不是带解释器和依赖的可执行运行时 |
 | `web/ npm run build` | Vue 静态资源与 Electron 主进程/预加载层编译 |
-| `web/ npm run electron:build` | electron-builder 入口；不证明已包含正确的 Python/Chromium 资源 |
+| `web/ npm run electron:build` | electron-builder 入口；不保证包含正确的 Python/Chromium 资源 |
 
 Electron packaged 分支会查找 `resources/bin/agent-core`，Windows 使用 `.exe` 后缀。尚未验证源码构建产物是否满足这些路径和跨平台执行要求。打包时不能假定用户机器上已经安装开发机使用的 Python、依赖或浏览器。
 
@@ -20,7 +20,7 @@ Electron packaged 分支会查找 `resources/bin/agent-core`，Windows 使用 `.
 
 Linux/Windows 的 `start desktop built` 从源码目录启动，使用本地 Python 环境运行后端，不进入 Electron `app.isPackaged` 分支。Web `built` 由同一 Python 后端在 8080 提供页面和 API，仅支持本机 loopback，不提供远程认证。
 
-构建和启动脚本不会自动安装浏览器或运行软件测试。Linux 下的 Core HTTP/WS、进程恢复和 Chromium 已完成部分实际运行测试；这不代表桌面安装版已经验证。Windows 整套启停、桌面安装包及其运行资源仍需在目标系统上测试，已完成和未覆盖的范围见 [路线图](../project/Roadmap.md#当前验收状态)。
+构建和启动脚本不会自动安装浏览器或运行软件测试。Linux 下的 Core HTTP/WS、进程恢复和 Chromium 已完成部分实际运行测试；桌面安装版尚未验证。Windows 整套启停、桌面安装包及其运行资源仍需在目标系统上测试，已完成和未覆盖的范围见 [路线图](../project/Roadmap.md#3-当前已知限制)。
 
 环境安装与构建命令见 [开发指南](../development/DevelopmentGuide.md)。[GitHub Actions CI](../../.github/workflows/ci.yml) 已配置 Python/前端检查与 Linux/Windows 源码构建，结果以对应提交的 Actions 记录为准。具体覆盖范围见 [测试与验收](../testing/TestPlan.md#github-actions)；独立安装包、桌面启动和真实模型仍须按下述要求验收。
 
@@ -55,13 +55,13 @@ Linux/Windows 的 `start desktop built` 从源码目录启动，使用本地 Pyt
 - [ ] 敏感凭证不进入制品、普通配置、数据库或日志；导出内容已脱敏。
 - [ ] 版本、Changelog、制品校验信息和验证记录一致。
 
-代码存在或 electron-builder 执行成功，都不代表以上检查已通过。发布阻塞项统一在 [交付路线与状态](../project/Roadmap.md) 中跟踪。
+代码存在或 electron-builder 执行成功后，以上检查仍需单独执行。发布阻塞项统一在 [交付路线与状态](../project/Roadmap.md) 中跟踪。
 
 ## 3. 最小质量门
 
 验收场景见 [测试与验收](../testing/TestPlan.md)，执行命令见 [开发指南](../development/DevelopmentGuide.md#4-质量与构建入口)。至少覆盖适用的静态检查与类型检查、Python/Vue 测试、协议兼容、授权安全、数据库升级、真实进程恢复和桌面 package-smoke。
 
-缺少工具、凭证或平台时，须标记未运行/跳过，不能标记通过。模型提供方验收分别记录 PROTOCOL、LIVE 和 UNVERIFIED；不能根据模拟服务推断真实缓存收益和成本。优先复用现成 CI，不为个人项目另建发布平台或值班系统。
+缺少工具、凭证或平台时，须标记未运行/跳过，不要标记通过。模型提供方验收分别记录 PROTOCOL、LIVE 和 UNVERIFIED；模拟服务不能证明真实缓存收益和成本。优先复用现成 CI，不为个人项目另建发布平台或值班系统。
 
 ## 4. 配置与数据升级
 
@@ -73,7 +73,7 @@ Repository 在启动时执行兼容升级，不使用 Alembic 或独立 Migratio
 
 保留上一稳定制品及其数据兼容说明。如果升级后的数据库格式不兼容旧版，不能直接降级程序；须先恢复副本做演练，或明确修复向前兼容问题。
 
-排查方法见 [日志与诊断](../ops-security/Observability.md)。发布说明只写实际功能，不能把规划中页面、空壳工作流或未验收运行时列为已交付。回滚不能恢复已撤销的权限或凭证，也不能撤销工具已经产生的副作用。
+排查方法见 [日志与诊断](../ops-security/Observability.md)。发布说明只写实际功能，不要把规划中页面、空壳工作流或未验收运行时列为已交付。回滚不会恢复已撤销的权限或凭证，也不会撤销工具已经产生的副作用。
 
 ## 6. 历史容器与未来远程访问
 

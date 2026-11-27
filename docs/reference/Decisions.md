@@ -267,8 +267,7 @@
 
 ## ADR-026: 个人 Agent 后端统一为 Python 单进程
 
-- **状态：** 已采纳；2026-10-12 源码迁移，未运行本轮验收。
 - **上下文：** Agent 执行、审批、模型、MCP 和持久化都在 Python。Go 主要承担协议转发与少量文件/凭证入口，却引入第二进程、gRPC 绑定、工具链与关闭协调成本；个人本机场景没有已证明的独立网关收益。
 - **决策：** 采用 FastAPI/Uvicorn 承接原 REST/WebSocket，直接调用 AgentCore；OS 凭证复用 keyring，文件与 Git 查询迁至受边界约束的 Python API。删除 Go、Proto、生成代码与 gRPC Server/Client。只允许一个 worker，启动器或 Electron 持有该后端。
-- **保留：** LangChain/LangGraph、原 PermissionPolicy/HITL、Repository、事件身份、SQLite/checkpoint 路径和用户数据。访问边界与工具执行策略仍独立，但不再按语言或进程拆开。
+- 访问边界与工具执行策略仍独立，但不再按语言或进程拆开。
 - **后果：** 减少跨进程协议和桌面启动资源；阻塞系统 I/O 必须下放工作线程。运行状态改为单 backend，UI 需同步构建。旧验收不能代表新传输层通过；Windows 凭证迁移、完整运行回归与桌面 bundling 仍须另行验收。

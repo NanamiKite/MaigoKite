@@ -93,13 +93,13 @@ API/ASGI 复用 FastAPI、Uvicorn 和 AnyIO，系统凭证复用 keyring；MCP�
 
 Web 与 Electron 继续共用相对路径构建产物。HTTP 返回的入口 HTML 补充 `<base href="/">`，让直接打开 `/chat/<id>` 时资源仍从站点根目录加载；磁盘文件不改写，Electron `file://` 保持相对路径。不存在的资源与 API（含 HEAD 请求）不回退为 SPA 页面。Windows 构建参数与共享脚本一致，不再接受 `go` 目标。
 
-Python HTTP/WS、Core 恢复与 Web 主路径已有定向验收，天线集成另有 Linux 的审批/取消、重启取回和导入记录；两者都不能覆盖后续所有模块调整。完整范围见 [当前验收状态](../project/Roadmap.md#当前验收状态)。独立桌面运行资源打包、手机远程认证和平台凭证迁移仍未完成；旧 Go 链路的测试不能作为现有接口的验证结果。
+Python HTTP/WS、Core 恢复与 Web 主路径已有定向验收，天线集成另有 Linux 的审批/取消、重启取回和导入记录，范围见 [已知限制](../project/Roadmap.md#3-当前已知限制)。独立桌面运行资源打包、手机远程认证和平台凭证迁移仍未完成；旧 Go 链路的测试结果与现有接口无关。
 
 ## 6. 保留但未接入的基础设施
 
-未接入不等于应该删除。下面的模块保留用于后续开发，但不注册到 Core、ToolRegistry、API、能力声明或默认启动流程；不能通过默认配置或自动发现把未完成实现带入生产调用链。
+未接入的模块保留用于后续开发，但不注册到 Core、ToolRegistry、API、能力声明或默认启动流程；不能通过默认配置或自动发现把未完成实现带入生产调用链。
 
-表中的 `ImageAdapter` 是未接入的实验适配器，不代表当前产品没有生图能力。生产生图使用 `models/image_generation.py` 与 `tools/native/image_generate.py`，看图使用当前聊天模型；入口、产物与限制见 [配置指南](../user-guide/Configuration.md#12-看图生图与文件预览)。
+表中的 `ImageAdapter` 是未接入的实验适配器；当前产品有独立的生图实现。生产生图使用 `models/image_generation.py` 与 `tools/native/image_generate.py`，看图使用当前聊天模型；入口、产物与限制见 [配置指南](../user-guide/Configuration.md#12-看图生图与文件预览)。
 
 | 模块 | 当前源码边界 | 未完成部分 |
 | --- | --- | --- |
@@ -111,7 +111,7 @@ Python HTTP/WS、Core 恢复与 Web 主路径已有定向验收，天线集成�
 | `knowledge_base/vector_store.py` | 预计算向量传给 FAISS/Chroma/Qdrant 的公开操作；批次与维度校验；返回原生分数 | FAISS 替换/恢复明确未实现；Qdrant 集合须预先配置，使用 UUID ID，调用方关闭 client；未接入记忆或索引任务 |
 | `knowledge_base/retriever.py` | 使用 SDK VectorStore/BaseRetriever 与异步检索；限制返回量，支持的过滤条件在检索前传入，不支持时拒绝 | 关键词语料/索引须由调用方显式提供，不用空白查询的样本冒充完整语料；不支持的按 ID 读取不伪装成“未找到” |
 
-向量适配使用预计算向量契约，文本 Retriever 使用已配置 embedding 的 SDK VectorStore；两者不能直接互换，本轮不增加桥接框架。FAISS/Chroma 的距离与 Qdrant 的相似度也不是统一分数；SDK Retriever 不提供分数时返回 `None`，不造一个 `0.0`。
+向量适配使用预计算向量契约，文本 Retriever 使用已配置 embedding 的 SDK VectorStore；两者不能直接互换，不增加桥接框架。FAISS/Chroma 的距离与 Qdrant 的相似度也不是统一分数；SDK Retriever 不提供分数时返回 `None`，不造一个 `0.0`。
 
 向量/检索依赖仅放在 `vectorstores` 可选组，未进入默认依赖。这些适配器尚无实际后端验收结果。预留类明确失败是为了防止误用；接入之前仍须完成实际工作流、数据归属、权限、资源关闭和取消处理，并通过相应验收。
 

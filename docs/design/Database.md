@@ -1,7 +1,7 @@
 # MaigoKite 数据库设计
 
 > 本文说明当前业务表、数据归属和事务边界，尚未实现的部分另行标注。
-> 数据库升级与恢复的测试范围见 [路线图](../project/Roadmap.md#当前验收状态)。
+> 数据库升级与恢复的测试范围见 [路线图](../project/Roadmap.md#3-当前已知限制)。
 
 建表和旧库增量升级 SQL 见 `python/agent/sqlite_schema.py`，业务查询和事务见 `python/agent/repository.py`；本文不把目标表写成已经存在的迁移。
 
@@ -10,7 +10,7 @@
 - 当前业务数据库只有 SQLite，启用 foreign keys 与 WAL。
 - SQLite 保存工作区、成员关系、会话、消息、任务、事件、工具调用、审批、设置、审计、Todo 和显式用户记忆。
 - 模型与其他非敏感工作区配置保存在 `workspace_settings` JSON 中。
-- 图片生成配置使用 `models.image_generation` 设置键，生图密钥仅存操作系统凭证库。消息表的 `attachments_json TEXT NOT NULL DEFAULT '[]'` 保存图片、文本和文档的文件夹、路径、哈希、类型及大小；扩展引用类型不新增资产表。分岔复制引用，不复制文件。LangGraph checkpoint 保存本轮组装的模型输入，普通消息/事件不保存 Base64。删除对话不删除 `chat-images/`、`chat-files/` 或 `generated-images/` 中的文件。旧图片引用、分岔和重启续聊已有定向记录；后续文本/文档/OCR 与旧库升级尚未行为验收，不能沿用图片结果宣布通过。
+- 图片生成配置使用 `models.image_generation` 设置键，生图密钥仅存操作系统凭证库。消息表的 `attachments_json TEXT NOT NULL DEFAULT '[]'` 保存图片、文本和文档的文件夹、路径、哈希、类型及大小；扩展引用类型不新增资产表。分岔复制引用，不复制文件。删除对话不删除 `chat-images/`、`chat-files/` 或 `generated-images/` 中的文件。旧图片引用、分岔和重启续聊已有定向记录；后续文本/文档/OCR 与旧库升级尚未行为验收，不能沿用图片结果宣布通过。
 - 敏感凭证值由 Python API 通过操作系统凭证存储保存，不进入 SQLite；访问边界见 [后端设计](BackendDesign.md#3-凭证与访问边界)。
 - 原始文档、FTS、向量嵌入、向量索引、PostgreSQL 和对象存储尚未接入。
 
@@ -32,7 +32,7 @@
 
 自动标题增量：`conversations.title_source` 只接受 `pending / automatic / manual`。既有库增列默认 `manual`，保留所有历史标题，不根据“新对话”等展示文字推断来源。新建未命名会话显式写入 `pending`；首条用户消息的准入事务同时更新标题与来源，重复提交不重新生成。显式改名和分岔使用 `manual`，不再按标题字面值判断。该升级不改变消息、审批或 checkpoint。
 
-会话分岔增量：`conversations` 增加 `forked_from_conversation_id / forked_from_message_id / fork_request_hash`，默认空值，保留原数据。前两项为来源标记而非级联外键，源删除不影响分岔；请求指纹只用于创建幂等，不是执行续接状态。分岔与新 ID 的可见消息在同一 SQLite 事务中写入，不复制任务、审批或 checkpoint。新库 API 的消息复制/独立 ID/无旧任务及图片引用复制已通过；旧库迁移与幂等并发不在该通过范围。
+会话分岔增量：`conversations` 增加 `forked_from_conversation_id / forked_from_message_id / fork_request_hash`，默认空值，保留原数据。前两项为来源标记而非级联外键，源删除不影响分岔；请求指纹只用于创建幂等，不是执行续接状态。分岔与新 ID 的可见消息在同一 SQLite 事务中写入，不复制任务、审批或 checkpoint。新库 API 的消息复制/独立 ID/无旧任务及图片引用复制已通过；旧库迁移与幂等并发尚未覆盖。
 
 - `workspaces.kind` 保留 `personal / team` 兼容值，当前产品只推进个人使用，不继续建设团队管理。
 - 启动时创建 `personal` 工作区和 `local-user` 所有者成员关系。
@@ -57,15 +57,15 @@
 | `approvals` | 任务/工具调用、principal、参数摘要值、风险、版本、过期和决定时间；`reuse_scope_json / authorization_scope / authorization_expires_at / authorization_revoked_at` 保存有限期窄授权 |
 | `audit_events` | 工作区、actor、action、resource、result、脱敏详情和时间 |
 | `todos` | 工作区内的文本、完成状态和时间 |
-| `questions` | 任务/工具调用、提问主体、标题、`options_json`、状态、版本与回答；工具调用 ID 唯一，等待回答不等于权限授权 |
+| `questions` | 任务/工具调用、提问主体、标题、`options_json`、状态、版本与回答；工具调用 ID 唯一，等待回答不是权限授权 |
 | `task_inputs` | 任务内逐步插话的内容、状态、时间与幂等键；`(task_id, idempotency_key)` 唯一 |
 | `user_memories` | 工作区 + subject user + `folder_scope`、类别、内容、来源、置信度和时间；旧记录归属为 NULL，不自动归入默认目录 |
 
 安全确认复用 `questions`，不增加审批表或新的执行状态。新选项在 `options_json` 中保存稳定 `value` 和可读 `label`；回答保存 `safety.continue / safety.stop`，可见历史保存标签。旧无标识记录只按原确切回答兼容读取，不改写原 checkpoint。
 
-User Preference 与用户记忆不合并：前者是显式产品设置，后者是用户可管理的长期信息。用户记忆支持手动 CRUD 和关键词查询；文件夹与对话开关同时开启时，手工条目可在预算内附带到当前模型请求，不写入消息或 checkpoint。双开关、遗忘和 checkpoint 分离已通过定向验收；自动提取和向量嵌入检索未实现。选择与隔离规则见 [记忆与检索边界](../agent-capabilities/memory/memory-system.md)，剩余门禁见 [当前验收状态](../project/Roadmap.md#当前验收状态)。
+User Preference 与用户记忆不合并：前者是显式产品设置，后者是用户可管理的长期信息。用户记忆支持手动 CRUD 和关键词查询；文件夹与对话开关同时开启时，手工条目可在预算内附带到当前模型请求，不写入消息或 checkpoint。双开关、遗忘和 checkpoint 分离已通过定向验收；自动提取和向量嵌入检索未实现。选择与隔离规则见 [记忆与检索边界](../agent-capabilities/memory/memory-system.md)，剩余门禁见 [已知限制](../project/Roadmap.md#3-当前已知限制)。
 
-2026-10-11 权限升级使用原 SQLite 增列逻辑，历史审批默认 `once`、空复用范围/期限，不生成授权。复用信息仍是审批审计回执，不新增 Grant 表、Runtime 状态表或执行续接数据。旧会话权限 `full_access / auto` 规范化为 `workspace_auto`；新的 `danger_full_access` 不由旧值推导。迁移不删除业务数据。运行验收未在本批执行。
+2026-10-11 权限升级使用原 SQLite 增列逻辑，历史审批默认 `once`、空复用范围/期限，不生成授权。复用信息仍是审批审计回执，不新增 Grant 表、Runtime 状态表或执行续接数据。旧会话权限 `full_access / auto` 规范化为 `workspace_auto`；新的 `danger_full_access` 不由旧值推导。迁移不删除业务数据。
 
 2026-10-16 新增显式 `authorization_scope=session_public_web`，复用上述 TEXT 字段，无表结构迁移、不改写旧回执。`reuse_scope_json` 保留原操作及策略边界；只有新 scope 才按内置搜索/公共网页读取组匹配，旧 `session` 仍按原范围精确匹配。该范围与 `session` 一样跨本会话任务复用，按原期限/撤销字段过滤；批准范围与原参数 hash 一起进入现有审计事务。
 
@@ -91,7 +91,7 @@ erDiagram
 
 个人扩展配置复用 `workspace_settings`，不新增插件表：
 
-- `extensions.config`：用户保存的期望配置，含 revision、MCP 程序/参数/凭证变量名、Skill 目录和托管 Markdown/启停选择；保存不代表已加载。
+- `extensions.config`：用户保存的期望配置，含 revision、MCP 程序/参数/凭证变量名、Skill 目录和托管 Markdown/启停选择；保存后需要应用才加载。
 - `extensions.applied_config`：执行入口准备成功后保存的生效配置，Core 重启与恢复原连接以它为准，不误用尚未应用的编辑。它不是执行状态或工具执行记录，实际恢复仍读取 LangGraph checkpoint；外部程序/目录内容也不因此成为不可变快照。
 
 原始凭证仅在系统密钥链；加载状态留在 Core 资源状态中，不落凭证值、生命周期日志或第二份执行状态。首次无数据库配置时读取 YAML 建立初始值；没有期望配置行时以生效配置作为编辑基线。升级前没有生效快照时沿用当时保存配置/YAML，不能追溯重建历史生效版本。
@@ -169,7 +169,6 @@ pending, consumed, rejected, expired
 
 未来只在需求、API、迁移与测试一起交付时增加数据结构，不预建工作流/Schedule/技能分发等整套目标表。完整 Team 身份、PostgreSQL 和多实例部署不进入当前个人路线。
 
-- 先补当前需要的排序、归属与原子提交约束，再评估是否需要成熟迁移工具；不把 ORM/迁移框架当本轮前置条件。
 - 文档检索若落地，原文是权威，数据片段/FTS/vector 是可删除重建的索引；删除原文须同步清理或登记清理索引。
 - 运行恢复复用运行时检查点；不要另建 task_runs/lease/续接数据体系来复制执行事实。
 - 全部业务数据直接或间接绑定工作区；UTC 时间、ID、状态与授权语义不能因换存储改变。

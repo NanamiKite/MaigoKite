@@ -17,7 +17,7 @@
 
 Agent 的任务结果与重复运行稳定性由独立 [个人 Agent 行为评测](AgentEvals.md) 覆盖。默认脚本模型只验证评测装配，不能计入真实模型能力；它不替代本文件中的功能验收。
 
-下表列出当前测试入口及历史名称。测试源码、fixtures、Vitest 配置和运行脚本由 Git 管理；本地生成的 `test-results/` 与 `playwright-report/` 不提交。新克隆后需先安装对应依赖。只有实际执行并记录结果，才能报告通过；文件存在不等于测试通过。
+下表列出当前测试入口及历史名称。测试源码、fixtures、Vitest 配置和运行脚本由 Git 管理；本地生成的 `test-results/` 与 `playwright-report/` 不提交。新克隆后需先安装对应依赖。只有实际执行并记录结果才算通过；文件存在不算。
 
 | 位置 | 覆盖对象 |
 | --- | --- |
@@ -42,7 +42,7 @@ Agent 的任务结果与重复运行稳定性由独立 [个人 Agent 行为评�
 #### 背景 GUI 脚本与静态契约
 
 背景滑块以当前设计的 0–100% 直接透明度为准；不再检查已移除的自动求限或 `--plate-a`。
-截图对比度门禁检查不透明纸面基线，自由透明度另验 0/50/100 与刷新持久化，不宣称任意图片下都满足对比度阈值。
+截图对比度门禁检查不透明纸面基线，自由透明度另验 0/50/100 与刷新持久化。
 `gui_desk_background.py`、`gui_desk_runtime.py`、`gui_desk_electron.py` 会将必检项缺失/为假、空截图文字清单及页面异常计入失败，写出报告后返回非零退出码。滚动耗时是测量值，不是性能通过结论。
 文字令牌按每个元素实际继承的作用域读取，包含设置预览的局部覆盖；未定义令牌不能借 CSS 继承冒充已登记颜色。真实 Chromium 反向用例验证嵌套覆盖和任意未登记色，仍保留 7:1 / 4.5:1 门禁。脚本在 `finally` 写报告时保留原始异常，不能只留下“缺少检查项”而丢失失败原因。
 
@@ -54,7 +54,7 @@ Agent 的任务结果与重复运行稳定性由独立 [个人 Agent 行为评�
 uv run --no-sync python -m unittest discover -s scripts/acceptance -p test_desk_checks.py -v
 ```
 
-CI 对上述脚本、共享检查与文字色报告运行 Ruff/strict mypy，并通过 `vue-tsc --noEmit -p tsconfig.json --incremental false` 检查前端测试契约。反向控制、静态检查和 jsdom 通过不代表真实 GUI、Electron 安装包或 Windows 已验收。
+CI 对上述脚本、共享检查与文字色报告运行 Ruff/strict mypy，并通过 `vue-tsc --noEmit -p tsconfig.json --incremental false` 检查前端测试契约。反向控制、静态检查和 jsdom 不覆盖真实 GUI、Electron 安装包或 Windows。
 
 安装锁定的 `dev` 检查依赖后，可运行完整后端测试及产品验收；显式排除真实付费模型入口：
 
@@ -82,9 +82,9 @@ PYTHONPATH=python MAIGOKITE_ACCEPTANCE_WEB_DIR="$PWD/web/dist" \
     scripts/acceptance/gui_media_features.py -vv --tb=short
 ```
 
-只验新增图片功能可运行 `PYTHONPATH=python uv run --no-sync python -m pytest scripts/acceptance/test_media_features.py python/tests/unit/test_media.py -vv --tb=short`；前端全量入口为 `cd web && npm run test:run -- --no-cache --maxWorkers=2 --minWorkers=1`。已知失败应原样报告并保留断言，不用跳过或修改净化预期清零。当前结果唯一来源为 [当前验收状态](../project/Roadmap.md#当前验收状态)。
+只验新增图片功能可运行 `PYTHONPATH=python uv run --no-sync python -m pytest scripts/acceptance/test_media_features.py python/tests/unit/test_media.py -vv --tb=short`；前端全量入口为 `cd web && npm run test:run -- --no-cache --maxWorkers=2 --minWorkers=1`。已知失败应原样报告并保留断言，不用跳过或修改净化预期清零。当前结果唯一来源为 [已知限制](../project/Roadmap.md#3-当前已知限制)。
 
-PowerShell 可先设置 `$env:PYTHONPATH = "python"`，再运行同样的 `uv run --no-sync python -m pytest ...` 后端命令；这不代表 Windows 原生验收已通过。GUI 用例的当前运行证据为 Linux，不能外推为 Electron 安装包验收。
+PowerShell 可先设置 `$env:PYTHONPATH = "python"`，再运行同样的 `uv run --no-sync python -m pytest ...` 后端命令；Windows 原生验收尚未通过。GUI 用例的运行证据来自 Linux，Electron 安装包需要单独验收。
 
 新增产品验收只替代模型 HTTP/SSE 输出，Core、LangGraph、PermissionPolicy、Repository、工具、MCP 与 GUI 保持真实；沿用现有进程恢复测试的启动入口。子 Core 使用独立工作区/SQLite/checkpoint，剥离继承的模型/Tracing 密钥。真实浏览器测试访问公开测试页面，Cookie 为自建 canary，不包含真实登录；命令 stdin/stop 使用测试自己启动的进程及显式完全访问，不视为 OS 沙箱隔离验收。
 `gui_personal_agent.py` 还通过真实 API/页面验证会话标签切换、重命名、关闭不删除、重开草稿保留与不落 localStorage，以及正文鼠标/键盘调宽、释放后保存、刷新恢复、双击还原和窄屏溢出。文字测量辅助程序的独立反向用例不替换产品方法，也不计入 Agent 能力验收。
@@ -109,13 +109,13 @@ PowerShell 可先设置 `$env:PYTHONPATH = "python"`，再运行同样的 `uv ru
 
 | 范围 | 要检查的行为 | 当前证据边界 |
 | --- | --- | --- |
-| 文本/图片快照与草稿 | 服务端类型和总量、哈希变化、切换对话/迟到响应、失败重试、按行与字节续读、模型能力变化和跨目录历史 | 10 月 28–31 日有静态记录，新增行为未验收；旧图片用例不替代这些场景 |
-| PDF/Office 提取与导航 | 损坏/加密/超限错误、真实目录、空文字页、单元编号、文字层与 OCR 偏移分离、快照版本与长文本续读 | 新入口未运行行为测试；必须用真实文件，不能靠空夹具宣布支持 |
-| 页图与本机 OCR | 引擎/语言不可用、实际页图、像素/输出/超时限制、取消后进程与临时文件清理；文字降级预算和可回读引用 | OCR/PDF 渲染、语言准确率、真实 GUI 与 Windows 未验收；不以文字提取代替视觉验证 |
-| 附件集合约束授权 | 当前会话/文件夹的 path+hash、添加新附件或版本变化后的授权失配、拒绝后继续、执行前重查、完全访问边界 | 源码已接入，行为未验收；不宣称完整污点追踪或提示注入防护 |
-| 桌面 API 认证 | HTTP/预检/WS、错误或缺失凭据、伪造 null/file 来源、允许窗口/主 frame、自有 API 和重定向不泄漏 | ASGI 24 项与请求头逻辑 12 项已有定向通过记录；真实 Electron 事件、窗口识别和握手仍待验收 |
+| 文本/图片快照与草稿 | 服务端类型和总量、哈希变化、切换对话/迟到响应、失败重试、按行与字节续读、模型能力变化和跨目录历史 | 10 月 28–31 日有静态记录，新增行为尚未验收；旧图片用例不覆盖这些场景 |
+| PDF/Office 提取与导航 | 损坏/加密/超限错误、真实目录、空文字页、单元编号、文字层与 OCR 偏移分离、快照版本与长文本续读 | 新入口尚未运行行为测试；必须用真实文件验证 |
+| 页图与本机 OCR | 引擎/语言不可用、实际页图、像素/输出/超时限制、取消后进程与临时文件清理；文字降级预算和可回读引用 | OCR/PDF 渲染、语言准确率、真实 GUI 与 Windows 尚未验收；文字提取不覆盖视觉验证 |
+| 附件集合约束授权 | 当前会话/文件夹的 path+hash、添加新附件或版本变化后的授权失配、拒绝后继续、执行前重查、完全访问边界 | 源码已接入，行为尚未验收；不是完整污点追踪或提示注入防护 |
+| 桌面 API 认证 | HTTP/预检/WS、错误或缺失凭据、伪造 null/file 来源、允许窗口/主 frame、自有 API 和重定向不泄漏 | ASGI 24 项与请求头逻辑 12 项已有定向通过记录；真实 Electron 事件、窗口识别和握手尚未验收 |
 
-结果与命令见 [近期记录](../project/Roadmap.md#2026-10-28-与-10-31-的定向测试)。本清单不授权启动应用、调用模型或执行测试，运行前仍按项目工作约束确认范围。
+结果与命令见 [测试覆盖](../project/Roadmap.md#2-测试覆盖与性能基准)。
 
 ### 天线扩展与数值实验
 
@@ -129,13 +129,13 @@ PowerShell 可先设置 `$env:PYTHONPATH = "python"`，再运行同样的 `uv ru
 
 导入失败时应保留已完成的计算，不自动再次求解；只有导入完成标记存在才显示完整导入。还要确认关闭或取消后的资源清理，以及正常聊天在未安装天线包时仍能使用。操作入口见 [独立包说明](../../extensions/antenna_design/README.md) 与 [接入步骤](../user-guide/Configuration.md#81-天线计算与方向图)。
 
-10 月 23–25 日已有 Linux 的真实 MCP、生产 Core 审批/取消、重启取回、图片 HTTP 预览、搜索交付与固定匹配的定向记录，范围见 [路线图](../project/Roadmap.md#2026-10-23-天线恢复与生产调用验收)。这些记录不是本次重新运行的测试，也不能覆盖完整 GUI、自然语言模型决策、Windows、运行中强杀恢复或每条独立 CLI 命令。
+10 月 23–25 日已有 Linux 的真实 MCP、生产 Core 审批/取消、重启取回、图片 HTTP 预览、搜索交付与固定匹配的定向记录，范围见 [路线图](../project/Roadmap.md#1-已实现的核心能力)。这些记录不覆盖完整 GUI、自然语言模型决策、Windows、运行中强杀恢复或每条独立 CLI 命令。
 
-10 月 28 日的 `WorkflowState` 和 v2 回执另需检查 revision/证据冲突、已发布包与数据库之间的崩溃窗口、重复查询补记、历史 v1 兼容、未知网格/匹配状态，以及单独 optimize 不复用 design 编号。这批只有静态结果，不能从旧版运行记录推出通过。
+10 月 28 日的 `WorkflowState` 和 v2 回执另需检查 revision/证据冲突、已发布包与数据库之间的崩溃窗口、重复查询补记、历史 v1 兼容、未知网格/匹配状态，以及单独 optimize 不复用 design 编号。这批目前只有静态检查，行为测试还没跑。
 
-工程结论另看样本和物理条件。须覆盖有限电导率、邻频辐射、同一组固定元件跨频点复算，以及基础网格达标但细网格不达标的情况。没有容差不宣称收敛，离散点通过不代表连续带宽；理想匹配不替代元件 Q/损耗、功率、巴伦和实物验证。
+工程结论另看样本和物理条件。须覆盖有限电导率、邻频辐射、同一组固定元件跨频点复算，以及基础网格达标但细网格不达标的情况。没有容差时不要标记收敛；离散点通过不覆盖连续带宽；理想匹配只覆盖元件 Q/损耗、功率、巴伦和实物验证之外的离散样本。
 
-主应用 CI 不会自动进入独立包安装依赖或执行实验；本地临时验收记录也不等于已提交可回归的测试源码。正式回归范围、独立安装和目标平台测试仍须补齐，不能将根项目检查通过写成所有层均通过。
+主应用 CI 不会自动进入独立包安装依赖或执行实验；本地临时验收记录不是可回归的测试源码。正式回归范围、独立安装和目标平台测试仍须补齐；根项目检查只覆盖主应用。
 
 ### GitHub Actions
 
@@ -160,7 +160,7 @@ Core 的命令契约用例在执行器边界使用替身，断言规范化目录
 
 前端用例使用真实 router、i18n 和可交互的选择/确认组件，按页面实际请求提供 API fixtures。未 mock 的 `fetch` 会被阻止并使测试失败，即使组件捕获了异常；不得连接开发者正在运行的后端作为隐式测试依赖。
 
-工作流已配置不等于远程运行通过。通过、失败或跳过的结果，以对应提交的 Actions 记录为准。
+工作流配置好后，通过、失败或跳过的结果以对应提交的 Actions 记录为准。
 
 ## 3. 生产聊天纵向路径
 

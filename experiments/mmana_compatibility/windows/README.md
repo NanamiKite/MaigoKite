@@ -19,7 +19,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\capture.ps1 -NextBatch
 
 先查看清单而不打开 GUI：`python capture.py --next-batch --list-plan`。也可 `-NextBatch -Case G03-yagi` 只采一个新模型，或 `-NextBatch -Case E05-soil` 只补该工况四个频点。遇到失败仍停止并保留原始证据，不自动循环重试。`-NextBatch` 不与 `-Sweep` / `-InspectOnly` 组合。
 
-下面保留默认六例的完整说明和历史故障证据，供复现，**不是本轮要重跑的步骤**。
+下面保留默认六例的完整说明和历史故障证据，供复现，**不需要重跑**。
 
 在 Windows 上打开 PowerShell，进入本目录后运行下面一条命令，选择你已经安装的 **MMANA-GAL 可执行文件**。无需安装或启动 MaigoKite。
 
@@ -43,7 +43,7 @@ Windows PowerShell 5.1 和 PowerShell 7 均有启动入口；机器需已有 Pyt
 
 每例保存 GAL 另存的 `model.maa`、计算日志、结果与设置截图、原始电流 CSV、原始远场 CSV、方向图截图。程序核对另存模型的几何、源、负载、分段和环境字段，并检查 CSV 数据列和角网格；不修改或归一化原始数据。方向图导出请求 5° 步长，自由空间 θ=0…180°、有地面 θ=0…90°，φ=0…355°。
 
-**六例主频采集已收齐并完成数值对照。** `053755Z-8t78q4op` 完成前五例，`055645Z-b9grnwah` 成功补采 E05，均来自实际文件版本 1.2.0.20、同一 EXE hash。最新 E05 的四个土壤值、单一介质及无地网在重新打开后核对成功，模型、电流和远场均已导出，收尾状态为 `COMPLETE`。这证明两次组合的六例采集完成，不冒充最新版脚本一次连续跑完六例；可选 `-Sweep` 尚未验证。
+**六例主频采集已收齐并完成数值对照。** `053755Z-8t78q4op` 完成前五例，`055645Z-b9grnwah` 成功补采 E05，均来自实际文件版本 1.2.0.20、同一 EXE hash。最新 E05 的四个土壤值、单一介质及无地网在重新打开后核对成功，模型、电流和远场均已导出，收尾状态为 `COMPLETE`。两次组合完成六例采集；最新版脚本一次连续跑完六例尚未验证，可选 `-Sweep` 也尚未验证。
 
 干净参考包为 `results/reference-capture-20261019.zip`，保留原始文件和两次来源元数据。旧失败/取消包已从有效结果目录移出，混合包中五例有效数据先经 SHA-256 校验保留。完整数值结论见[工程评估](../ENGINEERING.md)。下面是历史故障定位记录，不是当前仍阻塞的清单；旧 MMANA 源码仍不等同于 GAL 二进制。
 
@@ -55,7 +55,7 @@ Windows PowerShell 5.1 和 PowerShell 7 均有启动入口；机器需已有 Pyt
 
 `053755Z-8t78q4op` 已完成前五例的模型保存、计算及原始电流/远场 CSV 导出，收尾归档状态为 `COMPLETE`；仅 E05 在地面设置阶段停止。这版中文 GAL 把地网开关显示为“地面介质类型”，其关联的数量/半径编辑器已从截图与控件树确认。现结合 `TMediaDlgBox`、唯一复选框、所在组内两个径向线编辑器识别该布局，不能只按中文关键词判为未知，也不能忽略其他未知选项。关闭地网后要求复选框未选中、数量/半径编辑器均禁用；确认土壤设置后重新打开逐项核对，并拒绝额外介质。控件含义与提交逻辑参考 [公开 MMANA 地面设置源码](https://github.com/ja7ude/MMANA/blob/153ad346ee8748ca778d7d8926339a540ef40238/MediaDlg.cpp)，仍以 GAL 实际读回为准。
 
-`054442Z-7u_e_a42` 确认前述地网识别已通过，失败在第 3 个可编辑字段 `X(m)`：脚本要求清空，GAL 实际读回 `0.0`。这是采集器错误地把旧 MMANA 的空值表示当成了 GAL 必须满足的条件，不是介电常数或电导率错误。当前单一介质配方明确填写并严格读回 `13、5、0、0`（εr、mS/m、X 米、高度米）；保存后再次验证，不接受任意 X 值，也不跳过第二介质或地网检查。[GAL 帮助](https://hamsoft.ca/pages/mmana-gal/mmana-gal_basic_help/MMANA-GAL%20basic%20help.htm) 将 X/R 距离用于多介质分界；[原始 MMANA 求解入口](https://github.com/ja7ude/MMANA/blob/153ad346ee8748ca778d7d8926339a540ef40238/mininec3.cpp#L2060) 也单独处理最后介质的外延，不能把“必须空白”当作通用兼容条件。结果中 `x_m` 仅记录 GUI 原值，不解释为土壤在 0 米结束。`soil-readback.json` 逐项记录期望值、配置前值及提交/重新打开后的实际文本；最新 E05 已成功完成这些核对。
+`054442Z-7u_e_a42` 确认前述地网识别已通过，失败在第 3 个可编辑字段 `X(m)`：脚本要求清空，GAL 实际读回 `0.0`。这是采集器错误地把旧 MMANA 的空值表示当成了 GAL 必须满足的条件，不是介电常数或电导率错误。当前单一介质配方明确填写并严格读回 `13、5、0、0`（εr、mS/m、X 米、高度米）；保存后再次验证，不接受任意 X 值，也不跳过第二介质或地网检查。[GAL 帮助](https://hamsoft.ca/pages/mmana-gal/mmana-gal_basic_help/MMANA-GAL%20basic%20help.htm) 将 X/R 距离用于多介质分界；[原始 MMANA 求解入口](https://github.com/ja7ude/MMANA/blob/153ad346ee8748ca778d7d8926339a540ef40238/mininec3.cpp#L2060) 也单独处理最后介质的外延，“必须空白”不是通用兼容条件。结果中 `x_m` 仅记录 GUI 原值，不解释为土壤在 0 米结束。`soil-readback.json` 逐项记录期望值、配置前值及提交/重新打开后的实际文本；最新 E05 已成功完成这些核对。
 
 `054958Z-5os6o9xs` 的 `soil-readback.json` 已记录四项正确值 `13、5、0、0`。失败后仍是可用的地面设置对话框，表格编辑器已隐藏、确定按钮可用、没有额外验证弹窗；模拟鼠标消息未使确认完成。当前仅将地面设置的确定/取消改为 pywinauto 公共 `notify_parent(BN_CLICKED)`：它使用真实按钮 HWND 和 control ID 向父窗口投递标准 [WM_COMMAND / BN_CLICKED 通知](https://learn.microsoft.com/en-us/windows/win32/controls/bn-clicked)，仍执行 GAL 的按钮逻辑，不直接调用 EndDialog、隐藏窗口或假定数字 IDOK。关闭后必须同时满足对话框消失和主窗口恢复可用；出现其他弹窗立即报告其内容。确认后的重新打开校验保留，等待上限仍为 15 秒。最新 `055645Z-b9grnwah` 已在 Windows 上实际走通确认、重新打开和导出，脚本 SHA-256 为 `03021b821896a50b2ef0ba4a4b0b11c446239a796ddd56151200e72e50caa586`。
 

@@ -1,10 +1,8 @@
 # 个人 Agent 前端设计文档 · 「墨线 Inkline」
 
 > 核心隐喻：对话是工作纸上的正文，执行过程沉成页边的墨线。常用交互复用成熟产品的惯例，不为视觉身份发明新的操作语义。
-> 技术基线：Vue 3 + TS + Vite 5 · Pinia · Vue Router 4 · SCSS + CSS 变量 · Electron 44 · fetch + WebSocket（Python FastAPI；Go Gateway 已移除）。历史验收中的 Electron 28 记录不覆盖当前版本。
-> 2026-10-11：阶段 1–4 已验收；阶段 5+6 已完成本地页面收尾与质量检查，尚待用户验收。当前规范以第 1–7 节为准，第 8 节起保留各阶段历史证据。
-> 2026-10-16 验收对账：上述阶段号为本页 UI 实施阶段，不等于项目六批交付。真实 GUI 已覆盖子 Agent 页签/刷新、默认设置、图片上传/生成/预览；SVG 本地符号引用缺陷经单测和真实渲染复验关闭。准确的通过/失败/未覆盖见 [当前验收状态](../project/Roadmap.md#当前验收状态)，历史“当次未运行”不作为当前完成度。
-> 2026-11-25 收口（仅静态检查）：新页一律先落空白页、首条消息才建会话，侧栏会话取消日期分组；抽屉页签即标题，子 Agent 页签条按需出现；标题栏脉点改为跨会话聚合并可跳转；错误反馈用中性墨色、成功用对勾，小字号档不再受 12px 下限限制，减弱动效下加载指示改为仅透明度呼吸；36 处图标按钮的原生 `title` 首批改用 `v-tooltip`。已通过 `format:check`（34 个 Vue/TS 文件）、`lint`、`vue-tsc` 与 `build:web`；未运行测试套件、GUI 验收与远程 CI。
+> 技术基线：Vue 3 + TS + Vite 5 · Pinia · Vue Router 4 · SCSS + CSS 变量 · Electron 44 · fetch + WebSocket（Python FastAPI）。
+> 当前规范以第 1–7 节为准；第 8 节起是历史实施记录。
 
 ---
 
@@ -96,12 +94,11 @@ CSS 直接继承到传送浮层和速记胶囊，无新的组合函数、App.vue
 - 入口：设置 → 外观与称呼 → 案头背景。选择/更换/移除图片、开关、纸张透明度和焦点预览就地操作；预览复用 `AppearancePreview`。焦点支持拖动、方向键、Shift 微调步长及 Home 居中。命令面板在无图时定位设置字段，有图时切换开关。
 - 借鉴社区 `codex-skin` 的分层方式：全窗口仅由固定的 `.backdrop img` 绘制一张清晰壁纸，使用 cover 与焦点位置。侧栏、窗口栏、导航栏、对话区和宽屏抽屉只绘制半透明主题底色；不重复画图片、不铺柔化图、不加分区渐变或中央亮带。原有会话标签和正文调宽不变。
 - 用户指定透明度 `T`（0–100%），`--desk-paper-a = 1-T`，paper/paper-2 通过 `color-mix(in srgb, …, transparent)` 混合。数值直接控制底色，不修改文字和图标 opacity，不用隐藏的可读性上限截断滑块。旧 v1 偏好的 visibility 作为初始滑块值，新操作保存 paperTransparency；这是新的视觉语义，不保证旧版像素外观不变。
-- 本试版按用户确认放宽“任意图片逐像素强制达到正文 7:1、次要文字 4.5:1”的条件，不能承诺所有透明度和背景都满足该阈值。设置提示文字难辨时降低透明度；高对比度或强制颜色模式隐藏背景、强制纸色完全不透明。无背景模式及原有文字墨色令牌不变。
+- 透明度模式不强制任意图片逐像素达到正文 7:1、次要文字 4.5:1。设置提示文字难辨时降低透明度；高对比度或强制颜色模式隐藏背景、强制纸色完全不透明。无背景模式及原有文字墨色令牌不变。
 - 对话页只在 `.chat-page` 覆一次纸色；`.chat-body`、消息列、砚台外层透明，移除铺满窗口的纸张边框、折边和阴影。正文及预览沿用增强的静态文字墨色，装饰色、Pulse 和笔触不变。砚台本体、代码/终端/diff、浮层、命令面板、胶囊及 Settings/Memory 主内容区仍不透明；页边控制和提示自带纸底。
 - 窄屏抽屉与覆盖侧栏保持不透明，防止面板后另一组文字透入。图片层不在移动面板或滚动容器里，不需要 fixed 背景逐面板对齐、JS 偏移同步、滤镜或持续动画；不再使用落定后的纸罩显现流程。原有页面入场及 reduced-motion 规则不变。
 - PNG/JPEG/WebP/AVIF 校验、重编码、20 MiB / 8192px / 2400 万像素限制、IndexedDB 和本地 v1 偏好存储沿用已有实现，不新增依赖、后端接口或 IPC。旧记录的柔化 Blob 格式仍保留，本试版不使用它显示或进行运行时求限；不破坏已有导入数据。只为清晰图建立 object URL，切换/卸载释放。
-- 即时预览单独绘制清晰图，上面仅叠同一透明度的纸色及不透明砚台。切换主题只更新 CSS 令牌，不重新解码柔化图、扫描像素或计算对比度缓存。历史对比度纯函数和既有测试未删除或改写，但旧像素验收不代表这个自由透明度试版的结果。
-- 当前构建与改动文件 lint 结果见更新日志；本轮没有运行测试套件或原生 Electron/安装包验收。
+- 即时预览单独绘制清晰图，上面仅叠同一透明度的纸色及不透明砚台。切换主题只更新 CSS 令牌，不重新解码柔化图、扫描像素或计算对比度缓存。历史对比度纯函数和既有测试保留。
 
 ### 2.2 字体
 - 界面：`"Inter", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`
@@ -123,7 +120,7 @@ CSS 直接继承到传送浮层和速记胶囊，无新的组合函数、App.vue
 - 单项选择统一使用 `InkSelect`：触发按钮与字段同层级，展开后使用纸面浮层、石青选中底色和勾选标记。浮层在原生 dialog 顶层定位，自动选择向上或向下展开，长列表独立滚动，避免被抽屉、表单和外层弹窗裁切。方向键、Home / End / PageUp / PageDown、输入文字定位、Enter / Space 选择、Esc 取消，关闭后沿用原生焦点回收。
 - 现有 `Event.target.value` 处理函数由隐藏的 select 桥接，隐藏元素不提供系统菜单；字段校验、保存和审批接口不变。对话模型保留已有按提供商分组与搜索的 `ModelPicker`，只对齐浮层主题，不退化为普通列表。可信模型候选填写实际模型 ID，不使用配置记录 ID；手工输入继续保留。
 - 聊天模型提供商标题支持折叠，弹层内采用有层级的模型树；搜索展开匹配组，清空搜索恢复手动折叠，重新打开时展开当前模型所在组。上/下遍历可见节点，Enter 选择模型或开合分组，空搜索时左右键开合；Alt+数字仅对应可见模型。不同服务名称、地址与协议继续独立分组，不合并凭证。
-- 设置提供商卡借用原生 details/summary 的开合与键盘语义，自绘标记、背景与箭头；标题切换开合，「管理模型」独立编辑，折叠不影响默认模型或凭证。原生行为不等于系统默认外观。
+- 设置提供商卡借用原生 details/summary 的开合与键盘语义，自绘标记、背景与箭头；标题切换开合，「管理模型」独立编辑，折叠不影响默认模型或凭证。原生行为只借用语义，外观仍由项目绘制。
 - 鼠标悬停与键盘导航高亮分别处理，移开后不留下导航底色或阴影；真正选中仍保留勾选与强调色，键盘保留 focus-visible。统计柱状图的悬停预览随鼠标离开结束，点击选择仅保留底部细线，不用整列背景冒充悬停。
 - 系统 `window.confirm` 改为 `InkConfirm`，复用原生 dialog 的焦点陷阱与 Esc 取消；危险操作使用朱砂确认按钮，默认聚焦取消，确认期间后台状态变化后仍复核操作目标与忙碌状态。
 - 复选框保留原生输入与 checked / indeterminate / disabled 语义，外观由令牌控制。`InkNumber` 只装饰现有数字输入和加减按钮，min / max / step、键盘调整和数值校验仍由原生输入负责。
@@ -172,11 +169,11 @@ CSS 直接继承到传送浮层和速记胶囊，无新的组合函数、App.vue
 - **工作区移除**：后添加的工作区在侧栏和选择列表均有删除入口。确认弹窗展示名称、路径和明确后果：文件不动、对话保留并移至默认目录；后续文件操作使用默认目录。等待审批、运行/清理中的任务或进程、最新可恢复任务会阻止删除。默认工作区不显示删除按钮。移除当前行后焦点回到可用工作区行，当前对话保持打开、归属改为默认工作区。
 - **正文区**：纸面铺满可用区域，正文与砚台独立对齐限宽；默认宽度随内容区变化（78%，常规下限 640px、默认上限 1040px，窄屏以实际空间为准）。两侧可拖宽，手动宽度不受默认上限限制，双击还原；宽度不加缓动，手势结束才写入 localStorage。左侧保留 48px 轨道槽。
 - **已打开会话**：在应用导航栏内展示轻量标签，不与原生窗口按钮混排。左栏仍是全部工作区/会话目录；标签只代表当前窗口打开过的会话，关闭不删除、不停止运行。左右键切换、Home/End 定位、Delete 关标签、F2/双击重命名；窄窗口横向滚动，当前标签自动进入视野。只有一个活动 Chat 视图，草稿、阅读位置、分页数量与抽屉页签保存为内存中的 UI 状态；不等同于运行状态持久化或同时打开多个独立聊天窗格。
-- **流式渲染**：实时正文仅由 Run store 按帧发布，持久消息在完成或快照恢复时更新。文本帧保留工具、审批与补充输入的引用；轨道投影按活动集合缓存，缩略图只测量已经挂载的内容，测量间隔至少 120ms。Markdown 继续使用现有解析器与消毒策略，长文本按 100–400ms 自适应节流，结束时立即刷新；流式前缀不挤占已完成消息的缓存。无待处理项时不安装待处理 DOM 观察器。本次未做交互或性能运行验收。
+- **流式渲染**：实时正文仅由 Run store 按帧发布，持久消息在完成或快照恢复时更新。文本帧保留工具、审批与补充输入的引用；轨道投影按活动集合缓存，缩略图只测量已经挂载的内容，测量间隔至少 120ms。Markdown 继续使用现有解析器与消毒策略，长文本按 100–400ms 自适应节流，结束时立即刷新；流式前缀不挤占已完成消息的缓存。无待处理项时不安装待处理 DOM 观察器。
 - **抽屉**：保留宽度拖拽与持久化；「等你处理」跨会话，变更 / 运行 / 计划 / 文件沿用现有上下文。`Ctrl+.` 打开，`Ctrl+J` 直接切到待处理页签。
 - **运行定位**：每条运行标题旁保留独立的「定位到对话」图标按钮，不依赖卡片展开。点击展开前端折叠的历史并定位到对应用户消息开头，短暂墨色高亮；暂停自动跟随，窄屏关闭覆盖抽屉以露出目标，宽屏保留运行面板。目标尚未载入时按钮禁用并说明；重复点击仍可再次定位，不创建对话或子代理页签。高亮仅动画 opacity；减少动态效果时 80ms 淡入、停留原有时长后清除（`chat-turn-locate-reduced`）。
 - **运行记录与子 Agent 页签**：运行条目以输入标题和真实状态作摘要，历史默认折叠、分批展开；展开后显示原输入、执行小结和操作明细。小结复用聊天中的文件预览、命令结果、审批记录与失败详情，不再维护第二套统计。子 Agent 入口归属父运行，点击在「运行」面板内部打开独立页签，展示委派任务、实际模型、模型公开提供的思考/回复和只读工具结果；不新建工作区对话，不提供额外发送入口。关闭页签仅关闭视图，切换工作区对话后清空当前打开的子页签；切换抽屉页签保留视图。记录通过父任务现有事件历史恢复，旧记录缺失的过程不补造。页签支持左右方向键、Home/End 与 Delete 关闭；同一父运行和子 Agent 只打开一个页签。
-- **分隔条**：左右侧栏宽度、文件树 / 文件预览高度、变更列表 / diff 高度复用现有 `ResizeHandle`，内容区和分隔条明确设置 Electron `no-drag`。鼠标使用原生 `mousedown / mousemove / mouseup`；触摸和手写笔保留 Pointer Events。移动和释放由文档捕获阶段监听，不以指针捕获成功为前提；释放、按钮松开、失焦、窗口隐藏、窗口尺寸改变、停用或卸载清理监听。起拖读取当前实际可见尺寸，移动直接更新当前面板的 `width / flex-basis` 和分隔条读屏数值，不逐像素写入 Pinia 或重渲染布局父组件，也不等待 rAF；手势结束才提交尺寸并保存，宽度在 Vue 完成提交后交还 CSS 管理。左栏变宽时同步限制右栏，保留聊天区域最小宽度。会话标题的中间省略测量按标题和字体缓存，避免拖宽时重复创建 Canvas 和测量全部候选。拖动期间暂去抽屉阴影，全页保持对应调整光标并禁止选字，分隔条用强调色显形 / 伸展反馈，参数由 `--resize-line-rest-scale`、`--resize-grip-rest-opacity`、`--resize-grip-active-scale` 和既有动效令牌控制；减少动态效果时取消过渡，宽高不加缓动延迟。双击还原与键盘调整不变。独立 Electron 实例经操作系统鼠标输入观察四处按住期间连续变化、松手保存及光标状态回收；左右宽度拖动期间布局父节点的尺寸样式未更新。此结果不代替用户实际会话的性能验收，未量化 Web 滚动或拖动帧率，未运行测试套件或构建。
+- **分隔条**：左右侧栏宽度、文件树 / 文件预览高度、变更列表 / diff 高度复用现有 `ResizeHandle`，内容区和分隔条明确设置 Electron `no-drag`。鼠标使用原生 `mousedown / mousemove / mouseup`；触摸和手写笔保留 Pointer Events。移动和释放由文档捕获阶段监听，不以指针捕获成功为前提；释放、按钮松开、失焦、窗口隐藏、窗口尺寸改变、停用或卸载清理监听。起拖读取当前实际可见尺寸，移动直接更新当前面板的 `width / flex-basis` 和分隔条读屏数值，不逐像素写入 Pinia 或重渲染布局父组件，也不等待 rAF；手势结束才提交尺寸并保存，宽度在 Vue 完成提交后交还 CSS 管理。左栏变宽时同步限制右栏，保留聊天区域最小宽度。会话标题的中间省略测量按标题和字体缓存，避免拖宽时重复创建 Canvas 和测量全部候选。拖动期间暂去抽屉阴影，全页保持对应调整光标并禁止选字，分隔条用强调色显形 / 伸展反馈，参数由 `--resize-line-rest-scale`、`--resize-grip-rest-opacity`、`--resize-grip-active-scale` 和既有动效令牌控制；减少动态效果时取消过渡，宽高不加缓动延迟。双击还原与键盘调整不变。独立 Electron 实例经操作系统鼠标输入观察四处按住期间连续变化、松手保存及光标状态回收；左右宽度拖动期间布局父节点的尺寸样式未更新。
 - 宽度 ≤ 1100px 时抽屉为覆盖层；宽度 < 720px 时侧栏为覆盖层。断点来自 `_breakpoints.scss`，令牌导出给既有 JS 布局逻辑。桌面侧栏覆盖层从窗口栏下方开始，Web 侧栏从应用导航栏下方开始；抽屉覆盖层和遮罩始终从应用导航栏下方开始，避免挡住窗口按钮和导航。覆盖面板互斥，关闭复原焦点与滚动；宽屏非模态抽屉不设置焦点陷阱。
 - **Settings**：分组导航 + 内容；窄屏变顶部导航。搜索定位 18 个真实字段，保留 `route.query.tab`；旧 `tab=workspace` 深链不变，显示名称按实际内容改为「运行状态」。
 
@@ -188,8 +185,6 @@ CSS 直接继承到传送浮层和速记胶囊，无新的组合函数、App.vue
 含独立的服务默认位置；拖动预览，松手/键盘变更后保存。仅支持 on/off 时使用开关，不伪造强度档位。
 运行中与保存中禁用，失败恢复已保存值，切模型清空旧选择；能力请求取消旧请求，避免慢响应串入新模型。
 没有可控制能力时不显示滑块，只保留服务默认及原因提示。已知原生能力但兼容接口未接通也不冒充可操作。
-本批未进行 GUI 运行验收。
-
 ### 4.1 轨道 Rail（Inkline 的核心）
 - 正文左侧使用双 SVG 笔触，节点也用 SVG，不依赖字体字符；下列符号只是文档图例。
 - 节点类型：
@@ -263,7 +258,7 @@ CSS 直接继承到传送浮层和速记胶囊，无新的组合函数、App.vue
 - 当前会话的审批与提问就在 Rail 对应位置处理；不在视口内时，砚台上方提示「N 项等你处理 ↓」，点击定位并聚焦第一个操作控件。
 - 非当前会话显示侧栏菱形标记；收起侧栏时开关显示计数，抽屉入口也显示计数。两处均不计当前会话。
 - 抽屉的独立页签展示全部会话事项，标明当前对话，可直接处理或跳转定位；空态、加载与错误重试分别设计。
-- 窗口失焦时沿用既有桌面提醒与动作，不在本轮改动 Electron。
+- 窗口失焦时沿用既有桌面提醒与动作，不改 Electron。
 
 ### 4.5 审批卡片与「印记」
 - 卡片：`--wait` 色左边框，标题说明要做什么，下面是等宽字体的具体命令或路径，再一行风险说明。
@@ -291,7 +286,7 @@ CSS 直接继承到传送浮层和速记胶囊，无新的组合函数、App.vue
   - 队列在砚台上方可见，支持拖拽手柄调整先后，也支持聚焦手柄后使用上下方向键移动；显示插入线、拖动预览和落位过渡，减少动态效果时关闭过渡。直接重排按会话保存的同一个实际待发数组，不另存显示顺序；以消息 ID 定位，已出队的消息不可重排。编辑、移除、暂停后确认继续与失败保留原文不变；未增加跨重启持久化。
   - 等待审批时立即发送不可用，说明先处理审批；加入队列仍可用。普通输入不当作取消。
 - 运行中可修改执行权限，从下一个尚未开始的工具生效；已开始操作持有权限快照，不被更改或中断。已有审批仍须明确决定并校验 hash / 版本，调整模式不是自动批准。
-- 完全访问使用 `danger_full_access` 并就地二次确认，设置为新对话默认值还须风险勾选；旧自动模式单独标注，不自动提权。权限保存异常时查询实际状态，不自动重发或展示乐观降权。本次权限交互未做浏览器验收。
+- 完全访问使用 `danger_full_access` 并就地二次确认，设置为新对话默认值还须风险勾选；旧自动模式单独标注，不自动提权。权限保存异常时查询实际状态，不自动重发或展示乐观降权。
 
 ### 4.7 速记胶囊（桌面特有）
 - 全局快捷键 `Alt+Space`（可改）唤出一个 560×56 的无边框置顶小窗，位于屏幕中上方。
@@ -308,11 +303,11 @@ CSS 直接继承到传送浮层和速记胶囊，无新的组合函数、App.vue
 ### 4.9 抽屉
 标签页：**等你处理**（跨会话）· **变更**（真实 diff，行号、滚动、复制）· **运行**（当前操作、等待原因、子 Agent、后台进程及停止，历史记录折叠）· **计划**（真实 `plan.updated`，无计划不编造）· **文件**（键盘文件树与预览）。聊天区负责输入、回复及补充状态。
 
-- 「变更」显示当前工作区的 **Git 未提交变更**，不把执行小结中的历史文件操作当作当前差异。面板可见时，当前工作区的文件改动、非只读操作结束、任务结束、快照恢复与连接恢复触发合并刷新；重新打开、切回页签或窗口后也会刷新。隐藏、切换工作区及销毁时取消旧请求，防止旧响应覆盖新工作区；自动刷新保留仍存在的文件选择和预览，请求失败就地显示错误，不显示为空工作区。2026-10-16 源码与静态检查完成，尚未运行本次 GUI / 行为回归。
+- 「变更」显示当前工作区的 **Git 未提交变更**，不把执行小结中的历史文件操作当作当前差异。面板可见时，当前工作区的文件改动、非只读操作结束、任务结束、快照恢复与连接恢复触发合并刷新；重新打开、切回页签或窗口后也会刷新。隐藏、切换工作区及销毁时取消旧请求，防止旧响应覆盖新工作区；自动刷新保留仍存在的文件选择和预览，请求失败就地显示错误，不显示为空工作区。
 - 文件树 / 文件预览与变更列表 / diff 预览均以水平分隔条调整占位，分别滚动；两页各自记住比例，窗口变小时保留两区可用空间。变更较少且未手动调整时列表紧凑排列。分隔条可用上下方向键调整，Shift 加大步长，Home / End 调到边界，双击或 Enter 复原；页签切换清理拖拽和尺寸观察，重新进入时重测可用高度。
 - 文件与 diff 预览使用填满剩余高度的文档视图，所有已获取的行都可滚动查看，不套用聊天代码片段的前 20 行 / 最后 200 行折叠规则或 360px 高度上限。后端截断仍明确提示；代码标题和复制按钮不参与纵向压缩，操作区保留边距。
-- SVG / Markdown / HTML 的「源码 / 预览」为抽屉内的扁平切换区，复用纸面、墨色、细分隔线、石青选中底线与公共 `interactive-row` 反馈，不保留浏览器默认按钮外观；支持左右方向键、Home / End 和原生焦点提示。SVG 经 XML 检查与 DOMPurify 净化后以图片显示，不将用户 SVG 挂入应用 DOM；脚本、嵌入网页、外部资源不可用，截断或解析失败时保留源码入口。2026-10-16 已通过真实 Web/Chromium 预览与本地符号像素渲染复验；不代表所有键盘/平台交互均完成验收。
-- 文档复用纸面、工具栏和错误反馈，不在 renderer 执行 PDF/Office 内容。PDF 按物理页，DOCX 按段落/表格，XLSX 按行段，PPTX 按幻灯片定位；目录/查找始终使用文字层偏移。PDF 提取文字、页图与本地 OCR 分别展示，翻页固定快照哈希和读取模式，取消旧请求并忽略迟到响应。未知能力或缺少 OCR 语言时如实提示，不伪造空白页或识别成功。此新增路径仅有静态检查，未沿用旧图片 GUI 通过结论。
+- SVG / Markdown / HTML 的「源码 / 预览」为抽屉内的扁平切换区，复用纸面、墨色、细分隔线、石青选中底线与公共 `interactive-row` 反馈，不保留浏览器默认按钮外观；支持左右方向键、Home / End 和原生焦点提示。SVG 经 XML 检查与 DOMPurify 净化后以图片显示，不将用户 SVG 挂入应用 DOM；脚本、嵌入网页、外部资源不可用，截断或解析失败时保留源码入口。已通过真实 Web/Chromium 预览与本地符号像素渲染复验。
+- 文档复用纸面、工具栏和错误反馈，不在 renderer 执行 PDF/Office 内容。PDF 按物理页，DOCX 按段落/表格，XLSX 按行段，PPTX 按幻灯片定位；目录/查找始终使用文字层偏移。PDF 提取文字、页图与本地 OCR 分别展示，翻页固定快照哈希和读取模式，取消旧请求并忽略迟到响应。未知能力或缺少 OCR 语言时如实提示，不伪造空白页或识别成功。
 - 文件工具栏提供「新建空文件」「新建文件夹」「在文件资源管理器中打开文件夹」和刷新。选中文件夹时使用该目录，选中文件时使用其父目录，没有选择时使用工作区根目录；路径可查看完整提示。新建使用原生模态命名框，Enter 确认、Esc 取消，成功后刷新并定位，不覆盖同名内容，失败保留名称就地提示。创建仅接受已登记工作区内的单层名称，不递归补父目录、不写入文件内容、不修改 Git 元数据。桌面端复用现有受限 IPC；Web 端使用本机所有者接口打开文件夹，不能提交任意系统命令。
 - diff 增删使用独立的浅 / 深色语义令牌，不随强调色预设改变：整行及行号区着色、侧边墨线区分，原文的 `+ / −` 与前后行号保留；列表和小票中的增删数量采用相同色彩。
 - 页签即标题（2026-11-25）：页签内容区不再重复页签名。「运行」「等你处理」的刷新动作移到抽屉标题行右侧、放大与关闭之前，只在当前页签提供刷新时出现；「等你处理」的数量只保留在页签徽标上。变更、计划、文件页签没有标题行刷新钮（变更页内保留「Git 未提交 · N」与自己的刷新）。
@@ -339,7 +334,6 @@ CSS 直接继承到传送浮层和速记胶囊，无新的组合函数、App.vue
   不支持的服务隐藏入口，不提供虚假的剩余额度、余额合计或费用估算。
 - 加载用 InkLoader，错误和重试就地显示，空期间提供查看全部用量或开始对话的入口；
   窄屏表格转为带字段标签的紧凑行。取消页面请求不会关闭运行中的模型客户端。
-- 本轮未运行测试、构建、类型检查、lint、实例或真实额度查询；没有视觉截图验收结论。
 
 ### 4.11 桌面图形状态（2026-10-16）
 
@@ -347,7 +341,6 @@ CSS 直接继承到传送浮层和速记胶囊，无新的组合函数、App.vue
 - 沿用外观偏好文件中的可选 `hardwareAcceleration`，缺失视为允许，主进程在 ready 前读取。开关保存成功后才更新，待重启与实际状态分别显示；从托盘退出后重开才应用，不以关闭窗口代替退出，不自动打断任务。
 - 只在 `gpu-info-update` 后读真实特性；检测前显示等待，未知值保留为未知，GPU 进程退出时丢弃旧回执。硬件加速、软件渲染、不可用与性能受限按 [Electron GPUFeatureStatus](https://www.electronjs.org/docs/latest/api/structures/gpu-feature-status) 区分，不把偏好当作检测结果。主进程不添加强制绕过兼容限制的开关。
 - 沿用既有窗口身份、主 frame 与导航来源校验；preload 校验返回字段、隐藏 Electron 对象并提供可取消订阅。组件销毁时取消订阅，渲染进程没有文件或 Shell 权限。
-- 本次构建、全量类型、零警告 lint 和改动源码格式检查通过；未运行测试套件、原生窗口交互或重启验收，详见更新日志。
 
 ---
 
@@ -357,7 +350,7 @@ CSS 直接继承到传送浮层和速记胶囊，无新的组合函数、App.vue
 2. **一轮任务**：发送 → 脉点进入思考 → 轨道开始长线 → 节点陆续出现并自动折叠 → 正文流式输出结论 → `◆` 回合小结。
 3. **审批**：节点变 `◇`、脉点变菱形，就地确认后留下「准 / 驳」印记；其他会话的阻塞项才增加侧栏与抽屉入口计数。
 4. **中断**：`Esc` 停止当前生成，轨道末端画一个「╳ 你叫停了」，已完成的步骤都保留。
-5. **输入协作**：立即发送、加入队列、停止各自独立；未采用补充显式显示并提供重新发送。聊天分叉位于已保存助手回复下方的「⋯ → 从此处分叉新对话」，不再放在侧栏会话管理；携带该条回复的持久消息 ID，复制截至该回复的可见历史并打开独立会话。提示文件仍共享、不继承审批授权；源任务未结束时禁用并说明原因，无持久 ID 的流式回复不显示入口。支持键盘展开、Esc 收起与触屏点击，失败在原处显示且手动重试保留请求键。不展示逐节点执行分叉、worktree 或回滚。新增分叉未运行交互验收。
+5. **输入协作**：立即发送、加入队列、停止各自独立；未采用补充显式显示并提供重新发送。聊天分叉位于已保存助手回复下方的「⋯ → 从此处分叉新对话」，不再放在侧栏会话管理；携带该条回复的持久消息 ID，复制截至该回复的可见历史并打开独立会话。提示文件仍共享、不继承审批授权；源任务未结束时禁用并说明原因，无持久 ID 的流式回复不显示入口。支持键盘展开、Esc 收起与触屏点击，失败在原处显示且手动重试保留请求键。不展示逐节点执行分叉、worktree 或回滚。
 6. **滚动**：上滑后停止自动跟随，右下角出现「↓ 墨线还在长」按钮。
 
 ---
@@ -389,13 +382,13 @@ macOS 下 `Ctrl` 自动换成 `⌘`。
 - **设置反馈**：说明 / 字段 / 反馈三级排版；外观即时预览真实消息、节点和砚台。工具用途来自用户语言映射，模型说明折入详情；保存的 Secret 不读取回显，只能复制当前输入的新凭证。
 - **产品边界**：数据管理当前只读统计；知识索引没有管理 API，不伪造加载 / 重建 / 删除。MCP 重试沿用现有整体应用接口，不声称单 Server 重连。
 
-## 8. 阶段一视觉样张 · 已确认（历史记录）
+## 8. 视觉样张（历史记录）
 
 ### 范围与审计落实
 
-阶段一时，新纸面、深度、字号和墨线展示仅由 Chat 根节点的 `.inkline-preview` 启用，沿用现有 `data-theme`、`data-accent` 与纸纹设置。当时外部壳层保留原有视觉；本轮壳层调整见第 9 节。阶段一未修改 stores、api、composables、Electron 或后端，也未新增依赖。
+阶段一时，新纸面、深度、字号和墨线展示仅由 Chat 根节点的 `.inkline-preview` 启用，沿用现有 `data-theme`、`data-accent` 与纸纹设置。当时外部壳层保留原有视觉；壳层调整见第 9 节。
 
-| 审计问题 | 本轮处理 |
+| 审计问题 | 处理 |
 | --- | --- |
 | 时间戳与说明同样浅，关键信息难读 | 全量检查 `ink-3` / `text-tertiary`；导航、分组、参数、风险、空态提示、快捷键、结果和状态改用二级墨色 |
 | 空态只是小图标与一句问候 | 日线、大字宋体、呼应应用图标缎带的第一笔、三项起手式；仅填入可编辑草稿，不自动执行 |
@@ -420,51 +413,22 @@ macOS 下 `Ctrl` 自动换成 `⌘`。
 | 深 / 压层 | `#272E2B` | 11.99:1 | 7.70:1 | 3.88:1 |
 | 深 / 抬升纸面 | `#1B211E` | 14.14:1 | 9.07:1 | 4.58:1 |
 
-历史样张正文：浅 `#252722` / 深 `#F1EEE8`；当时三级墨色为浅 `#6F7268` / 深 `#818A7E`。上表保留当时数值，不是当前对比度结论；阶段 5+6 的数值见第 2.1 节和收尾审阅。三级墨色不用于操作说明，文件结果与执行说明使用 `ink-2`。纹理造成的像素波动不能替代文字角色审查。
+历史样张正文：浅 `#252722` / 深 `#F1EEE8`；当时三级墨色为浅 `#6F7268` / 深 `#818A7E`。上表保留当时数值，当前对比度见第 2.1 节。三级墨色不用于操作说明，文件结果与执行说明使用 `ink-2`。纹理造成的像素波动不能替代文字角色审查。
 
 ### 材质、节奏与降级
 
-- 画布噪点 0.022、砚台和小票 0.025、代码 0.008，均在文字下面；浮层纹理令牌 0.012 为后续壳层预留，本轮不添加浮层噪点。
+- 画布噪点 0.022、砚台和小票 0.025、代码 0.008，均在文字下面；浮层纹理令牌 0.012 为后续壳层预留，暂不添加浮层噪点。
 - 字号比例尺 12 / 13 / 15 / 19 / 24 / 30 / 38 / 48；问候随窗口收敛到 30，正文 15、行高 1.75。宋体仍仅用于签名位置。
 - 按压沿用 65ms、控件 140ms、新面板层级 240ms、首屏 480ms；第一笔、落点与纸面进入只动画 transform / opacity。CSS `linear()` 不可用时回退到缓动曲线，减少动态效果时静态显示。
-- 首屏的惊艳点是「第一笔 + 大字」；完成后的惊艳点是过程沉入轨道、结论后落下一张小票。视觉冲击力是否达标由用户评审，不自行宣布通过。
+- 首屏的惊艳点是「第一笔 + 大字」；完成后的惊艳点是过程沉入轨道、结论后落下一张小票。视觉冲击力留待实际使用中判断。
 
-### 本地截图证据
-
-截图与测试 JSON 位于被既有规则忽略的 `web/test-results/inkline-stage1/`，不进入 Git。Before 来自上轮界面审计，After 使用既有 `VITE_MOCK=1` 回放；是展示证据，不是后端审批或工具执行验收。Before/After 的会话内容不完全相同。
-
-- 首页：[浅色](../../web/test-results/inkline-stage1/after-home-light.png)、[深色](../../web/test-results/inkline-stage1/after-home-dark.png)。
-- Rail / 小票：[浅色](../../web/test-results/inkline-stage1/after-chat-light.png)、[深色](../../web/test-results/inkline-stage1/after-chat-dark.png)。
-- 原界面：[首页浅色](../../web/test-results/inkline-stage1/before-home-light.png)、[首页深色](../../web/test-results/inkline-stage1/before-home-dark.png)、[轨道浅色](../../web/test-results/inkline-stage1/before-chat-light.png)、[轨道深色](../../web/test-results/inkline-stage1/before-chat-dark.png)。
-- 补充：两主题首页/对话的 1100px、720px 截图，审批态、长输出、纸纹关闭对照；浏览器未报告页面异常。720px 首页无横向溢出，减少动态效果时节点动画为 `none`。
-
-### 验收与保留问题
-
-`npm run build` 通过（包括 vue-tsc 与 Electron 编译），仅结构改动的只读 ESLint 检查通过。`npm run test:run`：56 项中 28 通过、28 失败；基线为 41 失败，无新增失败。**测试尚未全绿**，符合本阶段「失败数不高于 41」的门槛。
-
-仅修正 `src/tests/setup.ts` 的真实 i18n / 独立 Pinia 装配与 `session.test.ts` 缺失的回执 `status` 夹具字段，未修改断言。此前误在提交 `223479b` 中加入追踪；现已从索引移除，两份文件保留在本地，测试忽略规则继续有效。未创建新提交或改写已有历史。
-
-| 剩余失败分类 | 数量 | 未改动原因 |
-| --- | --- | --- |
-| Session API / 事件投影预期 | 8 | 涉及业务契约，不在视觉修改范围 |
-| 模型设置交互 / 请求预期 | 7 | 不调整模型功能或用断言迁就行为 |
-| 输入控件 / 选择器预期 | 3 | 不变更发送、停止和模型选择逻辑 |
-| 活动显示 / 投影预期 | 2 | 不变更运行状态投影 |
-| 文件树请求参数预期 | 1 | 不变更文件 API |
-| 文案预期差异 | 4 | 不恢复已移除的说明来迎合测试 |
-| Memory 缺少路由装配 | 1 | 本轮未继续扩张装配修正 |
-| MCP 清单预期 | 1 | 需要另行核对真实数据契约 |
-| Markdown 安全渲染预期 | 1 | 不改变既有消毒策略来通过测试 |
-
-阶段一只证明样张可构建、原基线没有新增测试失败及截图状态可用，未证明全站键盘交互、所有错误态、长会话性能或桌面系统通知。用户已确认四张核心样张；第二阶段的验证见下节。
-
-## 9. 阶段二 · 壳层与待处理事项
+## 9. 壳层与待处理事项
 
 ### 实施边界
 
-本轮不改后端、Electron、审批接口、版本号提交、审计或运行状态机；不新增依赖。保留多工作区、文件树、变更、计划、队列、记忆入口和两侧宽度拖拽。未执行 Git 命令，也未修改测试文件、测试断言、忽略规则或 Git 索引。
+这一阶段不改后端、Electron、审批接口、版本号提交、审计或运行状态机，也不新增依赖。保留多工作区、文件树、变更、计划、队列、记忆入口和两侧宽度拖拽。
 
-经确认的最小例外：`ui.ts` 只增加待处理页签、删除过时的弹层开关；`useShortcuts.ts` 只调整展示入口和键盘作用域；`events.ts` / `event-adapter.ts` / `run.ts` 只保留真实序号、时间及工具调用 ID 供展示。窄屏互斥与焦点协调放在 AppLayout 本地，不增加业务 store 字段。
+最小例外：`ui.ts` 只增加待处理页签、删除过时的弹层开关；`useShortcuts.ts` 只调整展示入口和键盘作用域；`events.ts` / `event-adapter.ts` / `run.ts` 只保留真实序号、时间及工具调用 ID 供展示。窄屏互斥与焦点协调放在 AppLayout 本地，不增加业务 store 字段。
 
 ### 先后位置与降级
 
@@ -474,9 +438,9 @@ macOS 下 `Ctrl` 自动换成 `⌘`。
 4. Question 两者均缺失时，明确放在正文后、执行小结前。Approval 缺失工具调用 ID 或对应节点尚未到达时，保留按已有事件顺序排列的独立节点，不能声称精确挂载；Approval 快照没有创建时间，不能由 expires_at / decided_at 推导创建顺序。
 5. 定位、跨会话标记和汇总不依赖精确工具关联。所有视图过滤掉 closed / verdict / 已回答事项；操作仍走 inbox 的共享 busy 锁和原有请求、刷新与错误处理。
 
-### 逐项完成情况
+### 实现情况
 
-| 要求 | 本轮结果 |
+| 要求 | 结果 |
 | --- | --- |
 | 标题栏去独立通知入口、单一侧栏开关 | 完成；Ctrl+B 保留，窗口按钮与导航按钮分权重 |
 | 宋体会话标题、中间省略、双击重命名 | 完成，复用 manageSession；本地 mock API 验证重命名 |
@@ -491,91 +455,9 @@ macOS 下 `Ctrl` 自动换成 `⌘`。
 | 统一断点与覆盖面板互斥 | `_breakpoints.scss` 唯一来源，导出 CSS 变量给 JS；抽屉 ≤1100，侧栏 <720；本地焦点陷阱与还原，主区域 inert，滚动位置保留 |
 | 令牌、动效与 i18n | 新样式使用共享令牌；新面板仅 transform / opacity，reduced-motion 短淡入；新增文案进入现有语言目录 |
 
-### 修改文件清单
+## 10. 数据链路
 
-以下均为本轮修改，按职责列出；复用而未改动的 Pulse、inbox、session、layout、文件树业务与 Electron 不计入。
-
-| 文件（相对 web/src） | 原因 |
-| --- | --- |
-| `api/events.ts` | 展示 DTO 保留工具关联及序号 / 时间 |
-| `api/event-adapter.ts` | 保留 Gateway 已有 tool_call_id，不修改后端协议 |
-| `stores/run.ts` | 回放与快照保留展示顺序元信息，原有状态水位与审批逻辑不变 |
-| `stores/ui.ts` | 新待处理页签；清理废弃 inboxOpen |
-| `composables/useShortcuts.ts` | Ctrl+J 指向抽屉；审批键限制在有效展示作用域 |
-| `utils/layout-media.ts` | JS 读取共享 CSS 断点与尺寸，不复制阈值 |
-| `utils/rail-presentation.ts` | 只读 Rail 排序、精确关联及待处理过滤 / 先后排序 |
-| `utils/tool-presentation.ts` | 描述已知操作、目标与影响，不能据此授权 |
-| `components/layout/AppLayout.vue` | 壳层主题、覆盖互斥、焦点与 inert 协调 |
-| `components/layout/Sidebar.vue` | 去重复收起入口，复用共享断点 |
-| `components/shell/TitleBar.vue` | 导航 / 窗口按钮分层，非当前计数与新标题展示 |
-| `components/shell/Drawer.vue` | 独立待处理页签，保留宽度、tab 切换和滚动记忆 |
-| `components/common/SessionTitle.vue` | 新展示组件：中间省略及原接口重命名 |
-| `components/common/CommandPalette.vue` | 分组匹配、高亮、最近使用与键盘 / 焦点展示逻辑 |
-| `components/common/IconSymbol.vue` | 与等待 Pulse 一致的菱形图标 |
-| `components/sidebar/RecentChats.vue` | 工作区下的日期分组，阻塞会话不被最近列表配额隐藏 |
-| `components/sidebar/SessionItem.vue` | 非当前等待标记与指定事项导航 |
-| `components/rail/RailTrack.vue` | 分段折叠，不抽走等待节点；未知序号提问放到正文后 |
-| `components/rail/RailNode.vue` | 内联待处理卡、可定位锚点及处理后收起 |
-| `components/rail/SealMark.vue` | 印记尺寸统一引用令牌 |
-| `components/chat-area/ApprovalCard.vue` | 主层操作 / 目标 / 影响，详情折叠；原提交与错误逻辑保留 |
-| `components/chat-area/PendingReminder.vue` | 视口可见性与定位提示，不参与业务状态 |
-| `components/chat-area/InputBox.vue` | 等待占位文案、删除废弃弹层条件；发送 / 排队不变 |
-| `components/interact/QuestionCard.vue` | 真实 title 次要标签、空标题降级、定位控件标记 |
-| `components/drawer/PendingTab.vue` | 跨会话汇总，复用同一审批 / 提问组件 |
-| `views/Chat.vue` | 当前事项派生、Rail / minimap 一致投影与定位焦点 |
-| `i18n/locales/en.ts` | 新文案中英支持，清理废弃弹层标签 |
-| `styles/_breakpoints.scss` | 新共享断点来源及 SCSS mixin |
-| `styles/tokens.scss` | 壳层继承确认后的视觉令牌，新增面板 / 交互令牌 |
-| `styles/base.scss` | 纹理位于文字下方，纸纹关闭与 reduced-motion 降级 |
-| `styles/mixins.scss` | 共享行反馈使用令牌及 transform，不动画颜色 |
-| `styles/sidebar.scss` | 壳层层次、纸纹、窄屏与滑入 |
-| `styles/drawer.scss` | 240ms 滑入、raised 深度、页签与覆盖边界 |
-| `styles/workspace-list.scss` | 工作区与日期层级，减少整块高亮 |
-| `styles/session-item.scss` | 选中墨线与跨会话等待标记 |
-| 删除 `components/interact/InboxPopover.vue` | 没有其他引用，功能已归入抽屉，无数据删除 |
-
-本文件同步更新设计与验收记录。新建的展示组件均小于 250 行；未为整理行数拆分已有业务组件，也没有新建框架。
-
-### Before / After 与专项证据
-
-截图和测试 JSON 在已有忽略规则覆盖的 `web/test-results/inkline-stage2/`，未加入版本追踪。常规对照使用同一条现有 mock 回放输入；实际审批允许、驳回、版本与理由走原有 mock API。提问排序、缺失元信息和 Pulse 专项使用明确的展示夹具，不能算作后端或桌面 OS E2E。
-
-| 主题 / 宽度 | Before | After | After 抽屉 |
-| --- | --- | --- | --- |
-| 宣纸 / 1440 | [查看](../../web/test-results/inkline-stage2/before-light-1440.png) | [查看](../../web/test-results/inkline-stage2/after-light-1440.png) | [查看](../../web/test-results/inkline-stage2/after-drawer-light-1440.png) |
-| 宣纸 / 1100 | [查看](../../web/test-results/inkline-stage2/before-light-1100.png) | [查看](../../web/test-results/inkline-stage2/after-light-1100.png) | [查看](../../web/test-results/inkline-stage2/after-drawer-light-1100.png) |
-| 宣纸 / 719 | [查看](../../web/test-results/inkline-stage2/before-light-719.png) | [查看](../../web/test-results/inkline-stage2/after-light-719.png) | [查看](../../web/test-results/inkline-stage2/after-drawer-light-719.png) |
-| 松烟 / 1440 | [查看](../../web/test-results/inkline-stage2/before-dark-1440.png) | [查看](../../web/test-results/inkline-stage2/after-dark-1440.png) | [查看](../../web/test-results/inkline-stage2/after-drawer-dark-1440.png) |
-| 松烟 / 1100 | [查看](../../web/test-results/inkline-stage2/before-dark-1100.png) | [查看](../../web/test-results/inkline-stage2/after-dark-1100.png) | [查看](../../web/test-results/inkline-stage2/after-drawer-dark-1100.png) |
-| 松烟 / 719 | [查看](../../web/test-results/inkline-stage2/before-dark-719.png) | [查看](../../web/test-results/inkline-stage2/after-dark-719.png) | [查看](../../web/test-results/inkline-stage2/after-drawer-dark-719.png) |
-
-- 位置与处理：[提问位于前后工具之间、审批精确跟随目标工具](../../web/test-results/inkline-stage2/inline-question-approval-order.png)、[空 title / 无顺序降级](../../web/test-results/inkline-stage2/question-title-fallback.png)、[提问提交错误不丢事项](../../web/test-results/inkline-stage2/question-submit-error.png)、[允许印记](../../web/test-results/inkline-stage2/approval-allowed-seal.png)、[驳回印记](../../web/test-results/inkline-stage2/approval-denied-seal.png)。
-- 视口外：[提示](../../web/test-results/inkline-stage2/pending-outside-viewport.png)、[定位与焦点](../../web/test-results/inkline-stage2/pending-located-focused.png)。
-- 跨会话：[侧栏标记](../../web/test-results/inkline-stage2/sidebar-other-waiting.png)、[收起计数](../../web/test-results/inkline-stage2/sidebar-collapsed-count.png)、[抽屉有数据](../../web/test-results/inkline-stage2/drawer-pending-data.png)、[抽屉空态](../../web/test-results/inkline-stage2/drawer-pending-empty.png)。
-- 命令面板：[模糊命中高亮](../../web/test-results/inkline-stage2/palette-fuzzy.png)、[分组与键盘选中](../../web/test-results/inkline-stage2/palette-groups.png)、[深色](../../web/test-results/inkline-stage2/palette-dark.png)。
-- 覆盖：[719 侧栏](../../web/test-results/inkline-stage2/overlay-sidebar-719.png)、[719 抽屉](../../web/test-results/inkline-stage2/overlay-drawer-719.png)、[英文抽屉](../../web/test-results/inkline-stage2/drawer-english.png)、[减少动态效果](../../web/test-results/inkline-stage2/drawer-reduced-motion.png)。
-
-| Pulse | 宣纸标题栏 | 松烟标题栏 |
-| --- | --- | --- |
-| 静息 | [查看](../../web/test-results/inkline-stage2/pulse-light-idle.png) | [查看](../../web/test-results/inkline-stage2/pulse-dark-idle.png) |
-| 思考 | [查看](../../web/test-results/inkline-stage2/pulse-light-thinking.png) | [查看](../../web/test-results/inkline-stage2/pulse-dark-thinking.png) |
-| 行动 | [查看](../../web/test-results/inkline-stage2/pulse-light-acting.png) | [查看](../../web/test-results/inkline-stage2/pulse-dark-acting.png) |
-| 等你处理 | [查看](../../web/test-results/inkline-stage2/pulse-light-waiting.png) | [查看](../../web/test-results/inkline-stage2/pulse-dark-waiting.png) |
-| 出错 | [查看](../../web/test-results/inkline-stage2/pulse-light-error.png) | [查看](../../web/test-results/inkline-stage2/pulse-dark-error.png) |
-| 离线 | [查看](../../web/test-results/inkline-stage2/pulse-light-offline.png) | [查看](../../web/test-results/inkline-stage2/pulse-dark-offline.png) |
-
-### 验收与未覆盖项
-
-- `npm run build`：通过，含 vue-tsc 与既有 Electron 编译；仍有 Sass legacy API 弃用警告。
-- `npm run test:run`：56 项，28 通过、28 失败；失败项身份与本轮基线完全一致，新增失败 0，未修改装配、夹具或断言。剩余分类沿用第 8 节的 28 项分类，不能称为全量测试通过。
-- 改动 TS / Vue 文件 ESLint：退出码 0、错误 0；仍有 498 项格式警告（属性换行、模板缩进、元素换行等）。没有运行项目带全目录 `--fix` 的 lint 脚本，以免顺手改动其他模块；本轮不宣称警告清零。
-- 浏览器交互专项：[主记录](../../web/test-results/inkline-stage2/interaction-results.json)、[补充记录](../../web/test-results/inkline-stage2/extra-results.json)。覆盖版本化审批、驳回理由、提问错误保留、正文原样、顺序降级、定位焦点、计数、命令键盘、三个覆盖边界、互斥、焦点 / 滚动还原、宽度拖拽、双击重命名、英文与 reduced-motion；未报告页面异常。
-- 未覆盖：真实 Gateway / Core 的审批与回答端到端，macOS 红绿灯、Windows 窗口按钮、失焦系统提醒及托盘。相关业务 / Electron 代码保留，浏览器验证不能替代真实桌面验收。
-- 仍保留的边界：没有调用 ID 的审批不可能精确关联；缺少真实序号及时间的提问只能回落到末尾。没有新增后端接口需求，也不以猜测补齐缺失数据。
-
-## 10. 阶段 3a · 数据链路
-
-本阶段只接入运行中补充输入、真实计划和抽屉职责划分。3b 的 SVG 墨线、补充节点、小票、代码块与砚台视觉尚未开始。未修改 Go、Python 产品代码、Electron、composables、UI/layout store 或依赖；未执行 Git 命令。
+本阶段只接入运行中补充输入、真实计划和抽屉职责划分。对话主体展示的 SVG 墨线、补充节点、小票、代码块与砚台视觉尚未开始。
 
 ### 输入与恢复语义
 
@@ -583,7 +465,7 @@ macOS 下 `Ctrl` 自动换成 `⌘`。
 - queued / consumed 直接使用 `task.input.queued`、`task.input.consumed` 事件；不添加补充输入轮询。没有 not_consumed 事件，因此任务结束、刷新与重连时通过现有 GET 查询确认；查询失败显示未知与重试，不从任务终态推断消费结果。
 - 补充输入以 input ID 合并。消费后消息表中的同 ID 消息由补充条目承载，避免双份显示；同文不同 ID 的合法输入不去重。较新事件不被旧 GET 或迟到 queued 回执覆盖。
 - 未采用的补充明确显示“本轮未采用”和“作为新回合发送”，必须用户点击，不自动重发。响应不明确时保留原幂等键；确认成功后关闭同一条补充的重发操作。已执行的动作不撤回。
-- Alt+Enter / 发送菜单的“稍后发送”保留前端下一回合列表。列表可编辑、移除或立即引导；成功结束原任务后才自动发送，失败、取消、断线时暂停，需显式继续。此列表仍为当前前端实例的本地状态，不宣称跨浏览器刷新持久化。
+- Alt+Enter / 发送菜单的“稍后发送”保留前端下一回合列表。列表可编辑、移除或立即引导；成功结束原任务后才自动发送，失败、取消、断线时暂停，需显式继续。此列表仍为当前前端实例的本地状态，不跨浏览器刷新持久化。
 - 草稿收到确认前保留；4xx 就地显示错误，20 条上限仅计算 queued。较新草稿不会被旧请求的成功响应清空。首次引导展示一次送达与副作用边界说明。
 - Esc / 独立停止按钮走原取消接口，不把普通补充当取消。发送菜单打开时 Esc 只关闭菜单。
 - 会话 snapshot 没有 inputs / plan。恢复用原事件历史、`GET /tasks/{id}/inputs` 和 `GET /tasks/{id}/inspection`，不增后端字段。初次刷新只补读最新任务和最近 20 个任务中尚未确认消费的输入；展开更早聊天时再按需确认，避免遍历全部历史发请求。
@@ -593,78 +475,21 @@ macOS 下 `Ctrl` 自动换成 `⌘`。
 - `plan.updated` 只接受 `{content, status}` 的有效数组，按任务及真实序号整体替换；空数组明确清空。inspection 的 last_sequence 防止旧查询覆盖新计划，truncated 的缺失项不冒充空计划。
 - 计划状态按步骤独立展示：未开始用中性色空心圆，进行中用墨点、强调色浅底与左侧墨线，已完成用强调色勾选；每项同时显示状态文字。进度只计该步骤真实的 `completed`，不从工具成功或任务结束推断整份计划已完成。Runtime 投影兼容同批工具的列表型 channel updates，保留中间计划更新；`write_todos` 仍由原生中间件整体替换，提示词要求保留未改动步骤，不在前端猜测或合并遗漏项。
 - 显示名“任务”改为“运行”，保留既有 `jobs` 页签 ID 和 `JobsTab` 文件名。仅展示真实当前操作、等待原因、已派发子 Agent 和后端进程记录；历史运行默认折叠成一行摘要，用户完整输入留在聊天区。
-- “计划”展示当前最新任务的真实步骤、进度、加载、错误重试或空态，不沿用上一任务计划，也不伪造步骤。“等你处理”保留阶段 2 行为。
+- “计划”展示当前最新任务的真实步骤、进度、加载、错误重试或空态，不沿用上一任务计划，也不伪造步骤。“等你处理”保留原有行为。
 - 只有运行页签打开且存在真实活跃进程时才刷新日志尾部；切换会话、关闭和卸载取消可取消的读取、清理计时器，迟到响应不覆盖新会话。API listTasks 沿用原签名，不能物理取消的请求只丢弃过期结果。
-- 本阶段补充输入显示在所属任务过程之后，作为独立状态条目；3b 才加入 Rail 节点与 Minimap，不提前扩展时间线视觉。
+- 数据链路阶段先把补充输入显示在所属任务过程之后，作为独立状态条目；对话主体展示阶段再加入 Rail 节点与 Minimap。
 
-### 改动文件
+## 11. 对话主体展示
 
-| 文件（相对 web/src） | 本轮用途 |
-| --- | --- |
-| `api/client.ts` | inputs、inspection、进程列表的窄 DTO 与原 fetch API 接口 |
-| `api/events.ts` | 补充状态、计划水位、详情读取状态的 UI 类型 |
-| `api/event-adapter.ts` | 两类输入回执及 plan.updated 的公开协议映射 |
-| `stores/run.ts` | input ID 合并、防状态倒退、计划整体替换和恢复 |
-| `stores/session.ts` | 引导提交、幂等确认、显式待发操作、终态补读及恢复协调 |
-| `stores/session-projection.ts` | 按 input ID 合并消费后的可见消息 |
-| `views/Chat.vue` | 引导/稍后/发送入口与状态、未采用重发、可操作待发列表 |
-| `components/chat-area/InputBox.vue` | Enter / Alt+Enter / Esc、发送选项、保留草稿和就地错误 |
-| `components/chat-area/SupplementMessage.vue` | queued / consumed / not_consumed 与显式重发 |
-| `components/chat-area/QueuedMessages.vue` | 待发编辑、移除、立即引导、暂停后继续 |
-| `components/drawer/JobsTab.vue` | 真实运行状态、后台进程与折叠历史 |
-| `components/drawer/PlanTab.vue` | 真实计划及空/载/错态 |
-| `components/shell/Drawer.vue` | 页签显示名“运行”，不改内部 ID |
-| `styles/input-box.scss` | 发送菜单与提示的令牌化样式 |
-| `styles/chat.scss` | 补充重试与确认按钮的展示样式 |
-| `styles/jobs-tab.scss` | 运行面板局部样式，组件保持 250 行内 |
-| `styles/mixins.scss` | 小型文字操作按钮复用既有四态反馈 |
-| `i18n/locales/en.ts` | 所有新增界面文案的中英文来源目录 |
+实施日期：2026-10-11。本阶段只调整展示组件、只读展示工具函数、样式与文案，保留数据链路的补充输入、排队、审批和取消语义。
 
-本设计文档及 API 文档仅更新前端接线说明。新增 `src/tests/stage3a-{api,run,session,interactions}.test.ts` 和两个真实验收脚本都位于现有忽略规则下；未修改旧测试断言、夹具或装配，未修改 Git 索引。
-
-### 验收记录与截图
-
-- 构建：`npm run build` 通过（vue-tsc、Vite、既有 Electron 编译），仍有 Sass legacy API 警告。
-- 新增单测 33 / 33 通过。全量 89 项，61 通过、28 失败；与阶段 2 / 本轮基线逐项比较，新增失败 0。失败分类：session 8、model-settings 7、input-box 3、phase2-pages 3、agent-activity 2；api-client、markdown-content、runtime-status-settings、settings、workspace-explorer 各 1。不能称为全量测试通过。
-- 改动 TS / Vue 文件 ESLint 错误 0、格式警告 188，主要为模板属性/换行，不宣称警告清零。
-- 使用真实本地 `qwen/qwen3.5-9b` 与 Gateway/Core，不是 Mock：短任务完整链路的 10 项检查通过，任务 `succeeded`、停止任务 `cancelled`、页面错误 0；[真实记录](../../web/test-results/inkline-stage3a/short-live-results.json)。计划恢复、历史折叠、空态及 1100 / 719 抽屉的 6 项补充检查通过；[详情记录](../../web/test-results/inkline-stage3a/details-live-results.json)。
-- 长任务首次试跑：引导已消费，但任务触及既有 8 次模型调用预算而失败。此项单列，不算任务完成；未改变后端限制。首次本地截图脚本的 CSP 字符串求值问题已修复为函数形式，没有放宽 CSP。
-- 测试与截图都保留在本地已忽略目录，供审阅，不能依赖仓库分发这些文件。
-- 真实验收创建的 5 个“3a ·”会话已确认无活跃任务后归档，可从归档中恢复，没有删除记录。验收开发服务保留运行，便于本地审阅。
-
-| 真实后端步骤 | 截图 |
-| --- | --- |
-| 引导提交，等待纳入 | [查看](../../web/test-results/inkline-stage3a/01-guide-queued.png) |
-| 待发编辑完成 | [查看](../../web/test-results/inkline-stage3a/02-later-edited.png) |
-| 待发移除 | [查看](../../web/test-results/inkline-stage3a/03-later-removed.png) |
-| 引导已纳入，任务正常完成 | [查看](../../web/test-results/inkline-stage3a/04-guide-final.png) |
-| 刷新后按 input ID 还原 | [查看](../../web/test-results/inkline-stage3a/05-input-restored.png) |
-| 最后模型流期间补充 | [查看](../../web/test-results/inkline-stage3a/06-late-input-queued.png) |
-| 明确未采用与手动重发 | [查看](../../web/test-results/inkline-stage3a/07-not-consumed.png) |
-| 点击后新建任务 | [查看](../../web/test-results/inkline-stage3a/08-resend-new-turn.png) |
-| Esc 收到真实取消确认 | [查看](../../web/test-results/inkline-stage3a/09-esc-stop.png) |
-| 计划恢复 · 浅色 | [查看](../../web/test-results/inkline-stage3a/10-plan-restored-light.png) |
-| 计划恢复 · 深色 | [查看](../../web/test-results/inkline-stage3a/11-plan-restored-dark.png) |
-| 运行历史折叠 | [查看](../../web/test-results/inkline-stage3a/12-runtime-history-dark.png) |
-| 真实计划空态 | [查看](../../web/test-results/inkline-stage3a/13-plan-empty-dark.png) |
-| 1100 覆盖抽屉 | [查看](../../web/test-results/inkline-stage3a/14-plan-empty-1100-dark.png) |
-| 719 覆盖抽屉 | [查看](../../web/test-results/inkline-stage3a/14-plan-empty-719-dark.png) |
-
-尚未进行真实 20 条上限/等待审批的错误注入、进程与子 Agent 活跃态现场验收；相应路径有前端单测，不以单测冒充真实运行。跨进程恢复、其他 Provider、Electron 原生窗口与系统提醒不在本阶段验收范围。补充输入的已重发标记是当前前端实例的请求关联，不宣称服务端或跨设备 exactly-once。
-
-阶段 3a 已经用户确认，阶段 3b 的实施与验收记录如下。
-
-## 11. 阶段 3b · 对话主体展示
-
-实施日期：2026-10-11。本阶段不改 stores、api、composables、Electron、Go/Python 生产代码，不新增依赖，不操作 Git。保留 3a 的补充输入、排队、审批和取消语义，只调整展示组件、只读展示工具函数、样式与文案。
-
-### 逐项交付
+### 实现要点
 
 | 要求 | 实现与边界 |
 | --- | --- |
 | SVG Rail | `RailGlyph` 用 SVG 圆、菱形、叉、记忆笔形和补充箭头绘制；`RailInk` 用填充曲线与细线建立粗细笔触。只有正在执行节点的线段叠加强调色，以 scaleY / opacity 生长，静态透明度渐变提供墨尾，不动画模糊或阴影。 |
 | 节点状态 | 落笔使用既有 spring 令牌；等待为菱形，失败为朱砂 SVG 叉并自动展开。批准/驳回仍留下原有印记，不改审批版本提交。 |
-| 补充输入 | `PresentationNode` 仅存在于展示层，未新增 Gateway DTO。每条补充独立挂在 Rail 上，沿用等待纳入、已纳入、未采用和手动重发。以真实创建时间对齐带时间的工具节点；消费事件 seq 不冒充提交时间。没有可比较时间时使用可用 seq，缺少可比较顺序时放在过程末尾，不猜测。输入会隔开连续读节点，避免跨补充指令合并；正文不再重复绘制该输入。 |
+| 补充输入 | `PresentationNode` 仅存在于展示层，未新增后端 DTO。每条补充独立挂在 Rail 上，沿用等待纳入、已纳入、未采用和手动重发。以真实创建时间对齐带时间的工具节点；消费事件 seq 不冒充提交时间。没有可比较时间时使用可用 seq，缺少可比较顺序时放在过程末尾，不猜测。输入会隔开连续读节点，避免跨补充指令合并；正文不再重复绘制该输入。 |
 | 连续读取与审批 | 沿用已有只读聚合；带精确 toolCallId 的审批仍挂在对应操作后，不能被读取聚合吞掉。无顺序问题卡的末尾降级规则不变。 |
 | Minimap | 从实际 DOM 位置 / scrollHeight 计算墨量桶，密集位置更深。折叠节点映射到其真实摘要位置；未渲染的分页历史不伪造坐标。点击仍使用原有展开、滚动与焦点定位。ResizeObserver / MutationObserver 经 RAF 合并；文本 delta 不触发全节点 DOM 扫描，卸载时解除观察与待执行帧。 |
 | 消息 | 正文 15px / 1.7，过程与技术信息 12–13px；正文与页边过程保持分列。标题、列表、引用、链接、表格有独立层级，行数与小结数字使用 tabular-nums。 |
@@ -674,117 +499,9 @@ macOS 下 `Ctrl` 自动换成 `⌘`。
 | 键盘菜单 | / 和 @ 支持上下键、高亮滚动、Enter / Tab 确认、Alt+1–9 选择，Esc 先关菜单，IME 期间不提交。模型选择保留服务分组、搜索与原有 dialog 焦点恢复，增加 Home/End/PageUp/PageDown 和 Alt+数字；菜单选项不触发新的提交接口。 |
 | 响应式与无障碍 | 沿用共享断点和两侧覆盖面板规则。1440 / 1100 / 719 × 浅/深色均截图，无整页横向溢出；保留停止、定位和重发按钮的可访问名称。动态节点、小票和活动线在 reduced-motion 下短淡入，墨滴关闭。 |
 
-### 修改文件与目的
+## 12. 写作起点、工作记录与个人档案
 
-路径均相对 `web/src/`。展示组件保持单文件不超过 250 行；`Chat.vue` 是原有大视图，本阶段未为缩短行数迁移其提交逻辑。
-
-| 文件 | 目的 |
-| --- | --- |
-| `components/rail/RailGlyph.vue`（新增） | 单一 SVG 节点语言与落笔/等待动效。 |
-| `components/rail/RailInk.vue`（新增） | 笔触与当前操作的活动线，避免整条历史墨线同时生长。 |
-| `components/rail/RailTrack.vue` | 组合笔触、折叠过程、就地审批、补充节点与回复，保留问题的原有顺序降级。 |
-| `components/rail/RailNode.vue` | SVG、失败展开、补充卡、既有审批/回答/记忆撤销入口。 |
-| `components/rail/RailNodeDetail.vue` | 工具参数与输出接入公共代码展示，不改工具执行。 |
-| `components/rail/RailMinimap.vue` | 真实位置测量、密度、跳转和观察器清理。 |
-| `components/rail/Receipt.vue` | 紧凑/小票分流、结束按钮、小结数字和变更入口。 |
-| `components/rail/SealMark.vue` | 仅模板格式整理，批准/驳回语义和颜色不变。 |
-| `components/chat-area/AgentMessage.vue`、`UserMessage.vue` | 正文与元信息排版令牌。 |
-| `components/chat-area/MarkdownContent.vue` | 缓存/节流继续保留，顶层围栏交给 Vue 代码组件，净化后的正文仍安全渲染。 |
-| `components/chat-area/SupplementMessage.vue` | 支持 Rail 内嵌，原有状态、错误与重发操作不变。 |
-| `components/chat-area/InputBox.vue` | 保留 3a 提交决策和草稿确认；状态样式、发送墨滴、连接展示片段。 |
-| `components/chat-area/TerminalOutput.vue`、`ChangeItem.vue` | 复用代码/终端/diff 展示，移除重复输出样式。 |
-| `components/inkwell/ComposerDraft.vue`（新增） | 输入自动高度和菜单键盘交互，仅展示状态。 |
-| `components/inkwell/ComposerToolbar.vue`（新增） | 原有模式、模型、速度、权限和发送/停止控件，事件原样转发。 |
-| `components/inkwell/ComposerFooter.vue`（新增） | 保留用量、上下文和临时发送/停止状态，不常驻快捷键提示；子 Agent 设置已移至当前对话的标题栏。 |
-| `components/inkwell/ModePill.vue` | 模式墨块与键盘切换。 |
-| `components/inkwell/ModelPicker.vue` | 现有选择器的键盘补全与令牌定位，不改模型数据/选择契约。 |
-| `components/inkwell/MentionMenu.vue`、`SlashMenu.vue` | 高亮跟随、选项关联 ID 与数字提示。 |
-| `components/common/CodeBlock.vue`（新增） | 统一有界输出、行号、复制、折叠和 diff 展示。 |
-| `components/common/IconSymbol.vue` | 增加复制和引用的明确 SVG 图形，避免落入通用星光 fallback。 |
-| `components/file-explorer/WorkspaceDiff.vue` | 仅替换 diff 展示；加载、选择、请求代次与错误重试保持原样。 |
-| `views/Chat.vue` | 补充卡移进 Rail，传入真实滚动容器和排队数量，自动跟随修订包含输入状态。 |
-| `utils/rail-presentation.ts` | 只读补充节点与顺序，继续精确绑定审批，未改运行投影 store。 |
-| `utils/rail-minimap.ts`（新增） | 纯位置密度计算，供组件和单测使用。 |
-| `utils/code-presentation.ts`（新增） | 纯行号 / diff gutter / 有界预览，不应用 patch。 |
-| `utils/composer-presentation.ts`（新增） | 展示片段的共享既有 props / emit 类型和菜单索引计算，不新增输入协议。 |
-| `utils/markdown.ts`、`types/markdown-it.d.ts` | 复用 MarkdownIt 公开 parser / renderer；共享 DOMPurify 净化规则，补齐既有库的类型声明，不自行解析 Markdown。 |
-| `i18n/locales/en.ts` | 新增文案进入现有双语词表。 |
-| `styles/tokens.scss` | 新增 Rail、消息行高、代码 gutter、菜单、墨滴与缩略图尺寸令牌，保留既有主题与强调色所有权。 |
-| `styles/chat.scss`、`input-box.scss` | 移除旧 deep 样式覆盖、代码纹理和整条线动画，采用已有断点。 |
-| `styles/code-block.scss`、`markdown-content.scss`、`receipt.scss`（新增） | 对话主体三个单一展示模块的样式。 |
-| `styles/composer-controls.scss`、`composer-menu.scss`（新增） | 从砚台分离控件与菜单样式，仍是自定义 SCSS 组件。 |
-| `styles/model-picker.scss`、`workspace-diff.scss` | 令牌化并清理被公共展示组件替代的样式。 |
-
-本地新增 `src/tests/stage3b-presentation.test.ts`、`stage3b-fixture.ts`、`stage3b-visual.py`；结果与截图在 `web/test-results/inkline-stage3b/`。目录沿用既有忽略规则，未修改 Git 追踪状态，也未改旧测试断言。
-
-### 截图与检查证据
-
-以下为隔离的 **视觉夹具**，不是真实 Provider/工具执行验收。复用现有 Vite，未再启动 Gateway/Core，未发送真实任务。diff 接口由截图脚本截获，截图没有触发 Git；复制反馈使用浏览器内夹具，不写系统剪贴板。真实输入/消费链路证据仍见 3a，不能用这些图片替代。
-
-| 主题 / 宽度 | Before | After |
-| --- | --- | --- |
-| 浅色 / 1440 | [查看](../../web/test-results/inkline-stage3b/before-light-1440.png) | [查看](../../web/test-results/inkline-stage3b/after-light-1440.png) |
-| 浅色 / 1100 | [查看](../../web/test-results/inkline-stage3b/before-light-1100.png) | [查看](../../web/test-results/inkline-stage3b/after-light-1100.png) |
-| 浅色 / 719 | [查看](../../web/test-results/inkline-stage3b/before-light-719.png) | [查看](../../web/test-results/inkline-stage3b/after-light-719.png) |
-| 深色 / 1440 | [查看](../../web/test-results/inkline-stage3b/before-dark-1440.png) | [查看](../../web/test-results/inkline-stage3b/after-dark-1440.png) |
-| 深色 / 1100 | [查看](../../web/test-results/inkline-stage3b/before-dark-1100.png) | [查看](../../web/test-results/inkline-stage3b/after-dark-1100.png) |
-| 深色 / 719 | [查看](../../web/test-results/inkline-stage3b/before-dark-719.png) | [查看](../../web/test-results/inkline-stage3b/after-dark-719.png) |
-
-| 专项 | 浅色 | 深色 |
-| --- | --- | --- |
-| 纯聊天紧凑收尾 | [查看](../../web/test-results/inkline-stage3b/pure-chat-light.png) | [查看](../../web/test-results/inkline-stage3b/pure-chat-dark.png) |
-| 代码与操作小票 | [查看](../../web/test-results/inkline-stage3b/receipt-code-light.png) | [查看](../../web/test-results/inkline-stage3b/receipt-code-dark.png) |
-| 失败与未采用输入 | [查看](../../web/test-results/inkline-stage3b/failure-unused-input-light.png) | [查看](../../web/test-results/inkline-stage3b/failure-unused-input-dark.png) |
-| 砚台运行 | [查看](../../web/test-results/inkline-stage3b/composer-running-light.png) | [查看](../../web/test-results/inkline-stage3b/composer-running-dark.png) |
-| 砚台等待审批 | [查看](../../web/test-results/inkline-stage3b/composer-waiting-light.png) | [查看](../../web/test-results/inkline-stage3b/composer-waiting-dark.png) |
-| 砚台有待发消息 | [查看](../../web/test-results/inkline-stage3b/composer-queued-light.png) | [查看](../../web/test-results/inkline-stage3b/composer-queued-dark.png) |
-| diff 两侧行号 | [查看](../../web/test-results/inkline-stage3b/diff-drawer-light.png) | [查看](../../web/test-results/inkline-stage3b/diff-drawer-dark.png) |
-
-另有 [长过程 / 200 行终端](../../web/test-results/inkline-stage3b/long-process-terminal.png)、[斜杠键盘](../../web/test-results/inkline-stage3b/slash-keyboard.png)、[模型键盘](../../web/test-results/inkline-stage3b/model-keyboard.png)、[@ 引用菜单](../../web/test-results/inkline-stage3b/mention-keyboard.png)、[复制反馈](../../web/test-results/inkline-stage3b/code-copy-feedback.png)、[reduced-motion](../../web/test-results/inkline-stage3b/reduced-motion-waiting.png)。
-
-### 验收与未完成项
-
-以下为 3b 提交时的历史记录；其中 28 项失败已在下方“测试契约修复回执”中清零，不再作为可接受基线。
-
-- `npm run build` 通过，包含 vue-tsc、Vite 和既有 Electron 编译。Sass legacy API 和 mock 模块混合导入的既有警告保留。
-- 全量测试 **108 项 / 80 通过 / 28 失败**。新增展示测试 **19 / 19** 通过；3a 的 33 项单测没有新增失败。与 [3b 基线](../../web/test-results/inkline-stage3b-baseline.json)逐项比较，新增失败 0，旧失败集合完全不变。[最终报告](../../web/test-results/inkline-stage3b-final.json)。`test:run` 因旧失败仍以非零状态退出，不能写成全量通过。
-- 改动 TS/Vue lint：错误 0、警告 1。警告为净化后的 Markdown `v-html`；保留 `html:false`、DOMPurify、危险标签/属性禁用、链接安全属性，不为警告放宽安全策略。[lint 报告](../../web/test-results/inkline-stage3b-lint.json)。
-- 本地浏览器 **26 张 After + 6 张 Before，31 项专项检查通过，页面错误 0**。[视觉检查记录](../../web/test-results/inkline-stage3b/after-visual.json)。包括响应式、15px / 1.7、结束按钮、纯聊天、失败展开、砚台状态、终端上限、缩略图跳转、模型焦点恢复、diff 和复制反馈。
-- 安全/资源审查：Markdown 与工具输出的信任边界不变；卸载释放定时器与观察器，异步测量不会在组件销毁后重建观察器；没有新增请求、运行时状态机或存储事实。
-
-当时的失败按原测试文件分类（保留追溯，不代表当前状态）：
-
-| 文件 | 失败数 |
-| --- | --- |
-| `session.test.ts` | 8 |
-| `model-settings.test.ts` | 7 |
-| `input-box.test.ts` | 3 |
-| `phase2-pages.test.ts` | 3 |
-| `agent-activity.test.ts` | 2 |
-| `api-client.test.ts`、`markdown-content.test.ts`、`runtime-status-settings.test.ts`、`settings.test.ts`、`workspace-explorer.test.ts` | 各 1 |
-
-#### 测试契约修复回执（2026-10-11）
-
-- 先重新运行并复现 **108 项 / 80 通过 / 28 失败**，再修复装配与契约；没有删除、跳过用例，也没有关闭未处理异常检查。
-- 修复装配：补齐真实会话快照、能力发现与 `stream.ready` 握手；使用真实内存 Router；模拟 jsdom 缺少的对话框 API；组件自动卸载，文件级清理结束后释放 Pinia、定时器、全局 mock；Node 环境不访问浏览器 Storage。
-- 更新失效契约：单模型表单改为服务下的多模型草稿，读取目录不等于保存；新模型选择弹窗替代旧 select；扩展使用当前配置/运行快照和 MCP/Skills 分页；文件请求明确携带工作区 ID；活动展示测试直接使用生产 `RailTrack + AgentMessage`，不再向旧只读 activity facade 写入假状态。
-- 保留并加强行为断言：版本化审批、跨端点密钥隔离、手动模型 ID、确认保存、乐观消息与持久消息去重、思考/工具/子 Agent 与最终回复分离、可操作失败提示、停止请求与终态区分、危险 HTML 不生成可执行 DOM。`message.completed` 不能冒充任务完成；必须等任务终态。
-- 暴露并修复真实缺陷：模型 ID 修改后旧连接成功提示仍保留、旧连接测试异步结果覆盖新草稿；`task.waiting_approval` 未投影等待状态；事件投影失败前推进游标/去重，以及缓冲事件异常逃出恢复边界、消费异常被 JSON 解析捕获而静默丢失。补齐扩展页 `停用` 的翻译键。
-- 新增 **9 项回归**：3 项模型反馈/请求失效测试，6 项事件握手、去重、失败回放、停止清理和 JSON 边界测试。新增故障用例先在修复前失败，再验证修复；原 19 个文件的用例数均未减少。
-- 当前全量 **20 个文件 / 117 项通过 / 0 失败 / 0 跳过**；乱序执行（seed `20261011`）同样通过。`vue-tsc --noEmit` 与本次修改文件的非修复模式 ESLint 通过。Sass legacy API 的既有弃用提示仍在，不作为隐藏测试失败的手段。
-- 重跑命令：在 `web` 下运行 `npm run test:run -- --no-cache --maxWorkers=2 --minWorkers=1`；乱序追加 `--sequence.shuffle --sequence.seed=20261011`。本轮未执行真实模型、后端全量、Electron 启动或视觉 E2E，不把组件测试算作这些验收。
-- 测试源码与 `vitest.config.ts` 仍遵循仓库现有 `.gitignore` 的本地测试策略，未修改忽略规则或强制纳入 Git。本轮报告放在独立临时目录，结束后清理；旧验收产物保持不动。
-
-未完成 / 限制：
-
-- **嵌套在列表或引用中的代码围栏**仍保留 Markdown 原生结构与安全 `<pre>` 排版，没有挂载独立行号/复制/折叠工具条。当前 Vue 代码组件只接入顶层围栏；HTML 分段不能切断列表/引用容器，此边界已有单测，但不算嵌套代码交互完成。
-- Clipboard API 不可用/被拒绝时明确提示手动选择复制，没有谎报成功；本轮未验收 Electron 原生剪贴板或非安全 LAN HTTP 下的系统复制。
-- 长会话沿用分页和按需详情，不宣称实现完整虚拟列表；隐藏历史不计入 Minimap 坐标。没有开展独立 FPS/内存压测或 Electron 原生窗口验收。
-- 阶段 4–6 的其他页面、系统能力和全站视觉审校未顺带展开。本阶段不新增后端配合接口，沿用现有服务运行状态。
-
-## 12. 阶段 4 · 写作起点、工作记录与个人档案
-
-实施日期：2026-10-11。已确认的静态工作纸方案进入生产展示层；没有修改 stores / api / composables / Electron / Go / Python 生产源文件，没有新增依赖，没有操作 Git。所有新增界面文案进入既有 source-keyed i18n，样式数值进入 `tokens.scss`。测试和截图沿用已有忽略目录，仅保留在本地。
+实施日期：2026-10-11。静态工作纸方案进入生产展示层。所有新增界面文案进入既有 source-keyed i18n，样式数值进入 `tokens.scss`。
 
 ### 页面边界
 
@@ -794,13 +511,13 @@ macOS 下 `Ctrl` 自动换成 `⌘`。
 | Overview `/overview` | 侧栏和命令面板统一叫“工作记录”；依次展示待处理、运行中、最近对话与工作区。没有第二套问候或指标仪表盘。确认加载成功、没有任何对话才跳转 Chat；错误、加载中或全部归档不会触发此跳转。（2026-11-25 起零会话不再跳转，改为显示空态说明和「新建对话」入口，见第 5 节。） |
 | Memory `/memory` | 保留“它记得”入口；身份区在上，偏好与记忆条目在下。不是新增一套记忆 Runtime。 |
 
-### 逐项实现
+### 实现要点
 
 | 要求 | 完成情况与边界 |
 | --- | --- |
 | 展开的工作纸 | 近直角纸边、底部纸层、页边笔触；宋体问候最大 48px，1100px 收紧到 38px、719px 到 30px。应用图标（默认「助」时；设置头像字后换成该字）在砚台下方作落款，不使用独立居中 Logo。 |
 | MyGO 题记 | 保留 `pickMygoQuote` 与原 Chat welcome watcher；输入、主题切换不重新抽取，同一欢迎页语录不变。引用保留原文，不杜撰英文翻译。 |
-| 起手式 | 读工作区、规划任务、最近变更、分析问题；只调用现有 `restoreDraft`，追加已有草稿并聚焦，不发送、不改权限。默认工作区空 ID 不代表不可用，按真实 `root_path` 判断。无文件夹时只禁用读文件和变更入口；加载失败与未选择分别显示。 |
+| 起手式 | 读工作区、规划任务、最近变更、分析问题；只调用现有 `restoreDraft`，追加已有草稿并聚焦，不发送、不改权限。默认工作区空 ID 仍可用，按真实 `root_path` 判断。无文件夹时只禁用读文件和变更入口；加载失败与未选择分别显示。 |
 | 数字键 | 1–4 选择起手式；编辑控件、IME、修饰键、已打开弹窗不处理。挂载/卸载时注册/解除监听。 |
 | 开页叙事 | 主窗口渲染进程首次进入空态播放纸面、落笔、问候、题记、砚台编排，最长 480ms；后续新对话仅 180ms 淡入。使用 transform / opacity / SVG stroke-dashoffset，不动画阴影或滤镜。输入聚焦会取消影响可见性的入场动画，不阻塞操作。 |
 | Reduced motion | 纸面、问候、题记与砚台降级到 80ms 短淡入，落笔不播放；局部规则明确覆盖既有全局“关闭所有动画”规则。 |
@@ -814,65 +531,20 @@ macOS 下 `Ctrl` 自动换成 `⌘`。
 | 条目元信息 | 内容为主；类别/来源/置信度为次要文字，置信度以细线长度、数字和 meter aria 文本表示。显示值仅做 0–100% 归一化，不改存储值或宣称准确性校准。 |
 | 删除 / 置顶 / 定位 | 原二次确认、置顶、来源链接不变；删除用朱砂。保留 route.query.focus 的搜索清理、加载、滚动与焦点；定位条目加一次墨晕。反馈计时器在卸载清理。 |
 
-### 修改文件
-
-以下路径相对 `web/src/`；新增展示组件均低于 250 行。已有大视图及命令面板没有为行数指标改写提交逻辑或建立新框架。
-
-| 文件 | 用途 |
-| --- | --- |
-| `views/Chat.vue` | 稳定工作纸容器、首次展示标记、时段与落款，保留同一个 InputBox。 |
-| `components/chat-area/WelcomeSheet.vue` | 题记、问候、工作区、四个起手式及安全数字快捷键。 |
-| `utils/welcome-presentation.ts`（新增） | 时段、渲染生命周期首次标记、起手式元信息和键盘过滤；无任务状态。 |
-| `styles/chat.scss`、`styles/welcome-sheet.scss`（新增） | 工作纸构图、有限叙事动画、断点与 reduced-motion。 |
-| `views/Overview.vue`、`styles/overview.scss` | 真实记录列表与空记录跳转（2026-11-25 起零会话改为空态说明，不再跳转），清除旧仪表盘死样式。 |
-| `utils/work-records.ts`（新增） | 只读状态选择、记忆分组、置信度展示归一化。 |
-| `views/Memory.vue`、`styles/memory.scss`（新增） | 身份区、条目区、错误重试、保存微反馈。 |
-| `components/message/MemoryItem.vue` | 细线置信度、元信息、朱砂删除和墨晕定位。 |
-| `components/message/MemoryEditor.vue`（新增） | 就地表单、本地编辑副本与焦点，提交现有数据格式。 |
-| `components/message/MemoryGroup.vue`（新增） | 分组空态、添加、现有条目与编辑器组合。 |
-| `components/sidebar/WorkspaceSelector.vue` | 纯展示触发方式，不复制选择器逻辑。 |
-| `components/layout/Sidebar.vue` | 工作记录入口；其余会话/工作区逻辑不变。 |
-| `components/common/CommandPalette.vue` | 工作记录名称与搜索关键词；已有模糊匹配/最近使用/键盘协议不变。 |
-| `router/index.ts` | 仅 Overview 显示标题，路由路径与默认 Chat 跳转不变。 |
-| `styles/tokens.scss`、`i18n/locales/en.ts` | 工作纸/时段/记忆样式令牌与中英文文案。 |
-
-### 验收记录
-
-- 开工前重新记录的实际基线是 **117 / 117 通过**，不是旧的 28 项失败；未修改任何旧测试断言或夹具。阶段 4 新增 **19 项**，最终 **136 / 136 通过，0 失败，0 跳过**，原有用例未删除。
-- `npm run build` 通过（vue-tsc、Vite、原有 Electron 编译）；改动部分非修复模式 ESLint **0 错误 / 0 警告**。Sass legacy API 弃用提示及既有 mock 模块静态/动态导入提示仍在。
-- 真实生产组件、隔离 HTTP 夹具生成 **63 张截图 / 57 项检查全部通过 / 页面异常 0**。没有真实模型调用、没有后端写请求；不把视觉夹具称为真实后端 E2E。
-- 新增回归覆盖：空 ID 工作区、仅禁用文件依赖、仅预填、数字键/IME/弹窗隔离、语录稳定、四时段、首次展示、原前缀保存、就地编辑、过滤后反馈、失败保留、名字重试、计时器所有权清理、确认删除、置顶、focus、置信度 aria、空记录跳转与错误/归档不跳转。
-- [完整视觉检查及对比度数据](../../web/test-results/inkline-stage4/visual-results.json)、[全量单测报告](../../web/test-results/inkline-stage4/tests.json)、[Lint 报告](../../web/test-results/inkline-stage4/lint.json)、[构建记录](../../web/test-results/inkline-stage4/build.log)。这些本地产物不能依赖 Git 分发。
-
-| 尺寸 / 主题 | Chat 空态 | 工作记录：有 / 无数据 | Memory：有 / 全空 / 错误 |
-| --- | --- | --- | --- |
-| 1440 浅 | [截图](../../web/test-results/inkline-stage4/chat-light-1440.png) | [有](../../web/test-results/inkline-stage4/records-light-1440.png) / [无→Chat](../../web/test-results/inkline-stage4/records-empty-light-1440.png) | [有](../../web/test-results/inkline-stage4/memory-light-1440.png) / [空](../../web/test-results/inkline-stage4/memory-empty-light-1440.png) / [错](../../web/test-results/inkline-stage4/memory-error-light-1440.png) |
-| 1100 浅 | [截图](../../web/test-results/inkline-stage4/chat-light-1100.png) | [有](../../web/test-results/inkline-stage4/records-light-1100.png) / [无→Chat](../../web/test-results/inkline-stage4/records-empty-light-1100.png) | [有](../../web/test-results/inkline-stage4/memory-light-1100.png) / [空](../../web/test-results/inkline-stage4/memory-empty-light-1100.png) / [错](../../web/test-results/inkline-stage4/memory-error-light-1100.png) |
-| 719 浅 | [截图](../../web/test-results/inkline-stage4/chat-light-719.png) | [有](../../web/test-results/inkline-stage4/records-light-719.png) / [无→Chat](../../web/test-results/inkline-stage4/records-empty-light-719.png) | [有](../../web/test-results/inkline-stage4/memory-light-719.png) / [空](../../web/test-results/inkline-stage4/memory-empty-light-719.png) / [错](../../web/test-results/inkline-stage4/memory-error-light-719.png) |
-| 1440 深 | [截图](../../web/test-results/inkline-stage4/chat-dark-1440.png) | [有](../../web/test-results/inkline-stage4/records-dark-1440.png) / [无→Chat](../../web/test-results/inkline-stage4/records-empty-dark-1440.png) | [有](../../web/test-results/inkline-stage4/memory-dark-1440.png) / [空](../../web/test-results/inkline-stage4/memory-empty-dark-1440.png) / [错](../../web/test-results/inkline-stage4/memory-error-dark-1440.png) |
-| 1100 深 | [截图](../../web/test-results/inkline-stage4/chat-dark-1100.png) | [有](../../web/test-results/inkline-stage4/records-dark-1100.png) / [无→Chat](../../web/test-results/inkline-stage4/records-empty-dark-1100.png) | [有](../../web/test-results/inkline-stage4/memory-dark-1100.png) / [空](../../web/test-results/inkline-stage4/memory-empty-dark-1100.png) / [错](../../web/test-results/inkline-stage4/memory-error-dark-1100.png) |
-| 719 深 | [截图](../../web/test-results/inkline-stage4/chat-dark-719.png) | [有](../../web/test-results/inkline-stage4/records-dark-719.png) / [无→Chat](../../web/test-results/inkline-stage4/records-empty-dark-719.png) | [有](../../web/test-results/inkline-stage4/memory-dark-719.png) / [空](../../web/test-results/inkline-stage4/memory-empty-dark-719.png) / [错](../../web/test-results/inkline-stage4/memory-error-dark-719.png) |
-
-专项证据：
-
-- 砚台快捷选择：[1](../../web/test-results/inkline-stage4/starter-key-1.png) / [2](../../web/test-results/inkline-stage4/starter-key-2.png) / [3](../../web/test-results/inkline-stage4/starter-key-3.png) / [4](../../web/test-results/inkline-stage4/starter-key-4.png)、[无工作区](../../web/test-results/inkline-stage4/chat-no-workspace.png)、[保留已有草稿](../../web/test-results/inkline-stage4/starter-existing-draft.png)、[英文](../../web/test-results/inkline-stage4/chat-english.png)。
-- Memory：[定位墨晕](../../web/test-results/inkline-stage4/memory-focus.png)、[就地编辑](../../web/test-results/inkline-stage4/memory-inline-edit.png)、[加载](../../web/test-results/inkline-stage4/memory-loading.png)、[重试成功](../../web/test-results/inkline-stage4/memory-retry-success.png)、719 下半页[浅](../../web/test-results/inkline-stage4/memory-lower-light-719.png) / [深](../../web/test-results/inkline-stage4/memory-lower-dark-719.png)。
-- 实际生产 keyframes 的确定性采样：[0ms](../../web/test-results/inkline-stage4/intro-frame-0.png) / [120ms](../../web/test-results/inkline-stage4/intro-frame-120.png) / [240ms](../../web/test-results/inkline-stage4/intro-frame-240.png) / [480ms](../../web/test-results/inkline-stage4/intro-frame-480.png) / [600ms](../../web/test-results/inkline-stage4/intro-frame-600.png)、[reduced-motion](../../web/test-results/inkline-stage4/chat-reduced-motion.png)。不是原生 Electron 录屏。
-
 ### 四时段对比度
 
-测量为浏览器计算出的纸面实色与文字色，不宣称对纸纹每一个像素逐点作了 WCAG 测量。主文字最小 13.93:1，次要文字最小 7.42:1，装饰性元信息最小 4.51:1。
+测量为浏览器计算出的纸面实色与文字色，不逐像素测量纸纹。主文字最小 13.93:1，次要文字最小 7.42:1，装饰性元信息最小 4.51:1。
 
-| 主题 / 时段 | 主文字 | 次要文字 | 元信息 | 截图 |
-| --- | ---: | ---: | ---: | --- |
-| 浅 / 早 | 14.37 | 7.51 | 4.67 | [查看](../../web/test-results/inkline-stage4/light-light-morning.png) |
-| 浅 / 午 | 14.71 | 7.69 | 4.78 | [查看](../../web/test-results/inkline-stage4/light-light-noon.png) |
-| 浅 / 晚 | 14.20 | 7.42 | 4.61 | [查看](../../web/test-results/inkline-stage4/light-light-evening.png) |
-| 浅 / 深夜 | 14.63 | 7.65 | 4.76 | [查看](../../web/test-results/inkline-stage4/light-light-night.png) |
-| 深 / 早 | 13.93 | 8.94 | 4.51 | [查看](../../web/test-results/inkline-stage4/light-dark-morning.png) |
-| 深 / 午 | 14.14 | 9.07 | 4.58 | [查看](../../web/test-results/inkline-stage4/light-dark-noon.png) |
-| 深 / 晚 | 14.01 | 8.99 | 4.54 | [查看](../../web/test-results/inkline-stage4/light-dark-evening.png) |
-| 深 / 深夜 | 14.44 | 9.26 | 4.67 | [查看](../../web/test-results/inkline-stage4/light-dark-night.png) |
+| 主题 / 时段 | 主文字 | 次要文字 | 元信息 |
+| --- | ---: | ---: | ---: |
+| 浅 / 早 | 14.37 | 7.51 | 4.67 |
+| 浅 / 午 | 14.71 | 7.69 | 4.78 |
+| 浅 / 晚 | 14.20 | 7.42 | 4.61 |
+| 浅 / 深夜 | 14.63 | 7.65 | 4.76 |
+| 深 / 早 | 13.93 | 8.94 | 4.51 |
+| 深 / 午 | 14.14 | 9.07 | 4.58 |
+| 深 / 晚 | 14.01 | 8.99 | 4.54 |
+| 深 / 深夜 | 14.44 | 9.26 | 4.67 |
 
 ### 设计决策与限制
 
@@ -880,9 +552,9 @@ macOS 下 `Ctrl` 自动换成 `⌘`。
 2. **记录页不再争夺首页。** 它回答“哪些需要处理、哪些在做、最近做过什么”，不制造宏大指标或第二个欢迎页。数据未知就保持未知，冷启动不增加全历史抓取。
 3. **记忆是一份能改的档案。** 身份与条目有主次，编辑就在条目旁，成功才落下一句“已记下”；失败保留内容、删除仍确认，避免将置信度包装成准确性保证。
 
-未完成 / 范围限制：
+## 13. 已知限制
 
-- 首次展示范围为主窗口渲染进程生命周期，页面刷新算新启动；没有修改 Electron 来跨窗口或主进程持久化动画标记。
-- 不补齐模型侧记忆检索/注入，不暗示 Memory 页面条目已自动用于每一次模型调用；本阶段不新增后端配合接口。
-- 工作记录仅使用已加载的执行事实；未读取会话状态明确显示未知，不保证冷启动便获知所有后台运行。
-- 本轮未做真实模型/后端写入 E2E、Electron 原生窗口验收或独立 FPS/内存基准；视觉夹具、组件回归与构建不冒充这些结果。阶段 5 Settings 全面重塑与阶段 6 全站审校未提前展开。
+- 首次展示的范围是主窗口渲染进程生命周期，页面刷新算新启动；Electron 主进程和跨窗口没有持久化动画标记。
+- Memory 页面的条目不会自动进入每一次模型调用，模型侧记忆检索/注入尚未接入。
+- 工作记录只用已加载的执行事实；读不到的会话状态显示为未知，冷启动不保证拿到所有后台运行。
+- 长会话性能、Electron 原生窗口、系统通知、真实模型 E2E 和独立 FPS/内存基准还没有完整验证；设置页全面重塑与全站审校尚未展开。

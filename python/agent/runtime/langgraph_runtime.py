@@ -82,14 +82,6 @@ from agent.tools.permission_mgr import PermissionManager, PolicyDecision
 
 ModelResolver = Callable[[str, str, str], Awaitable[tuple[str, BaseChatModel]]]
 
-
-APPROVAL_RULES = (
-    "Request approval by calling the restricted tool; the run pauses until the user decides, "
-    "and a chat message is not an approval request. A rejected call returns an error and was not executed. "
-    "Report a file as written or changed only after the tool confirms it; otherwise say it was not done."
-)
-
-
 class RunHandle:
     """One run owns one root asyncio task and an event queue."""
 
@@ -165,7 +157,7 @@ class LangGraphRuntime:
         self.model = model
         if context_max_tokens <= 0 or max_model_calls <= 0:
             raise ValueError("context_max_tokens and max_model_calls must be positive")
-        self.system_prompt = "\n\n".join(part for part in (APPROVAL_RULES, system_prompt) if part)
+        self.system_prompt = system_prompt
         self.context_max_tokens = context_max_tokens
         self.max_model_calls = max_model_calls
         self.model_resolver = model_resolver

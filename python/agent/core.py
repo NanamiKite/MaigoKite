@@ -73,6 +73,13 @@ from agent.tools.tool_registry import ToolRegistry
 _EntryResult = TypeVar("_EntryResult")
 
 
+APPROVAL_RULES = (
+    "Request approval by calling the restricted tool; the run pauses until the user decides, "
+    "and a chat message is not an approval request. A rejected call returns an error and was not executed. "
+    "Report a file as written or changed only after the tool confirms it; otherwise say it was not done."
+)
+
+
 class AgentCore:
     RESPONSE_MODES = ConversationService.RESPONSE_MODES
 
@@ -356,7 +363,7 @@ class AgentCore:
             policy=self._policy,
             event_publisher=self.event_bus.publish,
             tools=specs,
-            system_prompt=skills.catalog_prompt(),
+            system_prompt="\n\n".join(part for part in (skills.catalog_prompt(), APPROVAL_RULES) if part),
             context_max_tokens=self._context_max_tokens,
             max_model_calls=self._max_tool_iterations,
             execution_metadata=self._langgraph_execution_metadata,
